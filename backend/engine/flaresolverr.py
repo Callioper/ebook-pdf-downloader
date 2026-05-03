@@ -122,13 +122,13 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
 
 
 async def check_flaresolverr(config: Dict[str, Any]) -> bool:
-    proxy = config.get("http_proxy", "")
-    proxies = {"http": proxy, "https": proxy} if proxy else None
     try:
         r = requests.get(
             "http://localhost:8191/v1",
             timeout=5,
-            proxies=proxies,
+            # IMPORTANT: no proxy for localhost check!
+            # If user has a proxy configured, requests to localhost
+            # would be routed through the proxy and fail
         )
         return r.status_code == 200
     except Exception as e:

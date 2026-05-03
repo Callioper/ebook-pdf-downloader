@@ -140,6 +140,27 @@ def main():
 if __name__ == "__main__":
     import webbrowser
     import urllib.request
+    import atexit
+
+    # Ensure FlareSolverr is cleaned up on exit
+    atexit.register(stop_flaresolverr)
+
+    # Windows: handle console close (CTRL_CLOSE_EVENT)
+    if os.name == "nt":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            # SetConsoleCtrlHandler: called when console window is closed
+            ctrl_type = 0  # CTRL_C_EVENT, but we handle all
+            handle = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+            def handler(ctrl_type):
+                stop_flaresolverr()
+                return 0  # ignore (allow normal shutdown)
+            kernel32.SetConsoleCtrlHandler(handle(handler), 1)
+        except Exception:
+            pass
+    import webbrowser
+    import urllib.request
 
     if "--no-browser" not in sys.argv:
         # Open browser as subprocess, then run server in main thread

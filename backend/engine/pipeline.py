@@ -387,6 +387,8 @@ async def run_pipeline(task_id: str):
 
             if step_func:
                 report = await step_func(task_id, task, config, report)
+                if report is None:
+                    report = {}
 
             task_store.update(task_id, {"report": report, "progress": int(((step_idx + 1) / 7) * 100)})
             await _emit(task_id, "task_update", {
