@@ -669,7 +669,13 @@ async def check_ocr(engine: str = Query(default="")):
         elif engine == "tesseract":
             result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                return {"ok": True, "engine": "tesseract", "version": result.stdout.split("\n")[0]}
+                ver = result.stdout.split("\n")[0].strip()
+                # Strip "tesseract v" prefix -> "5.4.0.20240606"
+                for prefix in ["tesseract v", "tesseract ", "v"]:
+                    if ver.startswith(prefix):
+                        ver = ver[len(prefix):]
+                        break
+                return {"ok": True, "engine": "tesseract", "version": ver}
             # Check common install paths (Tesseract may exist but not in PATH)
             for tess_path in [
                 r"C:\Program Files\Tesseract-OCR\tesseract.exe",

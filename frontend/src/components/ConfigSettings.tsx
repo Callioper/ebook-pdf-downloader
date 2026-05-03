@@ -1082,7 +1082,7 @@ export default function ConfigSettings() {
       {/* ============ OCR ============ */}
       <SectionHeader
         title="OCR"
-        summary={<><StatusDot status={ocrStatus} /> {ocrStatus === 'green' ? (ocrMsg.includes('已安装') ? ocrMsg : `已安装 ${ocrMsg}`) : ocrStatus === 'red' ? '未安装' : '未检测'}</>}
+        summary={<><StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : ocrEngines['ocrmypdf']?.msg ? 'red' : null} /> {ocrEngines['ocrmypdf']?.msg || '未检测'} · <StatusDot status={ocrStatus} /> {ocrStatus === 'green' ? (ocrMsg.includes('已安装') ? ocrMsg : `已安装 ${ocrMsg}`) : ocrStatus === 'red' ? '未安装' : '未检测'}</>}
         color="orange"
         expanded={expanded.ocr}
         onToggle={() => toggleSection('ocr')}

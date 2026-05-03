@@ -20,14 +20,25 @@ _flare_process: Optional[subprocess.Popen] = None
 
 def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    search_paths = [
-        # User-configured path first (from flaresolverr_path config)
-        os.path.join(config.get("flaresolverr_path", ""), "flaresolverr.exe"),
-        # Default install: program_root/tools/flaresolverr/flaresolverr/flaresolverr.exe
+    cfg_path = config.get("flaresolverr_path", "")
+
+    # Build search path list: all plausible locations
+    search_paths = []
+
+    # 1. Config path: check both the dir itself (if it IS the exe dir) and parent paths
+    if cfg_path:
+        for sub in ["", "flaresolverr"]:
+            p = os.path.join(cfg_path, sub, "flaresolverr.exe")
+            if p not in search_paths:
+                search_paths.append(p)
+        # Also check the EXACT path if it looks like an exe path
+        if cfg_path.lower().endswith(".exe"):
+            search_paths.insert(0, cfg_path)
+
+    # 2. Default install paths
+    search_paths += [
         os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr", "flaresolverr.exe"),
-        # Also check one level up
         os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr.exe"),
-        # Legacy temp locations
         os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr", "flaresolverr", "flaresolverr.exe"),
         os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr", "flaresolverr.exe"),
     ]
@@ -36,34 +47,36 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
         if path and os.path.exists(path):
             return os.path.abspath(path)
 
-    # Walk search: check common locations first, then full drive search
-    for base in [
+    # Walk search directories
+    walk_dirs = []
+    # Config path parent (user's install dir)
+    if cfg_path and os.path.isdir(os.path.dirname(cfg_path)):
+        walk_dirs.append(os.path.dirname(cfg_path))
+    # Config path itself
+    if cfg_path and os.path.isdir(cfg_path):
+        walk_dirs.append(cfg_path)
+    # Common locations
+    walk_dirs += [
         os.path.join(base_dir, "tools", "flaresolverr"),
         os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr"),
-    ]:
-        if os.path.isdir(base):
-            for root, dirs, files in os.walk(base):
+    ]
+    # Project root
+    if os.path.isdir(base_dir):
+        walk_dirs.append(base_dir)
+
+    seen = set()
+    for walk_base in walk_dirs:
+        if not walk_base or walk_base in seen:
+            continue
+        seen.add(walk_base)
+        try:
+            for root, dirs, files in os.walk(walk_base):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "__pycache__", "node_modules")]
                 for f in files:
                     if f.lower() == "flaresolverr.exe":
                         return os.path.abspath(os.path.join(root, f))
-
-    # Last resort: walk the config path (if set) and its parent, then project dir
-    config_path = config.get("flaresolverr_path", "")
-    if config_path and os.path.isdir(config_path):
-        # The exe might be in a subdir of the config path
-        for root, dirs, files in os.walk(config_path):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for f in files:
-                if f.lower() == "flaresolverr.exe":
-                    return os.path.abspath(os.path.join(root, f))
-
-    # Walk the project directory
-    if os.path.isdir(base_dir):
-        for root, dirs, files in os.walk(base_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "__pycache__", "node_modules")]
-            for f in files:
-                if f.lower() == "flaresolverr.exe":
-                    return os.path.abspath(os.path.join(root, f))
+        except (PermissionError, OSError):
+            continue
 
     return None
 
