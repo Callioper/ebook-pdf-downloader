@@ -98,10 +98,11 @@ async def cancel_task(task_id: str):
 
 
 @router.post("/{task_id}/retry")
-async def retry_task(task_id: str):
+async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     task = task_store.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    from engine.pipeline import run_pipeline
     task_store.update(task_id, {
         "status": STATUS_PENDING,
         "current_step": "",
@@ -114,7 +115,8 @@ async def retry_task(task_id: str):
         "type": "task_retry",
         "task_id": task_id,
     })
-    return {"ok": True}
+    background_tasks.add_task(run_pipeline, task_id)
+    return {"ok": True, "task_id": task_id}
 
 
 @router.post("/{task_id}/start")
