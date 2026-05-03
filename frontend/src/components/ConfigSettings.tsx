@@ -330,15 +330,21 @@ export default function ConfigSettings() {
     restoreSourceStatus()
   }, [config])
 
-  const checkFlare = useCallback(async () => {
+  const checkFlare = useCallback(async (manualPath?: string) => {
     setFlareChecking(true)
     setFlareInstallFailed(false)
     try {
-      const res = await fetch('/api/v1/check-flare')
+      const path = manualPath || flareManualPath.trim() || ''
+      const res = await fetch('/api/v1/check-flare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_path: path }),
+      })
       const data = await res.json()
       if (!mountedRef.current) return
       setFlareRunning(data.available || false)
       setFlareInstalled(data.installed || false)
+      if (data.exe_path) setFlareStatusText(`已找到: ${data.exe_path}`)
     } catch (e) {
       console.warn('[ConfigSettings] check flare:', e)
       if (mountedRef.current) {
@@ -348,9 +354,14 @@ export default function ConfigSettings() {
     } finally {
       if (mountedRef.current) setFlareChecking(false)
     }
-  }, [])
+  }, [flareManualPath])
 
-  useEffect(() => { checkFlare() }, [checkFlare])
+  const flareAutoRef = useRef(false)
+  useEffect(() => {
+    if (flareAutoRef.current) return
+    flareAutoRef.current = true
+    checkFlare()
+  }, [checkFlare])
 
   // Auto-detect SQLite database status after config loads
   useEffect(() => {
@@ -404,6 +415,17 @@ export default function ConfigSettings() {
       })
       .catch(() => {})
   }, [config, form.ocr_engine])
+
+
+  // Update OCR header status when engine selection or engine states change
+  useEffect(() => {
+    const eng = form.ocr_engine || 'tesseract'
+    const info = ocrEngines[eng]
+    if (info) {
+      setOcrStatus(info.installed ? 'green' : 'red')
+      setOcrMsg(info.msg || (info.installed ? '已安装' : '未检测到'))
+    }
+  }, [form.ocr_engine, ocrEngines])
 
   const checkOcr = useCallback(async (engine?: string) => {
     setOcrChecking(true)
@@ -990,7 +1012,7 @@ export default function ConfigSettings() {
                   )}
                   <button
                     type="button"
-                    onClick={checkFlare}
+                    onClick={() => checkFlare()}
                     disabled={flareChecking}
                     className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 disabled:opacity-50"
                   >

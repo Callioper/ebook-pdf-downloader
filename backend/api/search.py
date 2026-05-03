@@ -788,7 +788,7 @@ async def install_ocr(body: InstallOCRRequest):
                     try:
                         result = subprocess.run(
                             ["winget", "install", "--exact", "--id", "UB-Mannheim.TesseractOCR",
-                             "--silent", "--accept-package-agreements"],
+                             "--silent", "--accept-package-agreements", "--force"],
                             capture_output=True, text=True, timeout=120
                         )
                         if result.returncode == 0:
@@ -1055,12 +1055,28 @@ async def install_flare_complete():
         return {"success": False, "error": f"安装确认异常: {e}"}
 
 
-@router.get("/check-flare")
-async def check_flare():
+@router.post("/check-flare")
+async def check_flare(body: Optional[Dict[str, Any]] = None):
     try:
         from engine.flaresolverr import check_flaresolverr, find_flaresolverr_exe
-        running = check_flaresolverr()
-        exe_path = find_flaresolverr_exe(get_config())
+        from config import get_config, update_config
+        config = get_config()
+        running = await check_flaresolverr(config)
+
+        # If a manual path is provided, save it to config and prioritize it
+        manual_path = (body or {}).get("manual_path", "")
+        if manual_path:
+            import shutil as _shutil
+            # Check if the path contains flaresolverr.exe directly or in subdirs
+            for check in [
+                os.path.join(manual_path, "flaresolverr.exe"),
+                os.path.join(manual_path, "flaresolverr", "flaresolverr.exe"),
+            ]:
+                if os.path.exists(check):
+                    update_config({"flaresolverr_path": os.path.dirname(os.path.abspath(check))})
+                    return {"available": running, "installed": True, "exe_path": os.path.abspath(check)}
+
+        exe_path = find_flaresolverr_exe(config)
         return {"available": running, "installed": bool(exe_path), "exe_path": exe_path or ""}
     except Exception as e:
         return {"available": False, "installed": False, "exe_path": "", "error": str(e)}
