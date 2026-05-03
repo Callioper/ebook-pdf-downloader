@@ -137,9 +137,18 @@ async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> 
         return None
 
 
-async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Optional[str]:
+async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "", task_id: str = "") -> Optional[str]:
     """Search Anna's Archive by SS code and download the PDF. Returns the file path or None.
-    Uses FlareSolverr for Cloudflare bypass when available."""
+    Uses FlareSolverr for Cloudflare bypass when available.
+    When task_id is provided, logs are also written to task_store."""
+    def _log(msg: str):
+        logger.warning(f"AA download: {msg}")
+        if task_id:
+            try:
+                task_store.add_log(task_id, f"AA: {msg}")
+            except Exception:
+                pass
+
     import requests as _req
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
@@ -147,22 +156,23 @@ async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Opti
     search_url = f"https://annas-archive.gd/search?q={ss_code}"
     html = await _get_page_with_flare(search_url, proxy)
     if not html:
-        logger.warning(f"AA download: failed to fetch search page for SS:{ss_code}")
+        _log(f"搜索页获取失败: {search_url}")
         return None
     if "Cloudflare" in html or "cf-browser-verification" in html:
-        logger.warning("AA download: Cloudflare challenge page returned")
+        _log("Cloudflare 验证页面，FlareSolverr 未成功绕过")
         return None
     md5_m = re.search(r'href="/md5/([a-f0-9]{32})"', html)
     if not md5_m:
-        logger.warning(f"AA download: no MD5 found in search results for SS:{ss_code}")
+        _log(f"搜索结果中未找到 MD5 链接 (SS:{ss_code})")
         return None
     md5 = md5_m.group(1)
+    _log(f"找到 MD5: {md5}")
 
     # Step 2: Visit MD5 page → extract download link
     md5_url = f"https://annas-archive.gd/md5/{md5}"
     md5_html = await _get_page_with_flare(md5_url, proxy, timeout=30)
     if not md5_html:
-        logger.warning(f"AA download: failed to fetch MD5 page {md5}")
+        _log(f"MD5 详情页获取失败: {md5_url}")
         return None
 
     dl_url = None
@@ -205,8 +215,10 @@ async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Opti
                     pass
 
     if not dl_url:
-        logger.warning(f"AA download: no download link found for MD5:{md5}")
+        _log(f"未找到下载链接 (MD5:{md5})")
         return None
+
+    _log(f"找到下载链接: {dl_url[:80]}...")
 
     # Step 3: Download the file
     try:
@@ -234,10 +246,11 @@ async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Opti
 
         size = os.path.getsize(filepath)
         if size > 1024:
+            _log(f"下载成功: {fname} ({size/1024:.0f} KB)")
             return filepath
-        logger.warning(f"AA download: file too small ({size} bytes) for {md5}")
+        _log(f"文件太小 ({size} bytes)")
     except Exception as e:
-        logger.warning(f"AA download: file download failed for {md5}: {e}")
+        _log(f"文件下载失败: {e}")
     return None
 
 
@@ -265,7 +278,7 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
     if ss_code:
         task_store.add_log(task_id, f"Trying Anna's Archive (SS:{ss_code})...")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 30})
-        filepath = await _download_from_aa(ss_code, report["tmp_dir"], proxy)
+        filepath = await _download_from_aa(ss_code, report["tmp_dir"], proxy, task_id)
         if filepath:
             task_store.add_log(task_id, f"Downloaded from Anna's Archive: {os.path.basename(filepath)}")
             report["download_path"] = filepath
