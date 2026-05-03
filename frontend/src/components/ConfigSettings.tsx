@@ -144,6 +144,27 @@ const OCR_ENGINES = [
   { key: 'ocrmypdf', name: 'OCRmyPDF', desc: 'PDF OCR 优化工具' },
 ]
 
+const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
+
+1. 激活虚拟环境：
+   cd backend && venv\\Scripts\\activate
+
+2. 安装 OCRmyPDF 核心：
+   pip install ocrmypdf --user
+
+3. 安装引擎插件（按需选一个或多个）：
+   pip install ocrmypdf-easyocr --user     # EasyOCR 引擎（多语言）
+   pip install paddleocr --user            # PaddleOCR 引擎（中文推荐）
+   pip install ocrmypdf-paddleocr --user   # PaddleOCR+OCRmyPDF 桥接（可选）
+
+4. 安装 Tesseract OCR 系统依赖（OCRmyPDF 需要）：
+   winget install --id UB-Mannheim.TesseractOCR
+
+5. 验证安装：
+   python -c "import ocrmypdf; print('ocrmypdf:', ocrmypdf.__version__)"
+   python -c "import easyocr; print('easyocr ok')"
+   python -c "import paddleocr; print('paddleocr:', paddleocr.__version__)"`
+
 export default function ConfigSettings() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [form, setForm] = useState<AppConfig>({ ...DEFAULT_CONFIG })
@@ -580,7 +601,13 @@ export default function ConfigSettings() {
             if (!mountedRef.current) return
             if (fd.success) {
               setFlareInstalled(true)
-              setFlareStatusText('安装完成')
+              if (fd.started) {
+                setFlareRunning(true)
+                setFlareStatusText('安装完成，已启动')
+              } else {
+                setFlareRunning(false)
+                setFlareStatusText('安装完成（点击"启动"运行）')
+              }
             } else {
               setFlareStatusText(fd.error || '安装失败')
               setFlareInstallFailed(true)
@@ -762,6 +789,7 @@ export default function ConfigSettings() {
               </div>
               <StatusDot status={dbStatus} />
             </div>
+            <StatusDot status={dbStatus} />
           </div>
 
           <div className="flex items-center gap-2">
@@ -797,7 +825,6 @@ export default function ConfigSettings() {
               ))}
             </div>
           )}
-
         </div>
       )}
 
@@ -1186,6 +1213,21 @@ export default function ConfigSettings() {
           </div>
         </div>
       )}
+
+      {/* ---------- OCR 安装引导 ---------- */}
+      <details className="mt-3 group">
+        <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
+          <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          OCR 命令行安装指引
+        </summary>
+        <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+          <p className="text-xs text-blue-800 font-medium mb-2">在 OpenCode 中执行以下命令安装 OCR 引擎：</p>
+          <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{OCR_INSTALL_GUIDE}</pre>
+          <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
+        </div>
+      </details>
 
       {/* ============ 书签 ============ */}
       <SectionHeader

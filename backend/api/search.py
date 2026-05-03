@@ -680,10 +680,18 @@ async def check_ocr(engine: str = Query(default="")):
                     try:
                         r = subprocess.run([tess_path, "--version"], capture_output=True, text=True, timeout=5)
                         if r.returncode == 0:
-                            os.environ["PATH"] += os.pathsep + os.path.dirname(tess_path)
-                            return {"ok": True, "engine": "tesseract", "version": r.stdout.split("\n")[0], "note": "需手动添加至PATH"}
+                            return {"ok": True, "engine": "tesseract", "version": r.stdout.split("\n")[0], "note": "已安装但不在PATH中"}
                     except Exception:
                         pass
+            # Check if winget has it registered
+            if os.name == "nt":
+                try:
+                    r = subprocess.run(["winget", "list", "--exact", "--id", "UB-Mannheim.TesseractOCR"],
+                                       capture_output=True, text=True, timeout=10)
+                    if r.returncode == 0 and "Tesseract" in r.stdout:
+                        return {"ok": False, "engine": "tesseract", "message": "Tesseract 已通过 winget 注册但可能未完整安装，点击安装按钮重新安装"}
+                except FileNotFoundError:
+                    pass
         elif engine == "paddleocr":
             try:
                 import paddleocr
@@ -696,9 +704,15 @@ async def check_ocr(engine: str = Query(default="")):
             except ImportError:
                 pass
         elif engine == "easyocr":
+            # Use system Python to check (pip install goes to system Python, not frozen exe)
+            py = _pip_install_cmd()[0]  # just the python executable
+            r = subprocess.run([py, "-c", "import easyocr; print('ok')"],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                return {"ok": True, "engine": "easyocr"}
+            # Fallback: check inside frozen exe
             try:
                 import site
-                # Frozen exe may not include user site-packages in sys.path
                 user_site = site.getusersitepackages()
                 if user_site not in sys.path:
                     sys.path.insert(0, user_site)
@@ -707,18 +721,21 @@ async def check_ocr(engine: str = Query(default="")):
             except ImportError:
                 pass
         elif engine == "paddleocr":
+            # Use system Python to check (pip install goes to system Python, not frozen exe)
+            py = _pip_install_cmd()[0]  # just the python executable
+            r = subprocess.run([py, "-c", "import paddleocr; print(paddleocr.__version__)"],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                ver = r.stdout.strip().split("\n")[0]
+                return {"ok": True, "engine": "paddleocr", "version": ver if ver != "ok" else "已安装"}
+            # Fallback: check inside frozen exe
             try:
                 import site
                 user_site = site.getusersitepackages()
                 if user_site not in sys.path:
                     sys.path.insert(0, user_site)
                 import paddleocr
-                result = subprocess.run(
-                    [sys.executable, "-m", "paddleocr", "--version"],
-                    capture_output=True, text=True, timeout=5
-                )
-                ver = result.stdout.strip().split("\n")[0] if result.returncode == 0 else "已安装"
-                return {"ok": True, "engine": "paddleocr", "version": ver}
+                return {"ok": True, "engine": "paddleocr"}
             except ImportError:
                 pass
         elif engine == "appleocr":
@@ -1000,12 +1017,29 @@ async def install_flare_complete():
             install_path = os.path.join(base_dir, "tools", "flaresolverr")
 
         # Find the exe (walk the install dir)
+        exe_path = ""
         for root, dirs, files in os.walk(install_path):
             for f in files:
                 if f.lower() == "flaresolverr.exe":
                     exe_path = os.path.join(root, f)
-                    _flare_dl_state = {"downloaded": 0, "total": 0, "done": True, "error": "", "status": "done"}
-                    return {"success": True, "path": os.path.abspath(exe_path)}
+                    break
+            if exe_path:
+                break
+
+        if exe_path:
+            _flare_dl_state = {"downloaded": 0, "total": 0, "done": True, "error": "", "status": "done"}
+            # Auto-start FlareSolverr after successful installation
+            try:
+                from engine.flaresolverr import check_flaresolverr, start_flaresolverr
+                config = get_config()
+                already_running = await check_flaresolverr(config)
+                if not already_running:
+                    ok = await start_flaresolverr(config)
+                else:
+                    ok = True
+                return {"success": True, "path": os.path.abspath(exe_path), "started": ok, "exe_path": exe_path}
+            except Exception:
+                return {"success": True, "path": os.path.abspath(exe_path), "started": False, "exe_path": exe_path}
 
         # Check if extraction is still pending
         zip_path = os.path.join(install_path, "flaresolverr.zip")
@@ -1022,6 +1056,8 @@ async def install_flare_complete():
                 return {"success": False, "error": f"解压失败: {e}"}
 
         return {"success": False, "error": "未找到 flaresolverr.exe，请重试"}
+    except Exception as e:
+        return {"success": False, "error": f"安装确认异常: {e}"}
     except Exception as e:
         traceback.print_exc()
         return {"success": False, "error": f"安装异常: {str(e)}"}
