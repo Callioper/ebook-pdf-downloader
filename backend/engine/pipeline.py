@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from config import get_config
-from task_store import task_store, STATUS_RUNNING, STATUS_CANCELLED, STATUS_FAILED
+from task_store import task_store, STATUS_COMPLETED, STATUS_RUNNING, STATUS_CANCELLED, STATUS_FAILED
 from ws_manager import ws_manager
 
 PIPELINE_STEPS = [
@@ -43,12 +43,33 @@ async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[
     title = task.get("title", "")
     source = task.get("source", "DX_6.0")
 
+    # If book_id is empty but ISBN is known, look up the local DB for the real book_id
+    isbn = task.get("isbn", "")
+    if not book_id and isbn:
+        try:
+            from search_engine import SearchEngine
+            se = SearchEngine()
+            se.set_db_dir(config.get("ebook_db_path", ""))
+            result = se.search(field="isbn", query=isbn, page=1, page_size=1)
+            books = result.get("books", [])
+            if books:
+                book_id = books[0].get("book_id", "")
+                if not book_id:
+                    book_id = books[0].get("id", "")
+                # Fill in missing metadata from DB
+                if not title:
+                    title = books[0].get("title", "")
+                source = books[0].get("source", source)
+                task_store.add_log(task_id, f"Found book in database: ID={book_id}")
+        except Exception as e:
+            task_store.add_log(task_id, f"Database lookup failed: {e}")
+
     report = {
         "book_id": book_id,
         "title": title,
         "source": source,
         "ss_code": task.get("ss_code", ""),
-        "isbn": task.get("isbn", ""),
+        "isbn": isbn,
         "authors": task.get("authors", []),
         "publisher": task.get("publisher", ""),
     }

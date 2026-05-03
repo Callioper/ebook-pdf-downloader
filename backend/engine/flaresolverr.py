@@ -122,18 +122,28 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
 
 
 async def check_flaresolverr(config: Dict[str, Any]) -> bool:
-    try:
-        r = requests.get(
-            "http://localhost:8191/v1",
-            timeout=5,
-            # IMPORTANT: no proxy for localhost check!
-            # If user has a proxy configured, requests to localhost
-            # would be routed through the proxy and fail
-        )
-        return r.status_code == 200
-    except Exception as e:
-        logger.warning(f"FlareSolverr check failed: {e}")
-        return False
+    # Try multiple health check endpoints
+    for endpoint in ["/v1", "/health"]:
+        try:
+            r = requests.get(
+                f"http://localhost:8191{endpoint}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                return True
+            # Also accept any OK status from /v1
+            if endpoint == "/v1":
+                try:
+                    data = r.json()
+                    if data.get("status") == "ok":
+                        return True
+                except Exception:
+                    pass
+        except requests.ConnectionError as e:
+            logger.warning(f"FlareSolverr check ({endpoint}) connection failed: {e}")
+        except Exception as e:
+            logger.warning(f"FlareSolverr check ({endpoint}) failed: {e}")
+    return False
 
 
 async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:

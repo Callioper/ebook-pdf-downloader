@@ -9,7 +9,12 @@ export default function LogStream({ logs }: LogStreamProps) {
 
   useEffect(() => {
     if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
+      const el = containerRef.current
+      // Only auto-scroll if user is already near the bottom (within 30px)
+      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30
+      if (isNearBottom) {
+        el.scrollTop = el.scrollHeight
+      }
     }
   }, [logs])
 
