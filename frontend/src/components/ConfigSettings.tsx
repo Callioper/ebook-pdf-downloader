@@ -331,6 +331,59 @@ export default function ConfigSettings() {
 
   useEffect(() => { checkFlare() }, [checkFlare])
 
+  // Auto-detect SQLite database status after config loads
+  useEffect(() => {
+    if (!config) return
+    const autoDetectDb = async () => {
+      try {
+        const res = await fetch('/api/v1/available-dbs')
+        const data = await res.json()
+        if (!mountedRef.current) return
+        const dbs = data.dbs || []
+        setDbNames(dbs)
+        setDbStatus(dbs.length > 0 ? 'green' : 'yellow')
+      } catch (e) {
+        console.warn('[ConfigSettings] auto detect db:', e)
+        if (mountedRef.current) setDbStatus('red')
+      }
+    }
+    autoDetectDb()
+  }, [config])
+
+  // Auto-detect OCR engine statuses after config + form are ready
+  const autoOcrRef = useRef(false)
+  useEffect(() => {
+    if (!config || autoOcrRef.current) return
+    autoOcrRef.current = true
+    const engines = ['ocrmypdf', 'tesseract', 'paddleocr', 'easyocr', 'appleocr']
+    engines.forEach((eng) => {
+      fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (!mountedRef.current) return
+          setOcrEngines((prev) => ({
+            ...prev,
+            [eng]: {
+              installed: data.ok || false,
+              installing: false,
+              msg: data.version || data.message || (data.ok ? '已安装' : '未检测到'),
+            },
+          }))
+        })
+        .catch((e) => console.warn(`[ConfigSettings] auto detect ${eng}:`, e))
+    })
+    // Also check the default OCR engine for the main OCR status
+    const defaultEngine = form.ocr_engine || 'tesseract'
+    fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(defaultEngine)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!mountedRef.current) return
+        setOcrStatus(data.ok ? 'green' : 'red')
+        setOcrMsg(data.version || data.message || (data.ok ? '已安装' : '未检测到'))
+      })
+      .catch(() => {})
+  }, [config, form.ocr_engine])
+
   const checkOcr = useCallback(async (engine?: string) => {
     setOcrChecking(true)
     try {
