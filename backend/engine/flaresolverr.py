@@ -67,16 +67,29 @@ async def start_flaresolverr(config: Dict[str, Any]) -> bool:
 
     try:
         cwd = os.path.dirname(exe_path)
+        # Use CREATE_NO_WINDOW to hide console window on Windows
+        CREATE_NO_WINDOW = 0x08000000
         _flare_process = subprocess.Popen(
             [exe_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             cwd=cwd,
+            creationflags=CREATE_NO_WINDOW,
         )
-        for _ in range(20):
+        # Wait up to 30 seconds for FlareSolverr to start
+        for _ in range(30):
             await asyncio.sleep(1)
             if await check_flaresolverr(config):
                 return True
+        # If startup failed, kill the process
+        try:
+            _flare_process.terminate()
+        except Exception:
+            try:
+                _flare_process.kill()
+            except Exception:
+                pass
+        _flare_process = None
         return False
     except Exception as e:
         return False

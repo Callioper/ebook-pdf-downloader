@@ -72,20 +72,23 @@ def _search_annas_archive(query: str, proxy: str = "") -> List[Dict[str, str]]:
     encoded = urllib.parse.quote(query)
     url = f"https://annas-archive.gd/search?q={encoded}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        import requests as _requests
+        kwargs = {
+            "timeout": 10,
+            "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            "verify": False,
+        }
         if proxy:
-            proxy_handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
-            opener = urllib.request.build_opener(proxy_handler)
-            resp = opener.open(req, timeout=6)
-        else:
-            resp = urllib.request.urlopen(req, timeout=6)
-        html = resp.read().decode("utf-8", errors="ignore")
-        seen = set()
-        for m in re.finditer(r'href="/md5/([a-f0-9]{32})"', html):
-            md5 = m.group(1)
-            if md5 not in seen:
-                seen.add(md5)
-                results.append({"md5": md5, "md5_url": f"https://annas-archive.gd/md5/{md5}"})
+            kwargs["proxies"] = {"http": proxy, "https": proxy}
+        resp = _requests.get(url, **kwargs)
+        if resp.status_code == 200:
+            html = resp.text
+            seen = set()
+            for m in re.finditer(r'href="/md5/([a-f0-9]{32})"', html):
+                md5 = m.group(1)
+                if md5 not in seen:
+                    seen.add(md5)
+                    results.append({"md5": md5, "md5_url": f"https://annas-archive.gd/md5/{md5}"})
     except Exception:
         pass
     return results
@@ -95,14 +98,18 @@ def _fetch_md5_page_info(md5: str, proxy: str = "") -> Dict[str, Any]:
     info: Dict[str, Any] = {"md5": md5, "source": "annas_archive"}
     url = f"https://annas-archive.gd/md5/{md5}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        import requests as _requests
+        kwargs = {
+            "timeout": 10,
+            "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            "verify": False,
+        }
         if proxy:
-            proxy_handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
-            opener = urllib.request.build_opener(proxy_handler)
-            resp = opener.open(req, timeout=6)
-        else:
-            resp = urllib.request.urlopen(req, timeout=6)
-        html = resp.read().decode("utf-8", errors="ignore")
+            kwargs["proxies"] = {"http": proxy, "https": proxy}
+        resp = _requests.get(url, **kwargs)
+        if resp.status_code != 200:
+            return info
+        html = resp.text
         title_m = re.search(r'<title>(.*?)</title>', html, re.DOTALL)
         if title_m:
             raw_title = HTML_TAG_RE.sub('', title_m.group(1)).strip()
@@ -387,11 +394,9 @@ async def check_proxy(body: ProxyRequest):
     if not proxy_url:
         return {"ok": True, "message": "未设置代理，使用本机网络"}
     try:
-        proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
-        opener = urllib.request.build_opener(proxy_handler)
-        req = urllib.request.Request("http://httpbin.org/ip", headers={"User-Agent": "Mozilla/5.0"})
-        with opener.open(req, timeout=6) as resp:
-            resp.read()
+        import requests as _requests
+        r = _requests.get("http://httpbin.org/ip", timeout=6, proxies={"http": proxy_url, "https": proxy_url}, verify=False)
+        r.raise_for_status()
         # Persist proxy on success
         update_config({"http_proxy": proxy_url})
         return {"ok": True, "message": "代理可用"}
@@ -602,6 +607,11 @@ async def install_flare_complete():
 
         if not os.path.exists(zip_path):
             # Already cleaned up or never downloaded
+            # Check the nested flaresolverr/ subfolder path first
+            exe_path = os.path.join(install_path, "flaresolverr", "flaresolverr.exe")
+            if os.path.exists(exe_path):
+                return {"success": True, "path": os.path.abspath(exe_path)}
+            # Fallback: check direct path (legacy)
             exe_path = os.path.join(install_path, "flaresolverr.exe")
             if os.path.exists(exe_path):
                 return {"success": True, "path": os.path.abspath(exe_path)}

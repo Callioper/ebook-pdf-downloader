@@ -124,9 +124,8 @@ class ZLibDownloader:
 
     def _fetch_balance(self, session, imp: str) -> Optional[str]:
         """Fetch account balance/info after successful login."""
-        # Try to get user info endpoint
         try:
-            # EAPI user info endpoint
+            # EAPI user profile endpoint - response has "user" nested object
             r = session.get(
                 f"{Z_LIB_DOMAIN}/eapi/user/profile",
                 headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
@@ -135,30 +134,20 @@ class ZLibDownloader:
             )
             if r.status_code == 200:
                 data = r.json()
-                # Look for download limits, deposit info, subscription status
+                user = data.get("user", {})
+                # downloads_limit and downloads_today are the actual fields
+                dl_limit = user.get("downloads_limit", 0)
+                dl_today = user.get("downloads_today", 0)
+                if dl_limit or dl_today:
+                    remaining = dl_limit - dl_today if dl_limit else 0
+                    return f"今日下载: {dl_today}/{dl_limit if dl_limit else '∞'} (剩余 {remaining})"
+                # Fallback: check top-level fields
                 if data.get("downloads"):
                     return f"剩余下载: {data.get('downloads')}"
                 if data.get("deposit"):
                     return f"余额: ${data.get('deposit')}"
                 if data.get("premium"):
                     return f"高级会员: {data.get('premium')}"
-                if data.get("email"):
-                    return data.get("email")
-        except Exception:
-            pass
-        # Try alternative endpoints
-        try:
-            r2 = session.get(
-                f"{Z_LIB_DOMAIN}/eapi/user/stats",
-                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-                impersonate=imp,
-                timeout=10,
-            )
-            if r2.status_code == 200:
-                data = r2.json()
-                if data.get("limits", {}).get("dl"):
-                    dl = data["limits"]["dl"]
-                    return f"今日下载: {dl.get('used', 0)}/{dl.get('total', '∞')}"
         except Exception:
             pass
         return None
