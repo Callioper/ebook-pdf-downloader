@@ -1,8 +1,17 @@
+# ==== config.py ====
+# 职责：配置文件管理，加载、保存和更新应用配置
+# 入口函数：init_config(), get_config(), update_config(), load_config(), save_config()
+# 依赖：无
+# 注意：支持frozen模式，配置文件存储在APPDATA目录
+
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 def _get_app_dir() -> Path:
     if getattr(sys, 'frozen', False):
@@ -62,8 +71,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             with open(path, "r", encoding="utf-8") as f:
                 saved = json.load(f)
             config.update(saved)
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to load config from {path}: {e}")
     return config
 
 

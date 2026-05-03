@@ -1,3 +1,9 @@
+# ==== zlib_downloader.py ====
+# 职责：ZLibrary登录、搜索和下载，支持多种浏览器指纹伪装
+# 入口函数：ZLibDownloader.zlib_login(), zlib_search(), zlib_download(), download_file()
+# 依赖：无
+# 注意：使用curl_cffi绕过CloudFlare，支持代理和重试
+
 import os
 import time
 from typing import Any, Dict, Optional

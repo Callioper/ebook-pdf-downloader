@@ -1,3 +1,9 @@
+# ==== task_store.py ====
+# 职责：任务存储管理，持久化任务状态到JSON文件
+# 入口函数：TaskStore.create(), get(), list_all(), update(), delete(), cancel()
+# 依赖：config
+# 注意：线程安全，使用Lock保护并发访问
+
 import json
 import os
 import time

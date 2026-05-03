@@ -1,4 +1,11 @@
+# ==== flaresolverr.py ====
+# 职责：FlareSolverr进程管理和CloudFlare绕过下载
+# 入口函数：start_flaresolverr(), stop_flaresolverr(), check_flaresolverr(), download_via_flaresolverr()
+# 依赖：无
+# 注意：管理全局进程实例，支持自动查找和启动FlareSolverr
+
 import asyncio
+import logging
 import os
 import subprocess
 import tempfile
@@ -7,6 +14,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
+logger = logging.getLogger(__name__)
 _flare_process: Optional[subprocess.Popen] = None
 
 
@@ -52,7 +60,8 @@ async def check_flaresolverr(config: Dict[str, Any]) -> bool:
             proxies=proxies,
         )
         return r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.warning(f"FlareSolverr check failed: {e}")
         return False
 
 
@@ -84,14 +93,16 @@ async def start_flaresolverr(config: Dict[str, Any]) -> bool:
         # If startup failed, kill the process
         try:
             _flare_process.terminate()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to terminate FlareSolverr process: {e}")
             try:
                 _flare_process.kill()
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.warning(f"Failed to kill FlareSolverr process: {e2}")
         _flare_process = None
         return False
     except Exception as e:
+        logger.error(f"Failed to start FlareSolverr: {e}")
         return False
 
 
@@ -101,11 +112,12 @@ def stop_flaresolverr():
         try:
             _flare_process.terminate()
             _flare_process.wait(timeout=10)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to terminate FlareSolverr during stop: {e}")
             try:
                 _flare_process.kill()
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.warning(f"Failed to kill FlareSolverr during stop: {e2}")
         _flare_process = None
 
 
@@ -159,6 +171,7 @@ async def download_via_flaresolverr(
 
         return False
     except Exception as e:
+        logger.error(f"Failed to download via FlareSolverr: {e}")
         return False
 
 
@@ -177,8 +190,8 @@ async def get_page_content(url: str, proxy: str = "") -> Optional[str]:
             data = r.json()
             if data.get("status") == "ok":
                 return data.get("solution", {}).get("response", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"FlareSolverr get_page_content failed: {e}")
 
     try:
         headers = {
@@ -187,7 +200,7 @@ async def get_page_content(url: str, proxy: str = "") -> Optional[str]:
         r = requests.get(url, headers=headers, timeout=15, proxies=proxies)
         if r.status_code == 200:
             return r.text
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Direct get_page_content failed: {e}")
 
     return None

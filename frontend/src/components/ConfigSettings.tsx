@@ -211,7 +211,8 @@ export default function ConfigSettings() {
       } else {
         setUpdateResult(`已是最新版本 v${data.current}`)
       }
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] check update:', e)
       if (mountedRef.current) setUpdateResult('检查失败')
     } finally {
       if (mountedRef.current) setUpdateChecking(false)
@@ -231,7 +232,8 @@ export default function ConfigSettings() {
       setConfig(data)
       const merged = { ...DEFAULT_CONFIG, ...data }
       setForm(merged)
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] fetch config:', e)
       if (mountedRef.current) setConfig(DEFAULT_CONFIG)
     } finally {
       if (mountedRef.current) setLoading(false)
@@ -255,7 +257,7 @@ export default function ConfigSettings() {
           setZlibChecked(true)
           if (data.balance) setZlibBalance(data.balance)
         }
-      } catch { /* silent */ }
+      } catch (e) { console.warn('[ConfigSettings] restore zlib:', e) }
     }
     restoreZlib()
   }, [config, form.zlib_email, form.zlib_password, zlibChecked])
@@ -277,7 +279,7 @@ export default function ConfigSettings() {
           setProxyMsg(data.message || '代理不可用')
         }
         setProxyChecked(true)
-      } catch { /* silent */ }
+      } catch (e) { console.warn('[ConfigSettings] restore proxy:', e) }
     }
     restoreProxy()
   }, [config, form.http_proxy, proxyChecked])
@@ -302,7 +304,7 @@ export default function ConfigSettings() {
         setZlProxyStatus(results.zlibrary ? 'green' : 'red')
         setAaProxyDetail(details.annas_archive || '')
         setZlProxyDetail(details.zlibrary || '')
-      } catch { /* silent */ }
+      } catch (e) { console.warn('[ConfigSettings] restore source:', e) }
     }
     restoreSourceStatus()
   }, [config])
@@ -316,7 +318,8 @@ export default function ConfigSettings() {
       if (!mountedRef.current) return
       setFlareRunning(data.available || false)
       setFlareInstalled(data.installed || false)
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] check flare:', e)
       if (mountedRef.current) {
         setFlareRunning(false)
         setFlareInstalled(false)
@@ -337,7 +340,8 @@ export default function ConfigSettings() {
       if (!mountedRef.current) return
       setOcrStatus(data.ok ? 'green' : 'red')
       setOcrMsg(data.message || (data.ok ? data.version || '已安装' : '未检测到'))
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] check ocr:', e)
       if (mountedRef.current) {
         setOcrStatus('red')
         setOcrMsg('检测失败')
@@ -367,7 +371,8 @@ export default function ConfigSettings() {
         }
       }
       setDetectedPaths(allPaths)
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] detect paths:', e)
       if (mountedRef.current) setDbStatus('red')
     } finally {
       if (mountedRef.current) setDbDetecting(false)
@@ -383,7 +388,8 @@ export default function ConfigSettings() {
       const dbs = data.dbs || []
       setDbNames(dbs)
       setDbStatus(dbs.length > 0 ? 'green' : 'yellow')
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] check db:', e)
       if (mountedRef.current) setDbStatus('red')
     } finally {
       if (mountedRef.current) setDbDetecting(false)
@@ -415,7 +421,8 @@ export default function ConfigSettings() {
         setZlibConnected(false)
         setZlibMsg(data.message || '登录失败')
       }
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] zlib check:', e)
       if (mountedRef.current) {
         setZlibChecked(true)
         setZlibConnected(false)
@@ -445,7 +452,8 @@ export default function ConfigSettings() {
         setProxyStatus('red')
         setProxyMsg(data.message || '代理不可用')
       }
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] check proxy:', e)
       if (mountedRef.current) {
         setProxyChecked(true)
         setProxyStatus('red')
@@ -471,7 +479,7 @@ export default function ConfigSettings() {
       setZlProxyStatus(results.zlibrary ? 'green' : 'red')
       setAaProxyDetail(details.annas_archive || '')
       setZlProxyDetail(details.zlibrary || '')
-    } catch { /* silent */ }
+    } catch (e) { console.warn('[ConfigSettings] check proxy sources:', e) }
   }
 
   const handleInstallFlare = async () => {
@@ -525,9 +533,10 @@ export default function ConfigSettings() {
             }
             if (flarePollRef.current) clearInterval(flarePollRef.current)
           }
-        } catch { /* silent */ }
-      }, 1500)
-    } catch {
+        } catch (e) { console.warn('[ConfigSettings] flare poll:', e) }
+}, 1500)
+    } catch (e) {
+      console.warn('[ConfigSettings] install flare:', e)
       if (mountedRef.current) {
         setFlareStatusText('安装请求失败')
         setFlareInstallFailed(true)
@@ -549,7 +558,8 @@ export default function ConfigSettings() {
       } else {
         setFlareStatusText(data.error || '启动失败')
       }
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] start flare:', e)
       if (mountedRef.current) setFlareStatusText('启动请求失败')
     } finally {
       if (mountedRef.current) setFlareChecking(false)
@@ -565,7 +575,8 @@ export default function ConfigSettings() {
         setFlareRunning(false)
         setFlareStatusText('已停止')
       }
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] stop flare:', e)
       if (mountedRef.current) setFlareStatusText('停止请求失败')
     }
   }
@@ -584,7 +595,8 @@ export default function ConfigSettings() {
           msg: data.version || data.message || (data.ok ? '已安装' : '未检测到'),
         },
       }))
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] detect ocr engine:', e)
       if (mountedRef.current) {
         setOcrEngines(prev => ({
           ...prev,
@@ -612,7 +624,8 @@ export default function ConfigSettings() {
           msg: data.message || (data.ok ? '安装成功' : '安装失败'),
         },
       }))
-    } catch {
+    } catch (e) {
+      console.warn('[ConfigSettings] install ocr engine:', e)
       if (mountedRef.current) {
         setOcrEngines(prev => ({
           ...prev,
@@ -872,7 +885,7 @@ export default function ConfigSettings() {
                             if (data.path) {
                               setFlareManualPath(data.path)
                             }
-                          } catch { /* silent */ }
+                          } catch (e) { console.warn('[ConfigSettings] browse folder:', e) }
                         }}
                         className="px-2 py-1 text-xs rounded border border-yellow-300 bg-white hover:bg-yellow-50 text-yellow-700"
                       >
@@ -897,7 +910,8 @@ export default function ConfigSettings() {
                             } else {
                               setFlareStatusText('配置失败: ' + (data.error || ''))
                             }
-                          } catch {
+                          } catch (e) {
+                            console.warn('[ConfigSettings] configure flare path:', e)
                             setFlareStatusText('配置请求失败')
                           }
                         }}

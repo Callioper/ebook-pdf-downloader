@@ -1,5 +1,12 @@
+# ==== search.py ====
+# 职责：搜索API路由，支持本地数据库、Anna's Archive和ZLibrary搜索
+# 入口函数：search_books(), get_config_api(), update_config_api(), zlib_fetch_tokens()
+# 依赖：config, search_engine, version, engine.zlib_downloader
+# 注意：包含FlareSolverr安装、OCR安装和更新检查功能
+
 import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
@@ -21,6 +28,7 @@ from config import get_config, init_config, update_config
 from search_engine import search_engine, detect_database_paths
 from version import VERSION, GITHUB_REPO
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
 
 HTML_TAG_RE = re.compile(r'<[^>]+>')
@@ -90,8 +98,8 @@ def _search_annas_archive(query: str, proxy: str = "") -> List[Dict[str, str]]:
                 if md5 not in seen:
                     seen.add(md5)
                     results.append({"md5": md5, "md5_url": f"https://annas-archive.gd/md5/{md5}"})
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to search Anna's Archive: {e}")
     return results
 
 
@@ -132,7 +140,8 @@ def _fetch_md5_page_info(md5: str, proxy: str = "") -> Dict[str, Any]:
                     info[key] = val
         if "title" not in info:
             info["title"] = md5
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to fetch MD5 page info for {md5}: {e}")
         if "title" not in info:
             info["title"] = md5
     return info
@@ -164,7 +173,8 @@ async def _search_zlib(query: str, proxy: str = "") -> List[Dict[str, Any]]:
                 "book_id": str(item.get("id", "")),
             })
         return books
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to search ZLibrary: {e}")
         return []
 
 
@@ -214,16 +224,17 @@ async def search_books(
                         info = _fetch_md5_page_info(item["md5"], proxy)
                         if info.get("title"):
                             results.append(info)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch MD5 info in _run_aa: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to run Anna's Archive search: {e}")
             return results
 
         def _run_zlib():
             try:
                 return asyncio.new_event_loop().run_until_complete(_search_zlib(query, proxy))
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to run ZLibrary search: {e}")
                 return []
 
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)

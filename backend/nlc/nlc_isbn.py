@@ -1,3 +1,9 @@
+# ==== nlc_isbn.py ====
+# 职责：从国家图书馆（NLC）爬取ISBN信息
+# 入口函数：crawl_isbn()
+# 依赖：backend.nlc.headers
+# 注意：异步执行，支持标题清洗和多页面查询
+
 import asyncio
 import os
 import re

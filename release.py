@@ -59,7 +59,7 @@ for p in INNO_PATHS:
 
 # Read current version
 version_ns = {}
-with open(VERSION_FILE) as f:
+with open(VERSION_FILE, encoding="utf-8") as f:
     exec(f.read(), version_ns)
 current_version = version_ns.get("VERSION", "0.0.0")
 

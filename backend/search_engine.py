@@ -1,3 +1,9 @@
+# ==== search_engine.py ====
+# 职责：SQLite电子书数据库搜索引擎，支持多数据库查询和路径检测
+# 入口函数：SearchEngine.search(), detect_database_paths()
+# 依赖：无
+# 注意：使用本地缓存避免UNC路径锁定，支持DX_2.0-5.0和DX_6.0数据库
+
 import os
 import sqlite3
 import shutil

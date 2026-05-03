@@ -1,3 +1,9 @@
+# ==== pipeline.py ====
+# 职责：书籍下载处理流水线，协调元数据获取、下载、转换、OCR和书签
+# 入口函数：run_pipeline()
+# 依赖：config, task_store, ws_manager, engine.flaresolverr, engine.zlib_downloader, nlc.nlc_isbn
+# 注意：7步流水线，支持取消和错误处理
+
 import asyncio
 import os
 import shutil

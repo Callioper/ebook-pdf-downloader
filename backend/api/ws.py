@@ -1,3 +1,9 @@
+# ==== ws.py ====
+# 职责：WebSocket端点，处理客户端连接和任务订阅
+# 入口函数：websocket_endpoint()
+# 依赖：ws_manager, task_store
+# 注意：支持subscribe、unsubscribe和ping消息类型
+
 import json
 import uuid
 

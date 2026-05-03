@@ -1,3 +1,9 @@
+# ==== tasks.py ====
+# 职责：任务管理API路由，处理任务的创建、查询、删除和控制
+# 入口函数：list_tasks(), create_task(), start_task(), cancel_task(), retry_task()
+# 依赖：task_store, ws_manager, config, engine.pipeline
+# 注意：支持后台任务执行和WebSocket通知
+
 import os
 import subprocess
 from typing import Any, Dict, List, Optional

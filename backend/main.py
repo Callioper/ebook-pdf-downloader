@@ -1,3 +1,9 @@
+# ==== main.py ====
+# 职责：FastAPI应用入口，启动Web服务器，挂载路由和静态文件
+# 入口函数：main(), serve_spa(), serve_root()
+# 依赖：config, api.search, api.tasks, api.ws, search_engine, task_store, engine.flaresolverr
+# 注意：支持打包后的frozen模式，自动查找frontend目录
+
 import asyncio
 import logging
 import os

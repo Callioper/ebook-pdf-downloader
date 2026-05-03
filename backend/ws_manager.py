@@ -1,3 +1,9 @@
+# ==== ws_manager.py ====
+# 职责：WebSocket连接管理，处理客户端订阅和消息广播
+# 入口函数：ConnectionManager.connect(), disconnect(), subscribe(), broadcast_task()
+# 依赖：无
+# 注意：支持任务级订阅和全局广播
+
 import asyncio
 import json
 from typing import Any, Dict, List, Set

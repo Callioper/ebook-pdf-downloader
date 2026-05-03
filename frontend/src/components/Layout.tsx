@@ -60,7 +60,7 @@ export default function Layout() {
         }
       }
       setTaskLogs(logsMap)
-    } catch { /* silent */ }
+    } catch (e) { console.warn('[Layout] fetch running tasks:', e) }
   }
 
   useEffect(() => {
@@ -141,7 +141,7 @@ export default function Layout() {
             return
           }
           setDownloadingPct(p.total > 0 ? Math.round((p.downloaded / p.total) * 100) : 0)
-        } catch {}
+        } catch (e) { console.warn('[Layout] download poll:', e) }
       }, 500)
     } catch (e: any) {
       setDownloading(false)
@@ -160,7 +160,8 @@ export default function Layout() {
         alert('安装失败: ' + (data.error || '未知错误'))
         setInstalling(false)
       }
-    } catch {
+    } catch (e) {
+      console.warn('[Layout] install update:', e)
       setInstalling(false)
     }
   }
