@@ -789,7 +789,6 @@ export default function ConfigSettings() {
               </div>
               <StatusDot status={dbStatus} />
             </div>
-            <StatusDot status={dbStatus} />
           </div>
 
           <div className="flex items-center gap-2">
@@ -1211,23 +1210,23 @@ export default function ConfigSettings() {
               />
             </div>
           </div>
+
+          {/* ---------- OCR 安装引导 ---------- */}
+          <details className="group">
+            <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
+              <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              OCR 命令行安装指引
+            </summary>
+            <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+              <p className="text-xs text-blue-800 font-medium mb-2">推荐在 OpenCode 中执行以下命令安装 OCR 引擎，项目地址 https://opencode.ai/：</p>
+              <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{OCR_INSTALL_GUIDE}</pre>
+              <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
+            </div>
+          </details>
         </div>
       )}
-
-      {/* ---------- OCR 安装引导 ---------- */}
-      <details className="mt-3 group">
-        <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
-          <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-          OCR 命令行安装指引
-        </summary>
-        <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
-          <p className="text-xs text-blue-800 font-medium mb-2">在 OpenCode 中执行以下命令安装 OCR 引擎：</p>
-          <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{OCR_INSTALL_GUIDE}</pre>
-          <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
-        </div>
-      </details>
 
       {/* ============ 书签 ============ */}
       <SectionHeader

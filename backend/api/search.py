@@ -760,31 +760,30 @@ def _pip_install_cmd() -> List[str]:
     """Get the right command to run pip install, regardless of frozen status.
     In frozen mode, sys.executable is the exe (BookDownloader.exe), and
     'BookDownloader.exe -m pip install' would launch another BookDownloader instance.
-    Instead, find system python from PATH."""
+    Instead, find system python from PATH and use --user flag.
+    In dev mode (venv), use venv python directly (no --user, installs into venv)."""
     python_cmd = sys.executable
+    user_flag = []  # dev mode: install into current python (no --user)
     if getattr(sys, 'frozen', False):
+        user_flag = ["--user"]
         import shutil
         for candidate in ["python", "python3", "py"]:
             found = shutil.which(candidate)
             if found:
                 python_cmd = found
                 break
-        else:
-            # No system python found — try common Windows locations
+        if python_cmd == sys.executable:
+            # No system Python found via shutil — try common Windows locations
             for candidate in [
                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python314", "python.exe"),
                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python313", "python.exe"),
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python312", "python.exe"),
                 r"C:\Python314\python.exe",
                 r"C:\Python313\python.exe",
-                r"C:\Python312\python.exe",
-                r"C:\Program Files\Python314\python.exe",
-                r"C:\Program Files\Python313\python.exe",
             ]:
                 if os.path.exists(candidate):
                     python_cmd = candidate
                     break
-    return [python_cmd, "-m", "pip", "install", "--user"]
+    return [python_cmd, "-m", "pip", "install"] + user_flag
 
 
 @router.post("/install-ocr")
@@ -1032,12 +1031,13 @@ async def install_flare_complete():
             try:
                 from engine.flaresolverr import check_flaresolverr, start_flaresolverr
                 config = get_config()
+                # Save exe path to config so re-detection works
+                update_config({"flaresolverr_path": os.path.dirname(os.path.abspath(exe_path))})
                 already_running = await check_flaresolverr(config)
+                started = already_running
                 if not already_running:
-                    ok = await start_flaresolverr(config)
-                else:
-                    ok = True
-                return {"success": True, "path": os.path.abspath(exe_path), "started": ok, "exe_path": exe_path}
+                    started = await start_flaresolverr(config)
+                return {"success": True, "path": os.path.abspath(exe_path), "started": started, "exe_path": exe_path}
             except Exception:
                 return {"success": True, "path": os.path.abspath(exe_path), "started": False, "exe_path": exe_path}
 
@@ -1058,9 +1058,6 @@ async def install_flare_complete():
         return {"success": False, "error": "未找到 flaresolverr.exe，请重试"}
     except Exception as e:
         return {"success": False, "error": f"安装确认异常: {e}"}
-    except Exception as e:
-        traceback.print_exc()
-        return {"success": False, "error": f"安装异常: {str(e)}"}
 
 
 @router.get("/check-flare")
