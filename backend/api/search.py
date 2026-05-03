@@ -344,7 +344,14 @@ async def browse_folder():
 async def detect_paths():
     loop = asyncio.get_running_loop()
     paths = await loop.run_in_executor(None, detect_database_paths)
-    return {"paths": paths}
+    # Return just path strings (folder paths containing .db files), not dicts
+    path_strings = []
+    for p in paths:
+        if isinstance(p, dict) and "path" in p:
+            path_strings.append(p["path"])
+        elif isinstance(p, str):
+            path_strings.append(p)
+    return {"paths": path_strings}
 
 
 @router.get("/detect-nlc-paths")
@@ -443,7 +450,6 @@ async def check_proxy_sources(body: ProxyRequest):
             if proxy:
                 kwargs["proxies"] = {"http": proxy, "https": proxy}
             resp = _requests.get(url, **kwargs)
-            # 200=OK, 301/302=redirect, 503=service temporarily unavailable (still reachable)
             if resp.status_code in (200, 301, 302):
                 return (True, "OK")
             if resp.status_code == 503:
@@ -453,15 +459,61 @@ async def check_proxy_sources(body: ProxyRequest):
             return (False, f"HTTP {e.response.status_code}")
         except Exception as e:
             err_str = str(e).lower()
-            # Connection errors, SSL errors - still reachable
             if any(x in err_str for x in ["connection", "ssl", "timeout", "proxy", "resolve"]):
                 return (True, f"连接问题: {str(e)[:60]}")
             return (False, str(e)[:100])
+
+    def _check_aa_api(proxy: str = "") -> Tuple[bool, str]:
+        """Try actual search on Anna's Archive to verify API works."""
+        import requests as _requests
+        kwargs = {"timeout": 20, "headers": headers, "verify": False}
+        if proxy:
+            kwargs["proxies"] = {"http": proxy, "https": proxy}
+        try:
+            resp = _requests.get("https://annas-archive.gd/search?q=test", **kwargs)
+            if resp.status_code == 200:
+                html = resp.text
+                if re.search(r'href="/md5/([a-f0-9]{32})"', html):
+                    return (True, "搜索API正常")
+                return (True, "网站可达（搜索无结果）")
+            return (True, f"网站可达 (HTTP {resp.status_code})")
+        except Exception as e:
+            return (False, f"搜索API不可用: {str(e)[:60]}")
+
+    def _check_zl_api(proxy: str = "") -> Tuple[bool, str]:
+        """Try Z-Library eapi health/version check."""
+        import requests as _requests
+        kwargs = {"timeout": 15, "headers": headers, "verify": False}
+        if proxy:
+            kwargs["proxies"] = {"http": proxy, "https": proxy}
+        try:
+            resp = _requests.get("https://z-lib.sk/eapi/book/search?message=test&limit=1", **kwargs)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict) and ("books" in data or "results" in data):
+                    return (True, "搜索API正常")
+                return (True, "API可达")
+            return (True, f"网站可达 (HTTP {resp.status_code})")
+        except Exception as e:
+            return (False, f"搜索API不可用: {str(e)[:60]}")
 
     for name, url in targets:
         ok, detail = _check_url(url, proxy_url if proxy_url else "")
         results[name] = ok
         details[name] = detail
+
+    # Deep API-level checks
+    aa_ok, aa_api_detail = _check_aa_api(proxy_url if proxy_url else "")
+    zl_ok, zl_api_detail = _check_zl_api(proxy_url if proxy_url else "")
+
+    # Override with API-level detail when API check available
+    if aa_ok:
+        results["annas_archive"] = True
+        details["annas_archive"] = aa_api_detail
+    if zl_ok:
+        results["zlibrary"] = True
+        details["zlibrary"] = zl_api_detail
+
     return {"ok": True, "results": results, "details": details, "proxy_configured": bool(proxy_url)}
 
 
@@ -600,34 +652,39 @@ async def install_ocr(body: InstallOCRRequest):
                             for chunk in dl.iter_content(chunk_size=65536):
                                 if chunk:
                                     f.write(chunk)
-                        # Run silent install
-                        result = subprocess.run(
-                            [installer_path, "/S", "/D=C:\\Program Files\\Tesseract-OCR"],
-                            capture_output=True, text=True, timeout=300
-                        )
-                        if result.returncode == 0:
-                            # Add to PATH for current process
-                            os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
-                            return {"ok": True, "message": "Tesseract OCR 自动安装成功"}
-                        return {"ok": False, "message": f"安装程序执行失败 (exit {result.returncode})"}
+                        # Run silent install with elevation (WinError 740 fix)
+                        try:
+                            import ctypes
+                            # ShellExecuteW with "runas" verb requests UAC elevation
+                            ret = ctypes.windll.shell32.ShellExecuteW(
+                                None, "runas", installer_path,
+                                "/S /D=C:\\Program Files\\Tesseract-OCR",
+                                None, 0
+                            )
+                            # ShellExecuteW returns >32 on success
+                            if ret > 32:
+                                import time as _t
+                                _t.sleep(5)  # give installer time to start
+                                os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
+                                return {"ok": True, "message": "Tesseract OCR 自动安装已启动（请确认 UAC 弹窗）"}
+                        except Exception:
+                            # Fallback: try subprocess runas
+                            try:
+                                result = subprocess.run(
+                                    ["runas", "/user:Administrator", installer_path, "/S"],
+                                    capture_output=True, text=True, timeout=300
+                                )
+                            except Exception:
+                                pass
+                        return {"ok": False, "message": f"自动安装需要管理员权限，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
                 return {"ok": False, "message": "无法获取最新 Tesseract 下载链接，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
             except Exception as e:
                 return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
-        elif engine == "ocrmypdf":
+        elif engine in ("ocrmypdf", "paddleocr", "easyocr"):
+            if getattr(sys, 'frozen', False):
+                return {"ok": False, "message": f"打包版不支持自动安装{engine}，请从源码运行: cd backend && pip install {engine}"}
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "ocrmypdf", "--user"],
-                capture_output=True, text=True, timeout=300
-            )
-            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
-        elif engine == "paddleocr":
-            result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "paddlepaddle", "paddleocr", "--user"],
-                capture_output=True, text=True, timeout=300
-            )
-            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
-        elif engine == "easyocr":
-            result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "easyocr", "--user"],
+                [sys.executable, "-m", "pip", "install", engine, "--user"],
                 capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
@@ -717,7 +774,9 @@ async def install_flare_complete():
     """Called by frontend after download done to finalize installation."""
     global _flare_dl_state
     try:
-        install_path = os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr")
+        # Use the SAME path as install_flare, not tempdir
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        install_path = os.path.join(base_dir, "tools", "flaresolverr")
         zip_path = os.path.join(install_path, "flaresolverr.zip")
 
         if not os.path.exists(zip_path):
