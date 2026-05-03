@@ -159,6 +159,9 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
 
     try:
         cwd = os.path.dirname(exe_path)
+        # Some FlareSolverr builds need their own directory as cwd to find bundled files
+        if not cwd:
+            cwd = os.getcwd()
         CREATE_NO_WINDOW = 0x08000000
         _flare_process = subprocess.Popen(
             [exe_path],
@@ -167,18 +170,26 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
             cwd=cwd,
             creationflags=CREATE_NO_WINDOW,
         )
+        # Read stderr in background to detect early crashes
+        stderr_lines = []
+        async def _read_stderr():
+            try:
+                for line in iter(_flare_process.stderr.readline, b""):
+                    stderr_lines.append(line.decode("utf-8", errors="replace"))
+            except Exception:
+                pass
+        asyncio.create_task(_read_stderr())
         # Wait up to 30 seconds for FlareSolverr to start
         for _ in range(30):
             await asyncio.sleep(1)
+            # If process already exited, it crashed
+            if _flare_process.poll() is not None:
+                err_text = "".join(stderr_lines)[:500]
+                return (False, f"FlareSolverr 进程已退出 (exit code {_flare_process.returncode})。错误: {err_text or '无错误输出'}")
             if await check_flaresolverr(config):
                 return (True, "started")
-        # Startup failed — get stderr output for diagnostics
-        stderr_out = ""
-        try:
-            _, stderr_out = _flare_process.communicate(timeout=3)
-            stderr_out = (stderr_out or b"").decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
+        # Timeout — get accumulated stderr
+        err_text = "".join(stderr_lines)[:500]
         try:
             _flare_process.terminate()
         except Exception:
@@ -187,10 +198,9 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
             except Exception:
                 pass
         _flare_process = None
-        detail = f"启动超时(30s)，未收到端口8191响应"
-        if stderr_out:
-            detail += f"。错误输出: {stderr_out}"
-        # Also log to logger for debugging
+        detail = f"启动超时(30s)，端口8191无响应"
+        if err_text:
+            detail += f"。错误输出: {err_text}"
         logger.warning(f"FlareSolverr start failed: {detail}")
         return (False, detail)
     except Exception as e:

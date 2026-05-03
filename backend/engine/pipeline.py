@@ -35,7 +35,7 @@ async def _emit(task_id: str, event_type: str, data: Dict[str, Any]):
     })
 
 
-async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     task_store.add_log(task_id, "Step 1/7: Fetching metadata from database...")
     await _emit(task_id, "step_progress", {"step": "fetch_metadata", "progress": 50})
 
