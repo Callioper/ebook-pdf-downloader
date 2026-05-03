@@ -1,0 +1,97 @@
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+def _get_app_dir() -> Path:
+    if getattr(sys, 'frozen', False):
+        app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
+        conf_dir = app_data / 'BookDownloader'
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        return conf_dir
+    return Path(__file__).resolve().parent.parent
+
+CONFIG_FILE = _get_app_dir() / "config.json"
+DEFAULT_CONFIG_FILE = _get_app_dir() / "config.default.json"
+
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "download_dir": "",
+    "finished_dir": "",
+    "tmp_dir": "",
+    "stacks_base_url": "http://localhost:7788",
+    "zfile_base_url": "http://192.168.0.7:32771",
+    "zfile_external_url": "",
+    "zfile_storage_key": "1",
+    "http_proxy": "",
+    "ocr_jobs": 1,
+    "ocr_languages": "chi_sim+eng",
+    "ocr_timeout": 1800,
+    "nlc_max_workers": 5,
+    "ebook_data_geter_path": "",
+    "ebook_db_path": "",
+    "zlib_email": "",
+    "zlib_password": "",
+    "aa_membership_key": "",
+    "ocr_engine": "tesseract",
+}
+
+
+def _default_paths() -> Dict[str, str]:
+    home = Path.home()
+    default_download = str(home / "Downloads" / "book-downloader")
+    return {
+        "download_dir": default_download,
+        "finished_dir": os.path.join(default_download, "finished"),
+        "tmp_dir": str(home / "tmp" / "bdw"),
+        "ebook_data_geter_path": str(Path(__file__).resolve().parent / "nlc"),
+        "ebook_db_path": str(Path(__file__).resolve().parent / "data"),
+    }
+
+
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    path = Path(config_path) if config_path else CONFIG_FILE
+
+    config = dict(DEFAULT_CONFIG)
+    config.update(_default_paths())
+
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            config.update(saved)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return config
+
+
+def save_config(data: Dict[str, Any], config_path: Optional[str] = None) -> None:
+    path = Path(config_path) if config_path else CONFIG_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except (PermissionError, OSError) as e:
+        raise IOError(f"Cannot write config to {path}: {e}")
+
+
+CONFIG: Dict[str, Any] = {}
+
+
+def init_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    global CONFIG
+    CONFIG = load_config(config_path)
+    return CONFIG
+
+
+def get_config() -> Dict[str, Any]:
+    return CONFIG
+
+
+def update_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    global CONFIG
+    CONFIG.update(data)
+    save_config(CONFIG)
+    return CONFIG

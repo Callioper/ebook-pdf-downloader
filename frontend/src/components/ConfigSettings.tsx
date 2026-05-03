@@ -1,0 +1,1046 @@
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
+
+interface AppConfig {
+  host: string
+  port: number
+  download_dir: string
+  finished_dir: string
+  tmp_dir: string
+  stacks_base_url: string
+  zfile_base_url: string
+  zfile_external_url: string
+  zfile_storage_key: string
+  http_proxy: string
+  ocr_jobs: number
+  ocr_languages: string
+  ocr_timeout: number
+  ebook_db_path: string
+  zlib_email: string
+  zlib_password: string
+  aa_membership_key: string
+  ocr_engine: string
+  [key: string]: unknown
+}
+
+function FolderPicker({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const pickFolder = async () => {
+    try {
+      const res = await fetch('/api/v1/browse-folder')
+      const data = await res.json()
+      if (data.path) {
+        onChange(data.path)
+      }
+    } catch {}
+  }
+
+  return (
+    <div className="flex gap-1">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+      />
+      <button
+        type="button"
+        onClick={pickFolder}
+        className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 shrink-0"
+        title="打开文件夹选择对话框"
+      >
+        ...
+      </button>
+    </div>
+  )
+}
+
+function StatusDot({ status }: { status: 'green' | 'red' | 'yellow' | null }) {
+  const colors: Record<string, string> = {
+    green: 'bg-green-500',
+    red: 'bg-red-500',
+    yellow: 'bg-yellow-500',
+  }
+  return (
+    <span className={`inline-block w-2 h-2 rounded-full ${status ? colors[status] : 'bg-gray-300'}`} />
+  )
+}
+
+function SectionHeader({ title, summary, color, expanded, onToggle }: {
+  title: string
+  summary: ReactNode
+  color: string
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const borderMap: Record<string, string> = {
+    blue: 'border-l-blue-500',
+    green: 'border-l-green-500',
+    purple: 'border-l-purple-500',
+    orange: 'border-l-orange-500',
+    gray: 'border-l-gray-400',
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`w-full text-left bg-white border border-gray-200 rounded-lg ${borderMap[color]} border-l-4 p-4 hover:shadow-sm transition-shadow`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-medium text-gray-800">{title}</span>
+          <span className="text-xs text-gray-400 ml-2 truncate">{summary}</span>
+        </div>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ml-2 ${expanded ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+    </button>
+  )
+}
+
+const DEFAULT_CONFIG: AppConfig = {
+  host: '0.0.0.0',
+  port: 8000,
+  download_dir: '',
+  finished_dir: '',
+  tmp_dir: '',
+  stacks_base_url: 'http://localhost:7788',
+  zfile_base_url: 'http://192.168.0.7:32771',
+  zfile_external_url: '',
+  zfile_storage_key: '1',
+  http_proxy: '',
+  ocr_jobs: 1,
+  ocr_languages: 'chi_sim+eng',
+  ocr_timeout: 1800,
+  ebook_db_path: '',
+  zlib_email: '',
+  zlib_password: '',
+  aa_membership_key: '',
+  ocr_engine: 'tesseract',
+}
+
+const OCR_ENGINES = [
+  { key: 'tesseract', name: 'Tesseract OCR', desc: '经典开源引擎' },
+  { key: 'paddleocr', name: 'PaddleOCR', desc: '百度开源中文引擎' },
+  { key: 'easyocr', name: 'EasyOCR', desc: '多语言深度学习' },
+  { key: 'appleocr', name: 'AppleOCR', desc: 'macOS 原生 OCR' },
+  { key: 'ocrmypdf', name: 'OCRmyPDF', desc: 'PDF OCR 优化工具' },
+]
+
+export default function ConfigSettings() {
+  const [config, setConfig] = useState<AppConfig | null>(null)
+  const [form, setForm] = useState<AppConfig>({ ...DEFAULT_CONFIG })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState('')
+
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    database: false,
+    download: false,
+    proxy: false,
+    ocr: false,
+    bookmarks: false,
+  })
+
+  const [dbDetecting, setDbDetecting] = useState(false)
+  const [dbStatus, setDbStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
+  const [dbNames, setDbNames] = useState<string[]>([])
+  const [detectedPaths, setDetectedPaths] = useState<string[]>([])
+
+  const [zlibChecking, setZlibChecking] = useState(false)
+  const [zlibConnected, setZlibConnected] = useState(false)
+  const [zlibMsg, setZlibMsg] = useState('')
+
+  const [flareRunning, setFlareRunning] = useState(false)
+  const [flareInstalled, setFlareInstalled] = useState(false)
+  const [flareChecking, setFlareChecking] = useState(true)
+  const [flareInstalling, setFlareInstalling] = useState(false)
+  const [flareProgress, setFlareProgress] = useState(0)
+  const [flareStatusText, setFlareStatusText] = useState('')
+  const [flareInstallFailed, setFlareInstallFailed] = useState(false)
+  const flarePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const [proxyChecking, setProxyChecking] = useState(false)
+  const [proxyStatus, setProxyStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
+  const [proxyMsg, setProxyMsg] = useState('')
+  const [aaProxyStatus, setAaProxyStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
+  const [zlProxyStatus, setZlProxyStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
+  const [aaProxyDetail, setAaProxyDetail] = useState('')
+  const [zlProxyDetail, setZlProxyDetail] = useState('')
+
+  const [ocrChecking, setOcrChecking] = useState(false)
+  const [ocrStatus, setOcrStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
+  const [ocrMsg, setOcrMsg] = useState('')
+  const [ocrEngines, setOcrEngines] = useState<Record<string, { installed: boolean; installing: boolean; msg: string }>>({})
+
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateResult, setUpdateResult] = useState('')
+
+  const mountedRef = useRef(true)
+
+  const handleCheckUpdate = async () => {
+    setUpdateChecking(true)
+    setUpdateResult('')
+    try {
+      const res = await fetch('/api/v1/check-update')
+      const data = await res.json()
+      if (!mountedRef.current) return
+      if (data.has_update) {
+        setUpdateResult(`新版本 v${data.latest} 可用 (当前 v${data.current})`)
+      } else {
+        setUpdateResult(`已是最新版本 v${data.current}`)
+      }
+    } catch {
+      if (mountedRef.current) setUpdateResult('检查失败')
+    } finally {
+      if (mountedRef.current) setUpdateChecking(false)
+    }
+  }
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const fetchConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/config')
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setConfig(data)
+      const merged = { ...DEFAULT_CONFIG, ...data }
+      setForm(merged)
+    } catch {
+      if (mountedRef.current) setConfig(DEFAULT_CONFIG)
+    } finally {
+      if (mountedRef.current) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchConfig() }, [fetchConfig])
+
+  const checkFlare = useCallback(async () => {
+    setFlareChecking(true)
+    setFlareInstallFailed(false)
+    try {
+      const res = await fetch('/api/v1/check-flare')
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setFlareRunning(data.available || false)
+      setFlareInstalled(data.installed || false)
+    } catch {
+      if (mountedRef.current) {
+        setFlareRunning(false)
+        setFlareInstalled(false)
+      }
+    } finally {
+      if (mountedRef.current) setFlareChecking(false)
+    }
+  }, [])
+
+  useEffect(() => { checkFlare() }, [checkFlare])
+
+  const checkOcr = useCallback(async (engine?: string) => {
+    setOcrChecking(true)
+    try {
+      const eng = engine || form.ocr_engine || 'tesseract'
+      const res = await fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setOcrStatus(data.ok ? 'green' : 'red')
+      setOcrMsg(data.message || (data.ok ? data.version || '已安装' : '未检测到'))
+    } catch {
+      if (mountedRef.current) {
+        setOcrStatus('red')
+        setOcrMsg('检测失败')
+      }
+    } finally {
+      if (mountedRef.current) setOcrChecking(false)
+    }
+  }, [form.ocr_engine])
+
+  const checkDbConnectivity = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/status')
+      const data = await res.json()
+      if (!mountedRef.current) return
+      const edb = data?.ebookDatabase
+      const reachable = edb?.reachable || false
+      const dbs: string[] = edb?.dbs || []
+      setDbNames(dbs)
+      if (reachable && dbs.length > 0) {
+        setDbStatus('green')
+      } else if (reachable) {
+        setDbStatus('yellow')
+      } else {
+        setDbStatus('red')
+      }
+    } catch {
+      if (mountedRef.current) {
+        setDbStatus('red')
+        setDbNames([])
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (config) checkDbConnectivity()
+  }, [config, checkDbConnectivity])
+
+  useEffect(() => {
+    if (config) checkOcr()
+  }, [config, checkOcr])
+
+  const handleDetectPaths = async () => {
+    setDbDetecting(true)
+    setDetectedPaths([])
+    try {
+      const res = await fetch('/api/v1/detect-paths')
+      const data = await res.json()
+      if (!mountedRef.current) return
+      const raw = data.paths || []
+      const paths = raw.map((p: any) => (typeof p === 'string' ? p : p.path || ''))
+      .filter(Boolean)
+      setDetectedPaths(paths)
+      if (paths.length > 0) {
+        setForm((p) => ({ ...p, ebook_db_path: paths[0] }))
+      } else {
+        setDbStatus('red')
+      }
+    } catch {
+      if (mountedRef.current) {
+        setDetectedPaths([])
+        setDbStatus('red')
+      }
+    } finally {
+      if (mountedRef.current) setDbDetecting(false)
+    }
+  }
+
+
+  const handleCheckProxy = async () => {
+    setProxyChecking(true)
+    setProxyStatus(null)
+    setProxyMsg('')
+    try {
+      const res = await fetch('/api/v1/check-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ http_proxy: form.http_proxy }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setProxyStatus(data.ok ? 'green' : 'red')
+      setProxyMsg(data.message || (data.ok ? '代理可用' : '代理不可用'))
+    } catch {
+      if (mountedRef.current) {
+        setProxyStatus('red')
+        setProxyMsg('检测失败')
+      }
+    } finally {
+      if (mountedRef.current) setProxyChecking(false)
+    }
+  }
+
+  const handleCheckProxySources = async () => {
+    const proxy = form.http_proxy || ''
+    try {
+      const res = await fetch('/api/v1/check-proxy-sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ http_proxy: proxy }),
+      })
+      const data = await res.json()
+      const results = data.results || {}
+      const details = data.details || {}
+      setAaProxyStatus(results.annas_archive ? 'green' : 'red')
+      setZlProxyStatus(results.zlibrary ? 'green' : 'red')
+      setAaProxyDetail(details.annas_archive || '')
+      setZlProxyDetail(details.zlibrary || '')
+    } catch {
+      setAaProxyStatus('red')
+      setZlProxyStatus('red')
+      setAaProxyDetail('')
+      setZlProxyDetail('')
+    }
+  }
+
+  const handleZlibCheck = async () => {
+    if (!form.zlib_email || !form.zlib_password) {
+      setZlibMsg('请输入邮箱和密码')
+      return
+    }
+    setZlibChecking(true)
+    setZlibMsg('')
+    try {
+      const res = await fetch('/api/v1/zlib-fetch-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.zlib_email, password: form.zlib_password }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      if (data.ok) {
+        setZlibConnected(true)
+        setZlibMsg('已连接')
+      } else {
+        setZlibConnected(false)
+        setZlibMsg('连接失败: ' + (data.message || '未知错误'))
+      }
+    } catch (e: any) {
+      if (mountedRef.current) {
+        setZlibConnected(false)
+        setZlibMsg('请求失败: ' + (e.message || ''))
+      }
+    } finally {
+      if (mountedRef.current) setZlibChecking(false)
+    }
+  }
+
+  const handleInstallFlare = async () => {
+    setFlareInstalling(true)
+    setFlareProgress(0)
+    setFlareStatusText('正在下载 FlareSolverr ...')
+    setFlareInstallFailed(false)
+    try {
+      const res = await fetch('/api/v1/install-flare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ install_path: '' }),
+      })
+      const data = await res.json()
+      if (!data.success) {
+        setFlareStatusText('安装失败: ' + (data.error || '未知错误'))
+        setFlareInstalling(false)
+        setFlareInstallFailed(true)
+        return
+      }
+      if (mountedRef.current) {
+        setFlareProgress(100)
+        setFlareInstalled(true)
+        setFlareInstalling(false)
+        setFlareStatusText('安装完成，正在启动 ...')
+      }
+      try {
+        const startRes = await fetch('/api/v1/start-flare', { method: 'POST' })
+        const startData = await startRes.json()
+        if (startData.success) {
+          setFlareRunning(true)
+          setFlareStatusText('FlareSolverr 已启动')
+        } else {
+          setFlareStatusText('启动失败: ' + (startData.error || '未知错误'))
+        }
+      } catch {
+        setFlareStatusText('启动请求失败')
+      }
+    } catch (e: any) {
+      setFlareInstalling(false)
+      setFlareStatusText('安装请求失败: ' + (e.message || ''))
+      setFlareInstallFailed(true)
+    }
+  }
+
+  const handleStartFlare = async () => {
+    setFlareStatusText('正在启动 FlareSolverr ...')
+    try {
+      const res = await fetch('/api/v1/start-flare', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setFlareRunning(true)
+        setFlareStatusText('FlareSolverr 已启动')
+      } else {
+        setFlareStatusText('启动失败: ' + (data.error || '未知错误'))
+      }
+    } catch {
+      setFlareStatusText('启动请求失败')
+    }
+  }
+
+  const handleStopFlare = async () => {
+    setFlareStatusText('正在停止 FlareSolverr ...')
+    try {
+      const res = await fetch('/api/v1/stop-flare', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setFlareRunning(false)
+        setFlareStatusText('FlareSolverr 已停止')
+      } else {
+        setFlareStatusText('停止失败: ' + (data.error || '未知错误'))
+      }
+    } catch {
+      setFlareStatusText('停止请求失败')
+    }
+  }
+
+  const handleInstallOcrEngine = async (engine: string) => {
+    setOcrEngines((prev) => ({
+      ...prev,
+      [engine]: { ...(prev[engine] || { installed: false, msg: '' }), installing: true, msg: '' },
+    }))
+    try {
+      const res = await fetch('/api/v1/install-ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      if (data.ok) {
+        setOcrEngines((prev) => ({
+          ...prev,
+          [engine]: { installed: true, installing: false, msg: '安装成功' },
+        }))
+      } else {
+        setOcrEngines((prev) => ({
+          ...prev,
+          [engine]: { ...(prev[engine] || { installed: false, msg: '' }), installing: false, msg: data.message || '安装失败' },
+        }))
+      }
+    } catch (e: any) {
+      if (mountedRef.current) {
+        setOcrEngines((prev) => ({
+          ...prev,
+          [engine]: { ...(prev[engine] || { installed: false, msg: '' }), installing: false, msg: e.message || '请求失败' },
+        }))
+      }
+    }
+  }
+
+  const handleDetectOcrEngine = async (engine: string) => {
+    try {
+      const res = await fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(engine)}`)
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setOcrEngines((prev) => ({
+        ...prev,
+        [engine]: { ...(prev[engine] || { installing: false, msg: '' }), installed: data.ok || false, msg: data.ok ? (data.version || '已安装') : (data.message || '未安装') },
+      }))
+    } catch {
+      if (mountedRef.current) {
+        setOcrEngines((prev) => ({
+          ...prev,
+          [engine]: { ...(prev[engine] || { installing: false, msg: '' }), installed: false, msg: '检测失败' },
+        }))
+      }
+    }
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveMsg('')
+    try {
+      const body = JSON.stringify(form)
+      const res = await fetch('/api/v1/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+      if (!res.ok) {
+        setSaveMsg('保存失败: HTTP ' + res.status)
+        setSaving(false)
+        return
+      }
+      const data = await res.json()
+      setConfig(data)
+      setSaveMsg('保存成功')
+      setTimeout(() => setSaveMsg(''), 2000)
+    } catch (e: any) {
+      setSaveMsg('保存失败: ' + (e.message || '未知错误'))
+    }
+    setSaving(false)
+  }
+
+  const toggleSection = (key: string) => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const updateForm = (patch: Partial<AppConfig>) => {
+    setForm((prev) => ({ ...prev, ...patch }))
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-xs text-gray-400">
+        加载配置中...
+      </div>
+    )
+  }
+
+  const flareStatusSummary = flareChecking
+    ? '检测中...'
+    : flareRunning
+      ? '运行中'
+      : flareInstalled
+        ? '已安装(未启动)'
+        : '未安装'
+
+  return (
+    <div className="space-y-3">
+      {/* ============ 数据库 ============ */}
+      <SectionHeader
+        title="数据库"
+        summary={<><StatusDot status={dbStatus} /> {dbStatus === 'green' && dbNames.length > 0 ? `已连接 ${dbNames.join(', ')}` : dbStatus === 'red' ? '未连接' : dbStatus === 'yellow' ? '已连接(空)' : '检测中...'}</>}
+        color="blue"
+        expanded={expanded.database}
+        onToggle={() => toggleSection('database')}
+      />
+      {expanded.database && (
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">SQLite 数据库路径</label>
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <FolderPicker
+                  value={form.ebook_db_path || ''}
+                  onChange={(v) => updateForm({ ebook_db_path: v })}
+                  placeholder="选择数据库目录..."
+                />
+              </div>
+              <StatusDot status={dbStatus} />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDetectPaths}
+              disabled={dbDetecting}
+              className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {dbDetecting ? '检测中...' : '智能检测路径'}
+            </button>
+            <button
+              type="button"
+              onClick={checkDbConnectivity}
+              className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600"
+            >
+              重新检测连接
+            </button>
+          </div>
+
+          {detectedPaths.length > 0 && (
+            <div className="text-xs text-gray-500 space-y-1">
+              <span className="font-medium">检测到的路径:</span>
+              {detectedPaths.map((p, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => updateForm({ ebook_db_path: p })}
+                  className={`block w-full text-left px-2 py-1 rounded hover:bg-blue-50 ${p === form.ebook_db_path ? 'bg-blue-50 text-blue-700' : ''}`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* ============ 下载 ============ */}
+      <SectionHeader
+        title="下载"
+        summary={<><StatusDot status={form.download_dir && form.finished_dir ? 'green' : 'yellow'} /> {form.download_dir && form.finished_dir ? '配置完成' : '请设置下载目录和完成目录'}</>}
+        color="green"
+        expanded={expanded.download}
+        onToggle={() => toggleSection('download')}
+      />
+      {expanded.download && (
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">下载目录 (PDF 临时存放)</label>
+            <FolderPicker
+              value={form.download_dir || ''}
+              onChange={(v) => updateForm({ download_dir: v })}
+              placeholder="下载临时目录..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">完成目录 (最终输出)</label>
+            <FolderPicker
+              value={form.finished_dir || ''}
+              onChange={(v) => updateForm({ finished_dir: v })}
+              placeholder="完成输出目录..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Anna's Archive 会员密钥
+            </label>
+            <input
+              type="text"
+              value={form.aa_membership_key || ''}
+              onChange={(e) => updateForm({ aa_membership_key: e.target.value })}
+              placeholder="AA 会员密钥..."
+              spellCheck={false}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="border-t border-gray-200 pt-3">
+            <span className="text-xs font-medium text-gray-600">Z-Library 账户</span>
+            <div className="grid grid-cols-2 gap-2 mt-1.5">
+              <input
+                type="text"
+                value={form.zlib_email || ''}
+                onChange={(e) => updateForm({ zlib_email: e.target.value })}
+                placeholder="邮箱"
+                spellCheck={false}
+                className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <input
+                type="password"
+                value={form.zlib_password || ''}
+                onChange={(e) => updateForm({ zlib_password: e.target.value })}
+                placeholder="密码"
+                className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={handleZlibCheck}
+                disabled={zlibChecking}
+                className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {zlibChecking ? '检测中...' : '检测连通性'}
+              </button>
+              {zlibConnected && (
+                <span className="text-xs text-green-600 font-medium">已连接</span>
+              )}
+              {zlibMsg && !zlibConnected && (
+                <span className="text-xs text-red-500">{zlibMsg}</span>
+              )}
+            </div>
+            {zlibMsg && zlibConnected && (
+              <p className="text-xs mt-1.5 text-green-600">{zlibMsg}</p>
+            )}
+          </div>
+
+          <div className="border-t border-gray-200 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-600">FlareSolverr</span>
+              <StatusDot status={flareChecking ? 'yellow' : flareRunning ? 'green' : flareInstalled ? 'yellow' : 'red'} />
+            </div>
+            {flareChecking ? (
+              <span className="text-xs text-gray-400">检测中...</span>
+            ) : flareInstalling ? (
+              <div className="space-y-1.5">
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${flareProgress}%` }} />
+                </div>
+                <span className="text-xs text-blue-600">{flareStatusText}</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-600">
+                    {flareRunning ? '运行中' : flareInstalled ? '已安装 (未启动)' : '未安装'}
+                  </span>
+                  <span className="text-xs text-gray-400">{flareStatusText}</span>
+                </div>
+                {flareInstallFailed && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2 space-y-1">
+                    <p className="text-xs text-yellow-800 font-medium">手动安装指引：</p>
+                    <p className="text-xs text-yellow-700">
+                      从{' '}
+                      <a href="https://github.com/FlareSolverr/FlareSolverr/releases" target="_blank" rel="noreferrer" className="text-blue-600 underline hover:text-blue-800">
+                        GitHub Releases
+                      </a>
+                      {' '}下载 <code className="bg-yellow-100 px-1 rounded">flaresolverr_windows_x64.zip</code>，
+                      解压后将 <code className="bg-yellow-100 px-1 rounded">flaresolverr.exe</code> 放到
+                      <code className="bg-yellow-100 px-1 rounded">tools/flaresolverr/</code> 目录下
+                    </p>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  {!flareRunning && !flareInstalled && (
+                    <button
+                      type="button"
+                      onClick={handleInstallFlare}
+                      className="px-3 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-700"
+                    >
+                      一键安装
+                    </button>
+                  )}
+                  {!flareRunning && flareInstalled && (
+                    <button
+                      type="button"
+                      onClick={handleStartFlare}
+                      className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      启动
+                    </button>
+                  )}
+                  {flareRunning && (
+                    <button
+                      type="button"
+                      onClick={handleStopFlare}
+                      className="px-3 py-1.5 text-xs rounded bg-red-500 text-white hover:bg-red-600"
+                    >
+                      停止
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={checkFlare}
+                    disabled={flareChecking}
+                    className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 disabled:opacity-50"
+                  >
+                    重新检测
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ============ 网络代理 ============ */}
+      <SectionHeader
+        title="网络代理"
+        summary={<><StatusDot status={aaProxyStatus} /> AA · <StatusDot status={zlProxyStatus} /> ZL{form.http_proxy ? ` · ${form.http_proxy}` : ''}</>}
+        color="purple"
+        expanded={expanded.proxy}
+        onToggle={() => toggleSection('proxy')}
+      />
+      {expanded.proxy && (
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">HTTP 代理地址（可选）</label>
+            <input
+              type="text"
+              value={form.http_proxy || ''}
+              onChange={(e) => updateForm({ http_proxy: e.target.value })}
+              placeholder="http://127.0.0.1:10809"
+              spellCheck={false}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCheckProxy}
+              disabled={proxyChecking}
+              className="px-3 py-1.5 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+            >
+              {proxyChecking ? '检测中...' : '检测代理'}
+            </button>
+            <StatusDot status={proxyStatus} />
+            {proxyMsg && <span className="text-xs text-gray-500">{proxyMsg}</span>}
+          </div>
+
+          <div className="border-t border-gray-200 pt-3">
+            <span className="text-xs font-medium text-gray-600">源站连通性</span>
+            <div className="flex items-center gap-4 mt-2">
+              <div className="flex items-center gap-1.5">
+                <StatusDot status={aaProxyStatus} />
+                <span className="text-xs text-gray-500">Anna's Archive</span>
+                {aaProxyDetail && <span className="text-xs text-gray-400">({aaProxyDetail})</span>}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <StatusDot status={zlProxyStatus} />
+                <span className="text-xs text-gray-500">Z-Library</span>
+                {zlProxyDetail && <span className="text-xs text-gray-400">({zlProxyDetail})</span>}
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckProxySources}
+                className="px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
+              >
+                检测
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ OCR ============ */}
+      <SectionHeader
+        title="OCR"
+        summary={<><StatusDot status={ocrStatus} /> {ocrStatus === 'green' ? (ocrMsg.includes('已安装') ? ocrMsg : `已安装 ${ocrMsg}`) : ocrStatus === 'red' ? '未安装' : '未检测'}</>}
+        color="orange"
+        expanded={expanded.ocr}
+        onToggle={() => toggleSection('ocr')}
+      />
+      {expanded.ocr && (
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">OCRmyPDF 状态</label>
+            <div className="flex items-center gap-2">
+              <StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : 'red'} />
+              <span className="text-xs text-gray-500">
+                {ocrEngines['ocrmypdf']?.msg || '点击检测'}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleDetectOcrEngine('ocrmypdf')}
+                className="px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
+              >
+                检测
+              </button>
+              <button
+                type="button"
+                onClick={() => handleInstallOcrEngine('ocrmypdf')}
+                disabled={ocrEngines['ocrmypdf']?.installing}
+                className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+              >
+                {ocrEngines['ocrmypdf']?.installing ? '安装中...' : '一键安装'}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 pt-3">
+            <span className="text-xs font-medium text-gray-600">OCR 引擎</span>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {OCR_ENGINES.map((eng) => {
+                const info = ocrEngines[eng.key]
+                const isSelected = form.ocr_engine === eng.key
+                return (
+                  <div
+                    key={eng.key}
+                    className={`rounded border p-2.5 ${isSelected ? 'border-orange-400 bg-orange-50' : 'border-gray-200 bg-white'}`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-700">{eng.name}</span>
+                      <div className="flex items-center gap-1">
+                        <StatusDot status={info?.installed ? 'green' : info?.msg ? 'red' : null} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-2">{eng.desc}</p>
+                    {info?.msg && (
+                      <p className={`text-xs mb-1.5 ${info.installed ? 'text-green-600' : 'text-red-500'}`}>
+                        {info.msg}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleDetectOcrEngine(eng.key)}
+                        className="px-2 py-0.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
+                      >
+                        检测
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInstallOcrEngine(eng.key)}
+                        disabled={info?.installing}
+                        className="px-2 py-0.5 text-xs rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+                      >
+                        {info?.installing ? '安装中...' : '安装'}
+                      </button>
+                      {eng.key === form.ocr_engine ? (
+                        <span className="text-xs text-orange-600 font-medium ml-auto">当前</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => updateForm({ ocr_engine: eng.key })}
+                          className="px-2 py-0.5 text-xs rounded text-orange-600 hover:bg-orange-50 ml-auto"
+                        >
+                          选用
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 pt-2">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">语言</label>
+              <select
+                value={form.ocr_languages || 'chi_sim+eng'}
+                onChange={(e) => updateForm({ ocr_languages: e.target.value })}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="chi_sim+eng">chi_sim+eng</option>
+                <option value="chi_sim">chi_sim</option>
+                <option value="eng">eng</option>
+                <option value="chi_sim+eng+jpn">chi_sim+eng+jpn</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">并行线程</label>
+              <select
+                value={form.ocr_jobs ?? 1}
+                onChange={(e) => updateForm({ ocr_jobs: parseInt(e.target.value) || 1 })}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={4}>4</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">超时 (秒)</label>
+              <input
+                type="number"
+                value={form.ocr_timeout ?? 1800}
+                onChange={(e) => updateForm({ ocr_timeout: parseInt(e.target.value) || 1800 })}
+                min={60}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ 书签 ============ */}
+      <SectionHeader
+        title="书签"
+        summary="目录提取与PDF书签处理 (开发中)"
+        color="gray"
+        expanded={expanded.bookmarks}
+        onToggle={() => toggleSection('bookmarks')}
+      />
+      {expanded.bookmarks && (
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
+          <p className="text-xs text-gray-400 text-center py-4">
+            书签处理功能开发中，敬请期待...
+          </p>
+        </div>
+      )}
+
+      {/* ============ 保存按钮 ============ */}
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
+        >
+          {saving ? '保存中...' : '保存设置'}
+        </button>
+        <button
+          type="button"
+          onClick={handleCheckUpdate}
+          disabled={updateChecking}
+          className="px-5 py-2 text-sm rounded border border-blue-300 bg-white text-blue-600 hover:bg-blue-50 disabled:opacity-50 font-medium"
+        >
+          {updateChecking ? '检测中...' : '检查更新'}
+        </button>
+        {saveMsg && (
+          <span className={`text-xs ${saveMsg.includes('成功') ? 'text-green-600' : 'text-red-500'}`}>
+            {saveMsg}
+          </span>
+        )}
+        {updateResult && (
+          <span className={`text-xs ${updateResult.includes('失败') ? 'text-red-500' : updateResult.includes('新版本') ? 'text-blue-600' : 'text-green-600'}`}>
+            {updateResult}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}

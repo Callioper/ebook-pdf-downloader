@@ -1,0 +1,22 @@
+{
+  "host": "0.0.0.0",
+  "port": 8000,
+  "download_dir": "",
+  "finished_dir": "",
+  "tmp_dir": "",
+  "stacks_base_url": "http://localhost:7788",
+  "zfile_base_url": "http://192.168.0.7:32771",
+  "zfile_external_url": "",
+  "zfile_storage_key": "1",
+  "http_proxy": "",
+  "ocr_jobs": 4,
+  "ocr_languages": "chi_sim+eng",
+  "ocr_timeout": 7200,
+  "nlc_max_workers": 5,
+  "ebook_data_geter_path": "",
+  "ebook_db_path": "",
+  "zlib_email": "",
+  "zlib_password": "",
+  "aa_membership_key": "",
+  "ocr_engine": "tesseract"
+}

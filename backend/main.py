@@ -1,0 +1,187 @@
+import asyncio
+import logging
+import os
+import subprocess
+import sys
+import threading
+from pathlib import Path
+from typing import Optional
+
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from config import init_config, get_config
+from api.search import router as search_router
+from api.tasks import router as tasks_router
+from api.ws import router as ws_router
+from search_engine import search_engine
+from task_store import task_store
+from version import VERSION
+from engine.flaresolverr import stop_flaresolverr
+
+logger = logging.getLogger("book-downloader")
+_edge_process: Optional[subprocess.Popen] = None
+
+
+def get_frontend_dir() -> Optional[str]:
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = str(Path(__file__).resolve().parent.parent)
+
+    candidates = [
+        os.path.join(base, "frontend", "dist"),
+        os.path.join(base, "..", "frontend", "dist"),
+        os.path.join(os.path.dirname(base), "frontend", "dist"),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return os.path.normpath(c)
+    return None
+
+
+app = FastAPI(
+    title="Book Downloader",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(search_router)
+app.include_router(tasks_router)
+app.include_router(ws_router)
+
+
+@app.get("/api/v1/health")
+async def health():
+    return {"ok": True, "status": "running"}
+
+
+@app.post("/api/v1/shutdown")
+async def shutdown():
+    def _do_shutdown():
+        import time as _time
+        _time.sleep(0.3)
+        try:
+            stop_flaresolverr()
+        except Exception:
+            pass
+        os._exit(0)
+
+    threading.Thread(target=_do_shutdown, daemon=True).start()
+    return {"ok": True, "message": "shutting down"}
+
+
+frontend_dir = get_frontend_dir()
+
+if frontend_dir and os.path.isdir(frontend_dir):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str = ""):
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+        return JSONResponse({"error": "SPA not found"}, status_code=404)
+
+    @app.get("/")
+    async def serve_root():
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+        return JSONResponse({"app": "Book Downloader API"}, status_code=200)
+else:
+    @app.get("/")
+    async def serve_root():
+        return JSONResponse({"app": "Book Downloader API"}, status_code=200)
+
+
+def main():
+    config = init_config()
+    host = config.get("host", "0.0.0.0")
+    port = config.get("port", 8000)
+
+    db_path = config.get("ebook_db_path", "")
+    if db_path:
+        search_engine.set_db_dir(db_path)
+
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        reload=False,
+        log_level="info",
+    )
+
+
+if __name__ == "__main__":
+    import time
+    import webbrowser
+    import urllib.request
+
+    if "--no-browser" in sys.argv:
+        main()
+    else:
+        config_data = init_config()
+        port = config_data.get("port", 8000)
+
+        server_thread = threading.Thread(target=main, daemon=True)
+        server_thread.start()
+
+        url = f"http://localhost:{port}"
+        print(f"\n  Book Downloader: {url}\n")
+
+        # Wait for server
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"{url}/api/v1/health", timeout=0.5)
+                break
+            except Exception:
+                time.sleep(0.1)
+
+        # Try Edge app mode first
+        opened = False
+        for edge_path in [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]:
+            if os.path.exists(edge_path):
+                try:
+                    _edge_process = subprocess.Popen(
+                        [edge_path, f"--app={url}", "--new-window", "--window-size=1200,800"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    opened = True
+                    break
+                except Exception:
+                    pass
+
+        if not opened:
+            webbrowser.open(url)
+
+        if _edge_process:
+            def _poll_edge():
+                while _edge_process is not None and _edge_process.poll() is None:
+                    time.sleep(2)
+                stop_flaresolverr()
+                os._exit(0)
+
+            threading.Thread(target=_poll_edge, daemon=True).start()
+
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+            stop_flaresolverr()
