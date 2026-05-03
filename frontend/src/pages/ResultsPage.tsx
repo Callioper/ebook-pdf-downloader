@@ -34,6 +34,8 @@ export default function ResultsPage() {
         authors: book.author ? [book.author] : [],
         publisher: book.publisher || (book as any).publisher_ss || '',
       })
+      // Immediately start the task after creation
+      await axios.post(`${API_BASE}/tasks/${task.task_id}/start`)
       navigate(`/tasks/${task.task_id}`)
     } catch (e: any) {
       alert('创建任务失败: ' + e.message)
