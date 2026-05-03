@@ -178,15 +178,27 @@ async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "", task_id
     dl_url = None
 
     # Pattern A: Extract download link directly from MD5 page HTML
+    # AA uses various patterns for download links:
     for p in [
-        r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*\.(?:pdf|epub|mobi)[^"]*)"',
-        r'href="(https?://[^"]*\.(?:pdf|epub|mobi)\?[^"]*)"',
+        # Direct PDF/EPUB/MOBI links
+        r'href="(https?://[^"]*\.(?:pdf|epub|mobi)(?:\?[^"]*)?)"',
+        # AA download path (/d/ or /dl/ or /get/)
+        r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*)"',
+        # AA's own CDN/static links with md5
         r'href="(https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*)"',
-        r'data-(?:url|file|download)="(https?://[^"]*)"',
+        # Data attributes with URLs
+        r'data-(?:url|file|download|href)="(https?://[^"]*)"',
+        # Slow download links (common in AA)
+        r'href="(/d/[a-f0-9]{32})"',
+        # Onclick with window.open
+        r"onclick=[\"']window\.open\(['\"]([^\"']+)['\"]",
     ]:
         m = re.search(p, md5_html)
         if m:
             dl_url = m.group(1)
+            # Make relative URLs absolute
+            if dl_url.startswith("/"):
+                dl_url = f"https://annas-archive.gd{dl_url}"
             break
 
     # Pattern B: /d/{md5} redirect — fetch through FlareSolverr for Cloudflare bypass
@@ -274,14 +286,44 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
     title = report.get("title", "")
     downloaded = False
 
+    # === Ensure FlareSolverr is running for AA access (Cloudflare bypass) ===
+    flaresolverr_running = False
+    try:
+        from engine.flaresolverr import check_flaresolverr, start_flaresolverr
+        if await check_flaresolverr(config):
+            flaresolverr_running = True
+        else:
+            task_store.add_log(task_id, "FlareSolverr not running, attempting to start...")
+            started, msg = await start_flaresolverr(config)
+            if started:
+                flaresolverr_running = True
+                task_store.add_log(task_id, "FlareSolverr started successfully")
+            else:
+                task_store.add_log(task_id, f"FlareSolverr start failed: {msg}")
+    except ImportError:
+        task_store.add_log(task_id, "FlareSolverr module not available")
+    except Exception as e:
+        task_store.add_log(task_id, f"FlareSolverr check error: {e}")
+
     # === Method 1: Anna's Archive (search by SS code → MD5 → download) ===
     if ss_code:
-        task_store.add_log(task_id, f"Trying Anna's Archive (SS:{ss_code})...")
+        task_store.add_log(task_id, f"Trying Anna's Archive...")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 30})
-        filepath = await _download_from_aa(ss_code, report["tmp_dir"], proxy, task_id)
-        if filepath:
-            task_store.add_log(task_id, f"Downloaded from Anna's Archive: {os.path.basename(filepath)}")
-            report["download_path"] = filepath
+        # Try searching by SS code first, then by ISBN if available
+        aa_filepath = None
+        for search_query in [ss_code, isbn] if isbn else [ss_code]:
+            if search_query and search_query == ss_code:
+                task_store.add_log(task_id, f"AA search by SS: {ss_code}")
+            elif search_query and search_query == isbn:
+                task_store.add_log(task_id, f"AA search by ISBN: {isbn}")
+            else:
+                continue
+            aa_filepath = await _download_from_aa(search_query, report["tmp_dir"], proxy, task_id)
+            if aa_filepath:
+                break
+        if aa_filepath:
+            task_store.add_log(task_id, f"Downloaded from Anna's Archive: {os.path.basename(aa_filepath)}")
+            report["download_path"] = aa_filepath
             report["download_source"] = "annas_archive"
             downloaded = True
         else:
@@ -310,9 +352,17 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                         valid = False
                         for f in saved_files:
                             if f.stat().st_size > 1024:
-                                valid = True
-                                report["download_path"] = str(f)
-                                break
+                                # Validate PDF magic bytes when extension is .pdf
+                                if f.suffix.lower() == ".pdf":
+                                    with open(f, "rb") as _fh:
+                                        if _fh.read(4) == b"%PDF":
+                                            valid = True
+                                            report["download_path"] = str(f)
+                                            break
+                                else:
+                                    valid = True
+                                    report["download_path"] = str(f)
+                                    break
                         if valid:
                             task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
                             report["download_source"] = "zlibrary"
