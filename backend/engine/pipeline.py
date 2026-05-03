@@ -111,6 +111,86 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
     return report
 
 
+async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Optional[str]:
+    """Search Anna's Archive by SS code and download the PDF. Returns the file path or None."""
+    import requests as _req
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    kwargs = {"timeout": 15, "headers": headers, "verify": False}
+    if proxy:
+        kwargs["proxies"] = {"http": proxy, "https": proxy}
+
+    # Step 1: Search AA by SS code → get MD5
+    try:
+        resp = _req.get(f"https://annas-archive.gd/search?q={ss_code}", **kwargs)
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+        # Extract first MD5 from search results
+        md5_m = re.search(r'href="/md5/([a-f0-9]{32})"', html)
+        if not md5_m:
+            return None
+        md5 = md5_m.group(1)
+    except Exception as e:
+        return None
+
+    # Step 2: Visit MD5 page to extract download link
+    try:
+        resp = _req.get(f"https://annas-archive.gd/md5/{md5}", **kwargs)
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+
+        # Try various download link patterns on AA pages
+        dl_url = None
+        # Pattern 1: direct download link from /d/ redirect page
+        dl_m = re.search(r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*)"', html)
+        if dl_m:
+            dl_url = dl_m.group(1)
+        # Pattern 2: data-attribute with download URL
+        if not dl_url:
+            dl_m = re.search(r'data-(?:url|file|download)="(https?://[^"]*)"', html)
+            if dl_m:
+                dl_url = dl_m.group(1)
+        # Pattern 3: download through AA's own proxy
+        if not dl_url:
+            dl_m = re.search(r'https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*\.(?:pdf|epub|mobi)', html)
+            if dl_m:
+                dl_url = dl_m.group(0)
+        # Pattern 4: /d/{md5} redirect page
+        if not dl_url:
+            try:
+                resp2 = _req.get(f"https://annas-archive.gd/d/{md5}", allow_redirects=False, **kwargs)
+                if resp2.status_code in (301, 302, 303, 307) and resp2.headers.get("Location"):
+                    dl_url = resp2.headers["Location"]
+            except Exception:
+                pass
+
+        if not dl_url:
+            return None
+
+        # Step 3: Download the file
+        file_resp = _req.get(dl_url, stream=True, timeout=60, **kwargs)
+        file_resp.raise_for_status()
+
+        # Determine filename from Content-Disposition or URL
+        import urllib.parse as _up
+        fname = f"{md5}.pdf"
+        cd = file_resp.headers.get("Content-Disposition", "")
+        if cd and "filename=" in cd:
+            fname = cd.split("filename=")[-1].strip("\"' ")
+        elif dl_url:
+            fname = os.path.basename(_up.urlparse(dl_url).path) or fname
+
+        filepath = os.path.join(tmp_dir, fname)
+        with open(filepath, "wb") as f:
+            for chunk in file_resp.iter_content(chunk_size=65536):
+                if chunk:
+                    f.write(chunk)
+        return filepath if os.path.getsize(filepath) > 1024 else None
+    except Exception:
+        return None
+
+
 async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     task_store.add_log(task_id, "Step 3/7: Downloading book pages...")
     await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 0})
@@ -125,25 +205,57 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
         report["tmp_dir"] = os.path.join(os.path.dirname(__file__), "tmp", task_id)
         os.makedirs(report["tmp_dir"], exist_ok=True)
 
-    source = report.get("source", "DX_6.0")
-    book_id = report.get("book_id", "")
     ss_code = report.get("ss_code", "")
+    isbn = report.get("isbn", "")
+    proxy = config.get("http_proxy", "")
+    title = report.get("title", "")
+    downloaded = False
 
-    if not book_id:
-        task_store.add_log(task_id, "No book_id, searching with SS code...")
-        book_id = ss_code
+    # === Method 1: Anna's Archive (search by SS code → MD5 → download) ===
+    if ss_code:
+        task_store.add_log(task_id, f"Trying Anna's Archive (SS:{ss_code})...")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 30})
+        filepath = await _download_from_aa(ss_code, report["tmp_dir"], proxy)
+        if filepath:
+            task_store.add_log(task_id, f"Downloaded from Anna's Archive: {os.path.basename(filepath)}")
+            report["download_path"] = filepath
+            report["download_source"] = "annas_archive"
+            downloaded = True
+        else:
+            task_store.add_log(task_id, "Anna's Archive download failed, trying next method...")
 
-    task_store.add_log(task_id, f"Downloading from source: {source}")
-    await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 20})
+    # === Method 2: Z-Library (search by ISBN → download via eAPI) ===
+    if not downloaded and isbn:
+        task_store.add_log(task_id, f"Trying Z-Library (ISBN:{isbn})...")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
+        try:
+            from engine.zlib_downloader import ZLibDownloader
+            dl = ZLibDownloader(config)
+            result = await dl.zlib_search(isbn, page=1, limit=5)
+            items = result.get("books") or result.get("results") or result.get("data") or []
+            if isinstance(items, dict):
+                items = items.get("books", items.get("results", []))
+            for item in (items if isinstance(items, list) else []):
+                book_id = str(item.get("id", ""))
+                book_hash = item.get("hash", "")
+                if book_id and book_hash:
+                    ok = await dl.zlib_download_book(book_id, book_hash, report["tmp_dir"])
+                    if ok:
+                        task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
+                        report["download_source"] = "zlibrary"
+                        downloaded = True
+                        break
+                    else:
+                        task_store.add_log(task_id, f"Z-Library download attempt failed for book {book_id}")
+        except Exception as e:
+            task_store.add_log(task_id, f"Z-Library download error: {e}")
 
-    try:
-        from engine.flaresolverr import download_via_flaresolverr
-        from engine.zlib_downloader import ZLibDownloader
-        dl = ZLibDownloader(config)
-        await dl.download_file(task_id, book_id, report["tmp_dir"])
-    except ImportError:
-        task_store.add_log(task_id, "ZLib downloader not available")
-        report["download_note"] = "ZLib downloader not available - manual download required"
+    if not downloaded:
+        task_store.add_log(task_id, "All download methods failed")
+        report["download_note"] = "download failed"
+
+    await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 100})
+    return report
 
 
 async def _step_convert_pdf(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
