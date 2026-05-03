@@ -5,6 +5,7 @@
 # 注意：7步流水线，支持取消和错误处理
 
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,8 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 from config import get_config
 from task_store import task_store, STATUS_COMPLETED, STATUS_RUNNING, STATUS_CANCELLED, STATUS_FAILED
@@ -137,53 +140,72 @@ async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> 
 async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Optional[str]:
     """Search Anna's Archive by SS code and download the PDF. Returns the file path or None.
     Uses FlareSolverr for Cloudflare bypass when available."""
+    import requests as _req
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
     # Step 1: Search AA by SS code → get MD5
-    html = await _get_page_with_flare(f"https://annas-archive.gd/search?q={ss_code}", proxy)
+    search_url = f"https://annas-archive.gd/search?q={ss_code}"
+    html = await _get_page_with_flare(search_url, proxy)
     if not html:
+        logger.warning(f"AA download: failed to fetch search page for SS:{ss_code}")
+        return None
+    if "Cloudflare" in html or "cf-browser-verification" in html:
+        logger.warning("AA download: Cloudflare challenge page returned")
         return None
     md5_m = re.search(r'href="/md5/([a-f0-9]{32})"', html)
     if not md5_m:
+        logger.warning(f"AA download: no MD5 found in search results for SS:{ss_code}")
         return None
     md5 = md5_m.group(1)
 
     # Step 2: Visit MD5 page → extract download link
-    md5_html = await _get_page_with_flare(f"https://annas-archive.gd/md5/{md5}", proxy, timeout=30)
+    md5_url = f"https://annas-archive.gd/md5/{md5}"
+    md5_html = await _get_page_with_flare(md5_url, proxy, timeout=30)
     if not md5_html:
+        logger.warning(f"AA download: failed to fetch MD5 page {md5}")
         return None
 
     dl_url = None
-    # Pattern 1: /d/{md5} redirect via direct check
-    import requests as _req
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    kwargs = {"timeout": 15, "headers": headers, "verify": False, "allow_redirects": False}
-    if proxy:
-        kwargs["proxies"] = {"http": proxy, "https": proxy}
-    try:
-        resp = _req.get(f"https://annas-archive.gd/d/{md5}", **kwargs)
-        if resp.status_code in (301, 302, 303, 307):
-            dl_url = resp.headers.get("Location")
-    except Exception:
-        pass
 
-    # Pattern 2: direct file link in HTML
-    if not dl_url:
-        for p in [
-            r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*\.(?:pdf|epub|mobi)[^"]*)"',
-            r'href="(https?://[^"]*\.(?:pdf|epub|mobi)\?[^"]*)"',
-            r'href="(https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*)"',
-        ]:
-            m = re.search(p, md5_html)
-            if m:
-                dl_url = m.group(1)
-                break
-
-    # Pattern 3: data attributes
-    if not dl_url:
-        m = re.search(r'data-(?:url|file|download)="(https?://[^"]*)"', md5_html)
+    # Pattern A: Extract download link directly from MD5 page HTML
+    for p in [
+        r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*\.(?:pdf|epub|mobi)[^"]*)"',
+        r'href="(https?://[^"]*\.(?:pdf|epub|mobi)\?[^"]*)"',
+        r'href="(https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*)"',
+        r'data-(?:url|file|download)="(https?://[^"]*)"',
+    ]:
+        m = re.search(p, md5_html)
         if m:
             dl_url = m.group(1)
+            break
+
+    # Pattern B: /d/{md5} redirect — fetch through FlareSolverr for Cloudflare bypass
+    if not dl_url:
+        d_url = f"https://annas-archive.gd/d/{md5}"
+        d_html = await _get_page_with_flare(d_url, proxy, timeout=15)
+        if d_html:
+            for p in [
+                r'href="(https?://[^"]*\.(?:pdf|epub|mobi)[^"]*)"',
+                r'<meta[^>]*url=([^"\']+)',
+                r'window\.location\s*=\s*["\']([^"\']+)',
+            ]:
+                m = re.search(p, d_html)
+                if m:
+                    dl_url = m.group(1)
+                    break
+            if not dl_url:
+                try:
+                    d_kwargs = {"timeout": 15, "headers": headers, "verify": False, "allow_redirects": False}
+                    if proxy:
+                        d_kwargs["proxies"] = {"http": proxy, "https": proxy}
+                    resp = _req.get(d_url, **d_kwargs)
+                    if resp.status_code in (301, 302, 303, 307):
+                        dl_url = resp.headers.get("Location")
+                except Exception:
+                    pass
 
     if not dl_url:
+        logger.warning(f"AA download: no download link found for MD5:{md5}")
         return None
 
     # Step 3: Download the file
@@ -210,10 +232,12 @@ async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Opti
                 if chunk:
                     f.write(chunk)
 
-        if os.path.getsize(filepath) > 1024:
+        size = os.path.getsize(filepath)
+        if size > 1024:
             return filepath
-    except Exception:
-        pass
+        logger.warning(f"AA download: file too small ({size} bytes) for {md5}")
+    except Exception as e:
+        logger.warning(f"AA download: file download failed for {md5}: {e}")
     return None
 
 
@@ -258,32 +282,33 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
             from engine.zlib_downloader import ZLibDownloader
             dl = ZLibDownloader(config)
             result = await dl.zlib_search(isbn, page=1, limit=5)
-            items = result.get("books") or result.get("results") or result.get("data") or []
-            if isinstance(items, dict):
-                items = items.get("books", items.get("results", []))
-                for item in (items if isinstance(items, list) else []):
-                    book_id = str(item.get("id", ""))
-                    book_hash = item.get("hash", "")
-                    if book_id and book_hash:
-                        ok = await dl.zlib_download_book(book_id, book_hash, report["tmp_dir"])
-                        if ok:
-                            # Verify the file was actually saved and has content
-                            saved_files = list(Path(report["tmp_dir"]).glob(f"{book_id}.*"))
-                            valid = False
-                            for f in saved_files:
-                                if f.stat().st_size > 1024:
-                                    valid = True
-                                    report["download_path"] = str(f)
-                                    break
-                            if valid:
-                                task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
-                                report["download_source"] = "zlibrary"
-                                downloaded = True
+            raw_items = result.get("books") or result.get("results") or result.get("data") or []
+            if isinstance(raw_items, dict):
+                raw_items = raw_items.get("books", raw_items.get("results", []))
+            # raw_items should now be a list
+            for item in (raw_items if isinstance(raw_items, list) else []):
+                book_id = str(item.get("id", ""))
+                book_hash = item.get("hash") or item.get("book_hash") or ""
+                task_store.add_log(task_id, f"ZL result: id={book_id}, hash={'yes' if book_hash else 'no'}")
+                if book_id and book_hash:
+                    ok = await dl.zlib_download_book(book_id, book_hash, report["tmp_dir"])
+                    if ok:
+                        saved_files = list(Path(report["tmp_dir"]).glob(f"{book_id}.*"))
+                        valid = False
+                        for f in saved_files:
+                            if f.stat().st_size > 1024:
+                                valid = True
+                                report["download_path"] = str(f)
                                 break
-                            else:
-                                task_store.add_log(task_id, f"Z-Library file for {book_id} is empty or invalid")
+                        if valid:
+                            task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
+                            report["download_source"] = "zlibrary"
+                            downloaded = True
+                            break
                         else:
-                            task_store.add_log(task_id, f"Z-Library download attempt failed for book {book_id}")
+                            task_store.add_log(task_id, f"Z-Library file for {book_id} is empty or invalid")
+                    else:
+                        task_store.add_log(task_id, f"Z-Library download attempt failed for book {book_id}")
         except Exception as e:
             task_store.add_log(task_id, f"Z-Library download error: {e}")
 

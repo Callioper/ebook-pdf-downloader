@@ -290,7 +290,6 @@ async def download_via_flaresolverr(
 
 async def get_page_content(url: str, proxy: str = "") -> Optional[str]:
     flare_url = "http://localhost:8191/v1"
-    proxies = {"http": proxy, "https": proxy} if proxy else None
 
     try:
         payload = {
@@ -298,7 +297,8 @@ async def get_page_content(url: str, proxy: str = "") -> Optional[str]:
             "url": url,
             "maxTimeout": 30000,
         }
-        r = requests.post(flare_url, json=payload, timeout=40, proxies=proxies)
+        # IMPORTANT: no proxy for FlareSolverr localhost request
+        r = requests.post(flare_url, json=payload, timeout=40)
         if r.status_code == 200:
             data = r.json()
             if data.get("status") == "ok":
@@ -310,6 +310,7 @@ async def get_page_content(url: str, proxy: str = "") -> Optional[str]:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
+        proxies = {"http": proxy, "https": proxy} if proxy else None
         r = requests.get(url, headers=headers, timeout=15, proxies=proxies)
         if r.status_code == 200:
             return r.text
