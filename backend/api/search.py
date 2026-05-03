@@ -60,6 +60,8 @@ _flare_dl_state: Dict[str, Any] = {
     "status": "idle",
     "install_path": "",
 }
+# Persistent install path, survives _flare_dl_state resets
+_flare_last_install_path: str = ""
 
 
 def _flare_report_progress(block_count, block_size, total_size):
@@ -703,6 +705,37 @@ async def check_ocr(engine: str = Query(default="")):
         return {"ok": False, "engine": engine, "message": str(e)}
 
 
+def _pip_install_cmd() -> List[str]:
+    """Get the right command to run pip install, regardless of frozen status.
+    In frozen mode, sys.executable is the exe (BookDownloader.exe), and
+    'BookDownloader.exe -m pip install' would launch another BookDownloader instance.
+    Instead, find system python from PATH."""
+    python_cmd = sys.executable
+    if getattr(sys, 'frozen', False):
+        import shutil
+        for candidate in ["python", "python3", "py"]:
+            found = shutil.which(candidate)
+            if found:
+                python_cmd = found
+                break
+        else:
+            # No system python found — try common Windows locations
+            for candidate in [
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python314", "python.exe"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python313", "python.exe"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python312", "python.exe"),
+                r"C:\Python314\python.exe",
+                r"C:\Python313\python.exe",
+                r"C:\Python312\python.exe",
+                r"C:\Program Files\Python314\python.exe",
+                r"C:\Program Files\Python313\python.exe",
+            ]:
+                if os.path.exists(candidate):
+                    python_cmd = candidate
+                    break
+    return [python_cmd, "-m", "pip", "install", "--user"]
+
+
 @router.post("/install-ocr")
 async def install_ocr(body: InstallOCRRequest):
     engine = body.engine
@@ -764,34 +797,34 @@ async def install_ocr(body: InstallOCRRequest):
                 return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}。请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
         elif engine == "ocrmypdf":
             CREATE_NO_WINDOW = 0x08000000
+            cmd = _pip_install_cmd() + ["ocrmypdf"]
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "ocrmypdf", "--user"],
-                capture_output=True, text=True, timeout=300,
+                cmd, capture_output=True, text=True, timeout=300,
                 creationflags=CREATE_NO_WINDOW,
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "paddleocr":
             CREATE_NO_WINDOW = 0x08000000
+            cmd = _pip_install_cmd() + ["ocrmypdf-paddleocr"]
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "ocrmypdf-paddleocr", "--user"],
-                capture_output=True, text=True, timeout=300,
+                cmd, capture_output=True, text=True, timeout=300,
                 creationflags=CREATE_NO_WINDOW,
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "easyocr":
             CREATE_NO_WINDOW = 0x08000000
+            cmd = _pip_install_cmd() + ["ocrmypdf-easyocr"]
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "ocrmypdf-easyocr", "--user"],
-                capture_output=True, text=True, timeout=300,
+                cmd, capture_output=True, text=True, timeout=300,
                 creationflags=CREATE_NO_WINDOW,
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "appleocr":
             if sys.platform != "darwin":
                 return {"ok": False, "message": "AppleOCR 仅 macOS 支持"}
+            cmd = _pip_install_cmd() + ["appleocr"]
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "appleocr", "--user"],
-                capture_output=True, text=True, timeout=300
+                cmd, capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
         else:
@@ -811,6 +844,9 @@ async def install_flare(body: InstallFlareRequest):
             install_path = os.path.join(base_dir, "tools", "flaresolverr")
         else:
             install_path = custom_path
+
+        global _flare_last_install_path
+        _flare_last_install_path = install_path
 
         zip_path = os.path.join(install_path, "flaresolverr.zip")
         os.makedirs(install_path, exist_ok=True)
@@ -890,33 +926,40 @@ async def install_flare_complete():
     """Called by frontend after download done to finalize installation."""
     global _flare_dl_state
     try:
-        # Use the SAME path as install_flare (stored in _flare_dl_state)
-        install_path = _flare_dl_state.get("install_path", "")
+        # Use the SAME path as install_flare (try persistent storage first, fallback to state)
+        install_path = _flare_last_install_path or _flare_dl_state.get("install_path", "")
         if not install_path or not os.path.isdir(install_path):
-            # Fallback: tools directory
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             install_path = os.path.join(base_dir, "tools", "flaresolverr")
+            os.makedirs(install_path, exist_ok=True)
         zip_path = os.path.join(install_path, "flaresolverr.zip")
 
         if not os.path.exists(zip_path):
-            # Already cleaned up or never downloaded
-            # Check the nested flaresolverr/ subfolder path first
-            exe_path = os.path.join(install_path, "flaresolverr", "flaresolverr.exe")
-            if os.path.exists(exe_path):
-                return {"success": True, "path": os.path.abspath(exe_path)}
-            # Fallback: check direct path (legacy)
-            exe_path = os.path.join(install_path, "flaresolverr.exe")
-            if os.path.exists(exe_path):
-                return {"success": True, "path": os.path.abspath(exe_path)}
+            # Already cleaned up or never downloaded - check for already-extracted exe
+            for check in [
+                os.path.join(install_path, "flaresolverr", "flaresolverr.exe"),
+                os.path.join(install_path, "flaresolverr.exe"),
+            ]:
+                if os.path.exists(check):
+                    return {"success": True, "path": os.path.abspath(check)}
             return {"success": False, "error": "未找到下载文件，请重新尝试自动下载或手动安装"}
 
-        # The zip extracts to .../temp/book-downloader/flaresolverr/
-        # which already contains flaresolverr/ subfolder from the zip structure
-        extract_base = install_path
+        # Validate zip file
+        zip_size = os.path.getsize(zip_path)
+        if zip_size < 100000:  # too small to be a valid zip
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+            return {"success": False, "error": f"下载文件异常 (仅 {zip_size/1024:.0f} KB)，请重试"}
 
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_base)
+                # Validate before extracting
+                bad = zf.testzip()
+                if bad:
+                    return {"success": False, "error": f"下载文件损坏 (首个坏文件: {bad})，请重试"}
+                zf.extractall(install_path)
         except zipfile.BadZipFile:
             return {"success": False, "error": "下载文件损坏，请删除临时文件后重试"}
         except Exception as e:
