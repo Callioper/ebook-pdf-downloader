@@ -708,73 +708,84 @@ async def install_ocr(body: InstallOCRRequest):
     engine = body.engine
     try:
         if engine == "tesseract":
-            # Try auto-download and silent install from UB-Mannheim
+            # Try winget first (built-in on Win11), then fallback to download+install
             try:
-                import requests as _requests
-                # Get latest release info
-                api_url = "https://api.github.com/repos/UB-Mannheim/tesseract/releases/latest"
-                r = _requests.get(api_url, timeout=10, headers={"User-Agent": "book-downloader"}, verify=False)
-                if r.status_code == 200:
-                    assets = r.json().get("assets", [])
-                    # Find the 64-bit setup exe
-                    installer_url = ""
-                    for asset in assets:
-                        name = asset.get("name", "")
-                        if "w64" in name.lower() and name.lower().endswith(".exe") and "setup" in name.lower():
-                            installer_url = asset.get("browser_download_url", "")
-                            break
-                    if installer_url:
-                        tmp_dir = os.path.join(tempfile.gettempdir(), "book-downloader", "tesseract")
-                        os.makedirs(tmp_dir, exist_ok=True)
-                        installer_path = os.path.join(tmp_dir, os.path.basename(installer_url.split("?")[0]))
-                        # Download installer
-                        dl = _requests.get(installer_url, stream=True, timeout=120, verify=False)
-                        dl.raise_for_status()
-                        with open(installer_path, "wb") as f:
-                            for chunk in dl.iter_content(chunk_size=65536):
-                                if chunk:
-                                    f.write(chunk)
-                        # Run silent install with elevation (WinError 740 fix)
-                        try:
-                            import ctypes
-                            # ShellExecuteW with "runas" verb requests UAC elevation
-                            ret = ctypes.windll.shell32.ShellExecuteW(
-                                None, "runas", installer_path,
-                                "/S /D=C:\\Program Files\\Tesseract-OCR",
-                                None, 0
-                            )
-                            # ShellExecuteW returns >32 on success
-                            if ret > 32:
-                                import time as _t
-                                _t.sleep(5)  # give installer time to start
-                                os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
-                                return {"ok": True, "message": "Tesseract OCR 自动安装已启动（请确认 UAC 弹窗）"}
-                        except Exception:
-                            # Fallback: try subprocess runas
+                if os.name == "nt":
+                    # Method 1: winget
+                    try:
+                        result = subprocess.run(
+                            ["winget", "install", "--exact", "--id", "UB-Mannheim.TesseractOCR",
+                             "--silent", "--accept-package-agreements"],
+                            capture_output=True, text=True, timeout=60
+                        )
+                        if result.returncode == 0:
                             try:
-                                result = subprocess.run(
-                                    ["runas", "/user:Administrator", installer_path, "/S"],
-                                    capture_output=True, text=True, timeout=300
-                                )
+                                os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
                             except Exception:
                                 pass
-                        return {"ok": False, "message": f"自动安装需要管理员权限，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
-                return {"ok": False, "message": "无法获取最新 Tesseract 下载链接，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
+                            return {"ok": True, "message": "Tesseract OCR 安装成功（winget）"}
+                    except FileNotFoundError:
+                        pass  # winget not available, fall through
+
+                    # Method 2: Download from UB-Mannheim GitHub + ShellExecuteW runas
+                    import requests as _requests
+                    api_url = "https://api.github.com/repos/UB-Mannheim/tesseract/releases/latest"
+                    r = _requests.get(api_url, timeout=10, headers={"User-Agent": "book-downloader"}, verify=False)
+                    if r.status_code == 200:
+                        assets = r.json().get("assets", [])
+                        installer_url = ""
+                        for asset in assets:
+                            name = asset.get("name", "")
+                            if "w64" in name.lower() and name.lower().endswith(".exe") and "setup" in name.lower():
+                                installer_url = asset.get("browser_download_url", "")
+                                break
+                        if installer_url:
+                            tmp_dir = os.path.join(tempfile.gettempdir(), "book-downloader", "tesseract")
+                            os.makedirs(tmp_dir, exist_ok=True)
+                            installer_path = os.path.join(tmp_dir, os.path.basename(installer_url.split("?")[0]))
+                            dl = _requests.get(installer_url, stream=True, timeout=120, verify=False)
+                            dl.raise_for_status()
+                            with open(installer_path, "wb") as f:
+                                for chunk in dl.iter_content(chunk_size=65536):
+                                    if chunk:
+                                        f.write(chunk)
+                            import ctypes
+                            ret = ctypes.windll.shell32.ShellExecuteW(
+                                None, "runas", installer_path,
+                                "/S /D=C:\\Program Files\\Tesseract-OCR", None, 0
+                            )
+                            if ret > 32:
+                                import time as _t
+                                _t.sleep(5)
+                                os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
+                                return {"ok": True, "message": "Tesseract OCR 安装已启动（请确认 UAC 弹窗）"}
+                return {"ok": False, "message": "请手动安装 Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki"}
             except Exception as e:
-                return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
-        elif engine in ("ocrmypdf", "paddleocr", "easyocr"):
-            if getattr(sys, 'frozen', False):
-                tips = {
-                    "ocrmypdf": "pip install ocrmypdf",
-                    "paddleocr": "pip install ocrmypdf-paddleocr (详见 https://github.com/clefru/ocrmypdf-paddleocr)",
-                    "easyocr": "pip install ocrmypdf-easyocr (详见 https://github.com/ocrmypdf/OCRmyPDF-EasyOCR)",
-                }
-                return {"ok": False, "message": f"打包版不支持自动安装 {engine}。请从源码运行后手动安装: cd backend && {tips.get(engine, 'pip install ' + engine)}"}
+                return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}。请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
+        elif engine == "ocrmypdf":
+            CREATE_NO_WINDOW = 0x08000000
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", engine, "--user"],
-                capture_output=True, text=True, timeout=300
+                [sys.executable, "-m", "pip", "install", "ocrmypdf", "--user"],
+                capture_output=True, text=True, timeout=300,
+                creationflags=CREATE_NO_WINDOW,
             )
-            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
+            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
+        elif engine == "paddleocr":
+            CREATE_NO_WINDOW = 0x08000000
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "ocrmypdf-paddleocr", "--user"],
+                capture_output=True, text=True, timeout=300,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
+        elif engine == "easyocr":
+            CREATE_NO_WINDOW = 0x08000000
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "ocrmypdf-easyocr", "--user"],
+                capture_output=True, text=True, timeout=300,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "appleocr":
             if sys.platform != "darwin":
                 return {"ok": False, "message": "AppleOCR 仅 macOS 支持"}
@@ -879,9 +890,12 @@ async def install_flare_complete():
     """Called by frontend after download done to finalize installation."""
     global _flare_dl_state
     try:
-        # Use the SAME path as install_flare, not tempdir
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        install_path = os.path.join(base_dir, "tools", "flaresolverr")
+        # Use the SAME path as install_flare (stored in _flare_dl_state)
+        install_path = _flare_dl_state.get("install_path", "")
+        if not install_path or not os.path.isdir(install_path):
+            # Fallback: tools directory
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            install_path = os.path.join(base_dir, "tools", "flaresolverr")
         zip_path = os.path.join(install_path, "flaresolverr.zip")
 
         if not os.path.exists(zip_path):

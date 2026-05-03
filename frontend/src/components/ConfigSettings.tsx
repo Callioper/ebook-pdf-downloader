@@ -541,10 +541,11 @@ export default function ConfigSettings() {
     setFlareStatusText('准备下载...')
     setFlareInstallFailed(false)
     try {
+      const installPath = flareManualPath.trim() || ''
       const res = await fetch('/api/v1/install-flare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ install_path: '' }),
+        body: JSON.stringify({ install_path: installPath }),
       })
       const data = await res.json()
       if (!data.success) {
@@ -908,83 +909,41 @@ export default function ConfigSettings() {
                   </span>
                   <span className="text-xs text-gray-400">{flareStatusText}</span>
                 </div>
-                {flareInstallFailed && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2 space-y-1">
-                    <p className="text-xs text-yellow-800 font-medium">手动安装指引：</p>
-                    <p className="text-xs text-yellow-700">
-                      从{' '}
-                      <a href="https://github.com/FlareSolverr/FlareSolverr/releases" target="_blank" rel="noreferrer" className="text-blue-600 underline hover:text-blue-800">
-                        GitHub Releases
-                      </a>
-                      {' '}下载 <code className="bg-yellow-100 px-1 rounded">flaresolverr_windows_x64.zip</code>，
-                      解压后将 <code className="bg-yellow-100 px-1 rounded">flaresolverr.exe</code> 放到
-                      <code className="bg-yellow-100 px-1 rounded">tools/flaresolverr/</code> 目录下
-                    </p>
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <input
-                        type="text"
-                        value={flareManualPath}
-                        onChange={(e) => setFlareManualPath(e.target.value)}
-                        placeholder="或点击...选择 flaresolverr.exe 所在目录"
-                        spellCheck={false}
-                        className="flex-1 rounded border border-yellow-300 px-2 py-1 text-xs font-mono focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const res = await fetch('/api/v1/browse-folder')
-                            const data = await res.json()
-                            if (data.path) {
-                              setFlareManualPath(data.path)
-                            }
-                          } catch (e) { console.warn('[ConfigSettings] browse folder:', e) }
-                        }}
-                        className="px-2 py-1 text-xs rounded border border-yellow-300 bg-white hover:bg-yellow-50 text-yellow-700"
-                      >
-                        ...
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const path = flareManualPath.trim()
-                          if (!path) return
-                          try {
-                            const res = await fetch('/api/v1/configure-flare-path', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ path }),
-                            })
-                            const data = await res.json()
-                            if (data.success) {
-                              setFlareInstalled(true)
-                              setFlareInstallFailed(false)
-                              setFlareStatusText('目录配置成功')
-                            } else {
-                              setFlareStatusText('配置失败: ' + (data.error || ''))
-                            }
-                          } catch (e) {
-                            console.warn('[ConfigSettings] configure flare path:', e)
-                            setFlareStatusText('配置请求失败')
-                          }
-                        }}
-                        className="px-2 py-1 text-xs rounded bg-yellow-600 text-white hover:bg-yellow-700"
-                      >
-                        配置目录
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* Always-visible folder picker + install row */}
                 <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={flareManualPath}
+                    onChange={(e) => setFlareManualPath(e.target.value)}
+                    placeholder="选择 FlareSolverr 安装目录..."
+                    spellCheck={false}
+                    className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/v1/browse-folder')
+                        const data = await res.json()
+                        if (data.path) setFlareManualPath(data.path)
+                      } catch (e) { console.warn('[ConfigSettings] browse folder:', e) }
+                    }}
+                    className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
+                    title="选择安装目录..."
+                  >
+                    ...
+                  </button>
                   {!flareRunning && !flareInstalled && (
                     <button
                       type="button"
                       onClick={handleInstallFlare}
-                      className="px-3 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-700"
+                      className="px-3 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-700 shrink-0"
                     >
                       一键安装
                     </button>
                   )}
+                </div>
+                <div className="flex items-center gap-2">
                   {!flareRunning && flareInstalled && (
                     <button
                       type="button"
@@ -1012,6 +971,11 @@ export default function ConfigSettings() {
                     重新检测
                   </button>
                 </div>
+                {flareInstallFailed && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
+                    <p className="text-xs text-yellow-800">下载失败，请检查网络或重试</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
