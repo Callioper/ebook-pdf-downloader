@@ -670,25 +670,53 @@ async def check_ocr(engine: str = Query(default="")):
             result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 ver = result.stdout.split("\n")[0].strip()
-                # Strip "tesseract v" prefix -> "5.4.0.20240606"
                 for prefix in ["tesseract v", "tesseract ", "v"]:
                     if ver.startswith(prefix):
                         ver = ver[len(prefix):]
                         break
                 return {"ok": True, "engine": "tesseract", "version": ver}
             # Check common install paths (Tesseract may exist but not in PATH)
+            found_path = None
             for tess_path in [
                 r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files\Tesseract-OCR\program\tesseract.exe",
                 os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
                 os.path.expandvars(r"%ProgramFiles%\Tesseract-OCR\tesseract.exe"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\program\tesseract.exe"),
             ]:
                 if os.path.exists(tess_path):
-                    try:
-                        r = subprocess.run([tess_path, "--version"], capture_output=True, text=True, timeout=5)
-                        if r.returncode == 0:
-                            return {"ok": True, "engine": "tesseract", "version": r.stdout.split("\n")[0], "note": "已安装但不在PATH中"}
-                    except Exception:
-                        pass
+                    found_path = tess_path
+                    break
+            if not found_path:
+                # Walk common install dirs
+                for base_dir in [
+                    r"C:\Program Files\Tesseract-OCR",
+                    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR"),
+                ]:
+                    if os.path.isdir(base_dir):
+                        for root, dirs, files in os.walk(base_dir):
+                            for f in files:
+                                if f.lower() == "tesseract.exe":
+                                    found_path = os.path.join(root, f)
+                                    break
+                            if found_path:
+                                break
+                    if found_path:
+                        break
+            if found_path:
+                try:
+                    r = subprocess.run([found_path, "--version"], capture_output=True, text=True, timeout=5)
+                    if r.returncode == 0:
+                        # Add to PATH so subsequent calls work
+                        os.environ["PATH"] = os.path.dirname(found_path) + os.pathsep + os.environ.get("PATH", "")
+                        ver = r.stdout.split("\n")[0].strip()
+                        for prefix in ["tesseract v", "tesseract ", "v"]:
+                            if ver.startswith(prefix):
+                                ver = ver[len(prefix):]
+                                break
+                        return {"ok": True, "engine": "tesseract", "version": ver, "note": "已自动添加到PATH"}
+                except Exception:
+                    pass
             # Check if winget has it registered
             if os.name == "nt":
                 try:
@@ -781,6 +809,17 @@ async def install_ocr(body: InstallOCRRequest):
     engine = body.engine
     try:
         if engine == "tesseract":
+            # First check if Tesseract is already installed (even if not in PATH)
+            for tess_path in [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files\Tesseract-OCR\program\tesseract.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\program\tesseract.exe"),
+            ]:
+                if os.path.exists(tess_path):
+                    os.environ["PATH"] = os.path.dirname(tess_path) + os.pathsep + os.environ.get("PATH", "")
+                    return {"ok": True, "message": f"Tesseract OCR 已存在于 {tess_path}，已添加至 PATH"}
+
             # Try multiple install methods
             try:
                 if os.name == "nt":
@@ -1086,8 +1125,8 @@ async def check_flare(body: Optional[Dict[str, Any]] = None):
 async def start_flare():
     try:
         from engine.flaresolverr import start_flaresolverr
-        ok = await start_flaresolverr(get_config())
-        return {"success": ok}
+        success, message = await start_flaresolverr(get_config())
+        return {"success": success, "message": message}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

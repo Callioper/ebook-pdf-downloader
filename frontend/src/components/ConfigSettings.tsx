@@ -659,7 +659,8 @@ export default function ConfigSettings() {
         setFlareRunning(true)
         setFlareStatusText('已启动')
       } else {
-        setFlareStatusText(data.error || '启动失败')
+        setFlareStatusText(data.message || data.error || '启动失败')
+        if (data.message) setFlareInstallFailed(true)
       }
     } catch (e) {
       console.warn('[ConfigSettings] start flare:', e)

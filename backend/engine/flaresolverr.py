@@ -136,23 +136,23 @@ async def check_flaresolverr(config: Dict[str, Any]) -> bool:
         return False
 
 
-async def start_flaresolverr(config: Dict[str, Any]) -> bool:
+async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
+    """Returns (success, error_message)."""
     global _flare_process
     if await check_flaresolverr(config):
-        return True
+        return (True, "already running")
 
     exe_path = find_flaresolverr_exe(config)
     if not exe_path:
-        return False
+        return (False, "未找到 flaresolverr.exe，请先安装")
 
     try:
         cwd = os.path.dirname(exe_path)
-        # Use CREATE_NO_WINDOW to hide console window on Windows
         CREATE_NO_WINDOW = 0x08000000
         _flare_process = subprocess.Popen(
             [exe_path],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,  # capture stderr for diagnostics
             cwd=cwd,
             creationflags=CREATE_NO_WINDOW,
         )
@@ -160,21 +160,28 @@ async def start_flaresolverr(config: Dict[str, Any]) -> bool:
         for _ in range(30):
             await asyncio.sleep(1)
             if await check_flaresolverr(config):
-                return True
-        # If startup failed, kill the process
+                return (True, "started")
+        # Startup failed — get stderr output for diagnostics
+        stderr_out = ""
+        try:
+            _, stderr_out = _flare_process.communicate(timeout=3)
+            stderr_out = (stderr_out or b"").decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
         try:
             _flare_process.terminate()
-        except Exception as e:
-            logger.warning(f"Failed to terminate FlareSolverr process: {e}")
+        except Exception:
             try:
                 _flare_process.kill()
-            except Exception as e2:
-                logger.warning(f"Failed to kill FlareSolverr process: {e2}")
+            except Exception:
+                pass
         _flare_process = None
-        return False
+        detail = f"启动超时(30s)，未收到端口8191响应"
+        if stderr_out:
+            detail += f"。错误输出: {stderr_out}"
+        return (False, detail)
     except Exception as e:
-        logger.error(f"Failed to start FlareSolverr: {e}")
-        return False
+        return (False, f"启动异常: {str(e)}")
 
 
 def stop_flaresolverr():
