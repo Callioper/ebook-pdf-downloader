@@ -16,6 +16,16 @@ from config import get_config
 from task_store import task_store, STATUS_RUNNING, STATUS_CANCELLED, STATUS_FAILED
 from ws_manager import ws_manager
 
+PIPELINE_STEPS = [
+    "fetch_metadata",
+    "fetch_isbn",
+    "download_pages",
+    "convert_pdf",
+    "ocr",
+    "bookmark",
+    "finalize",
+]
+
 
 async def _emit(task_id: str, event_type: str, data: Dict[str, Any]):
     await ws_manager.broadcast_task(task_id, {
@@ -335,6 +345,19 @@ async def run_pipeline(task_id: str):
 
     task_store.update(task_id, {"status": STATUS_RUNNING, "current_step": "fetch_metadata"})
     await _emit(task_id, "task_started", {"task_id": task_id})
+
+    # Log current settings at pipeline start
+    db_path = config.get("ebook_db_path", "") or "未设置"
+    proxy = config.get("http_proxy", "") or "无"
+    ocr_engine = config.get("ocr_engine", "tesseract")
+    ocr_langs = config.get("ocr_languages", "chi_sim+eng")
+    ocr_jobs = config.get("ocr_jobs", 1)
+    ocr_timeout = config.get("ocr_timeout", 1800)
+    task_store.add_log(task_id, f"⚙ 数据库: {db_path} | 代理: {proxy}")
+    task_store.add_log(task_id, f"⚙ OCR引擎: {ocr_engine} | 语言: {ocr_langs} | 线程: {ocr_jobs} | 超时: {ocr_timeout}s")
+    # Log download source from task
+    source = task.get("source", "未知")
+    task_store.add_log(task_id, f"⚙ 下载源: {source}")
 
     report = {}
 

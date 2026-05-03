@@ -146,13 +146,24 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
     if not exe_path:
         return (False, "未找到 flaresolverr.exe，请先安装")
 
+    # Step 1: Quick sanity check — can the exe start at all
+    try:
+        quick_test = subprocess.run([exe_path, "--version"], capture_output=True, text=True, timeout=10)
+        if quick_test.returncode != 0:
+            err = (quick_test.stderr or quick_test.stdout or "无输出")[:200]
+            return (False, f"flaresolverr.exe 无法运行: {err}")
+    except FileNotFoundError:
+        return (False, f"flaresolverr.exe 不存在: {exe_path}")
+    except Exception as e:
+        return (False, f"flaresolverr.exe 测试失败: {str(e)}")
+
     try:
         cwd = os.path.dirname(exe_path)
         CREATE_NO_WINDOW = 0x08000000
         _flare_process = subprocess.Popen(
             [exe_path],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,  # capture stderr for diagnostics
+            stderr=subprocess.PIPE,
             cwd=cwd,
             creationflags=CREATE_NO_WINDOW,
         )
@@ -165,7 +176,7 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
         stderr_out = ""
         try:
             _, stderr_out = _flare_process.communicate(timeout=3)
-            stderr_out = (stderr_out or b"").decode("utf-8", errors="replace")[:200]
+            stderr_out = (stderr_out or b"").decode("utf-8", errors="replace")[:500]
         except Exception:
             pass
         try:
@@ -179,9 +190,13 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
         detail = f"启动超时(30s)，未收到端口8191响应"
         if stderr_out:
             detail += f"。错误输出: {stderr_out}"
+        # Also log to logger for debugging
+        logger.warning(f"FlareSolverr start failed: {detail}")
         return (False, detail)
     except Exception as e:
         return (False, f"启动异常: {str(e)}")
+
+    return (False, "未知错误")
 
 
 def stop_flaresolverr():

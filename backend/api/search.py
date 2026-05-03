@@ -1068,10 +1068,11 @@ async def install_flare_complete():
                 # Save exe path to config so re-detection works
                 update_config({"flaresolverr_path": os.path.dirname(os.path.abspath(exe_path))})
                 already_running = await check_flaresolverr(config)
-                started = already_running
                 if not already_running:
-                    started = await start_flaresolverr(config)
-                return {"success": True, "path": os.path.abspath(exe_path), "started": started, "exe_path": exe_path}
+                    started_ok, start_msg = await start_flaresolverr(config)
+                else:
+                    started_ok, start_msg = True, "already running"
+                return {"success": True, "path": os.path.abspath(exe_path), "started": started_ok, "start_msg": start_msg, "exe_path": exe_path}
             except Exception:
                 return {"success": True, "path": os.path.abspath(exe_path), "started": False, "exe_path": exe_path}
 
