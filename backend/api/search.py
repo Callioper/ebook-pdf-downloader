@@ -670,6 +670,20 @@ async def check_ocr(engine: str = Query(default="")):
             result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return {"ok": True, "engine": "tesseract", "version": result.stdout.split("\n")[0]}
+            # Check common install paths (Tesseract may exist but not in PATH)
+            for tess_path in [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+                os.path.expandvars(r"%ProgramFiles%\Tesseract-OCR\tesseract.exe"),
+            ]:
+                if os.path.exists(tess_path):
+                    try:
+                        r = subprocess.run([tess_path, "--version"], capture_output=True, text=True, timeout=5)
+                        if r.returncode == 0:
+                            os.environ["PATH"] += os.pathsep + os.path.dirname(tess_path)
+                            return {"ok": True, "engine": "tesseract", "version": r.stdout.split("\n")[0], "note": "需手动添加至PATH"}
+                    except Exception:
+                        pass
         elif engine == "paddleocr":
             try:
                 import paddleocr
@@ -683,8 +697,28 @@ async def check_ocr(engine: str = Query(default="")):
                 pass
         elif engine == "easyocr":
             try:
+                import site
+                # Frozen exe may not include user site-packages in sys.path
+                user_site = site.getusersitepackages()
+                if user_site not in sys.path:
+                    sys.path.insert(0, user_site)
                 import easyocr
                 return {"ok": True, "engine": "easyocr"}
+            except ImportError:
+                pass
+        elif engine == "paddleocr":
+            try:
+                import site
+                user_site = site.getusersitepackages()
+                if user_site not in sys.path:
+                    sys.path.insert(0, user_site)
+                import paddleocr
+                result = subprocess.run(
+                    [sys.executable, "-m", "paddleocr", "--version"],
+                    capture_output=True, text=True, timeout=5
+                )
+                ver = result.stdout.strip().split("\n")[0] if result.returncode == 0 else "已安装"
+                return {"ok": True, "engine": "paddleocr", "version": ver}
             except ImportError:
                 pass
         elif engine == "appleocr":
@@ -762,10 +796,26 @@ async def install_ocr(body: InstallOCRRequest):
 
                     # Method 2: Download from UB-Mannheim GitHub + ShellExecuteW runas
                     import requests as _requests
-                    api_url = "https://api.github.com/repos/UB-Mannheim/tesseract/releases/latest"
-                    r = _requests.get(api_url, timeout=10, headers={"User-Agent": "book-downloader"}, verify=False)
-                    if r.status_code == 200:
-                        assets = r.json().get("assets", [])
+                    tess_urls = [
+                        "https://github.com/UB-Mannheim/tesseract/releases/latest",
+                        "https://ghproxy.net/https://github.com/UB-Mannheim/tesseract/releases/latest",
+                        "https://github.moeyy.xyz/https://github.com/UB-Mannheim/tesseract/releases/latest",
+                    ]
+                    api_data = None
+                    for api_url in tess_urls:
+                        try:
+                            r = _requests.get(api_url, timeout=10, headers={"User-Agent": "book-downloader"}, verify=False)
+                            if r.status_code == 200:
+                                if "api.github.com" in api_url or "releases/latest" in api_url:
+                                    try:
+                                        api_data = r.json()
+                                        break
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            continue
+                    if api_data is not None:
+                        assets = api_data.get("assets", [])
                         installer_url = ""
                         for asset in assets:
                             name = asset.get("name", "")
@@ -805,7 +855,8 @@ async def install_ocr(body: InstallOCRRequest):
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "paddleocr":
             CREATE_NO_WINDOW = 0x08000000
-            cmd = _pip_install_cmd() + ["ocrmypdf-paddleocr"]
+            # Install paddleocr directly (NOT ocrmypdf-paddleocr which has paddlepaddle 3.x dependency issues)
+            cmd = _pip_install_cmd() + ["paddleocr"]
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=300,
                 creationflags=CREATE_NO_WINDOW,
@@ -881,6 +932,22 @@ async def install_flare(body: InstallFlareRequest):
                         _flare_dl_state["status"] = "extracting"
                         _flare_dl_state["done"] = True
                         last_error = ""
+                        # Extract immediately in the download thread
+                        try:
+                            if os.path.getsize(zip_path) >= 100000:
+                                import zipfile as _zipfile
+                                with _zipfile.ZipFile(zip_path, "r") as _zf:
+                                    _bad = _zf.testzip()
+                                    if not _bad:
+                                        _zf.extractall(install_path)
+                                        _flare_dl_state["status"] = "done"
+                                try:
+                                    os.remove(zip_path)
+                                except Exception:
+                                    pass
+                        except Exception as _ex:
+                            _flare_dl_state["error"] = f"解压失败: {_ex}"
+                            _flare_dl_state["status"] = "error"
                         break  # success, stop trying
                     except Exception as e:
                         last_error = str(e)
@@ -923,67 +990,38 @@ async def flare_download_progress():
 
 @router.post("/install-flare-complete")
 async def install_flare_complete():
-    """Called by frontend after download done to finalize installation."""
+    """Called by frontend after download done to finalize installation.
+    Extraction already happened in the download thread — just find the exe."""
     global _flare_dl_state
     try:
-        # Use the SAME path as install_flare (try persistent storage first, fallback to state)
         install_path = _flare_last_install_path or _flare_dl_state.get("install_path", "")
         if not install_path or not os.path.isdir(install_path):
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             install_path = os.path.join(base_dir, "tools", "flaresolverr")
-            os.makedirs(install_path, exist_ok=True)
+
+        # Find the exe (walk the install dir)
+        for root, dirs, files in os.walk(install_path):
+            for f in files:
+                if f.lower() == "flaresolverr.exe":
+                    exe_path = os.path.join(root, f)
+                    _flare_dl_state = {"downloaded": 0, "total": 0, "done": True, "error": "", "status": "done"}
+                    return {"success": True, "path": os.path.abspath(exe_path)}
+
+        # Check if extraction is still pending
         zip_path = os.path.join(install_path, "flaresolverr.zip")
-
-        if not os.path.exists(zip_path):
-            # Already cleaned up or never downloaded - check for already-extracted exe
-            for check in [
-                os.path.join(install_path, "flaresolverr", "flaresolverr.exe"),
-                os.path.join(install_path, "flaresolverr.exe"),
-            ]:
-                if os.path.exists(check):
-                    return {"success": True, "path": os.path.abspath(check)}
-            return {"success": False, "error": "未找到下载文件，请重新尝试自动下载或手动安装"}
-
-        # Validate zip file
-        zip_size = os.path.getsize(zip_path)
-        if zip_size < 100000:  # too small to be a valid zip
+        if os.path.exists(zip_path):
             try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    zf.extractall(install_path)
                 os.remove(zip_path)
-            except Exception:
-                pass
-            return {"success": False, "error": f"下载文件异常 (仅 {zip_size/1024:.0f} KB)，请重试"}
+                for root, dirs, files in os.walk(install_path):
+                    for f in files:
+                        if f.lower() == "flaresolverr.exe":
+                            return {"success": True, "path": os.path.abspath(os.path.join(root, f))}
+            except Exception as e:
+                return {"success": False, "error": f"解压失败: {e}"}
 
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                # Validate before extracting
-                bad = zf.testzip()
-                if bad:
-                    return {"success": False, "error": f"下载文件损坏 (首个坏文件: {bad})，请重试"}
-                zf.extractall(install_path)
-        except zipfile.BadZipFile:
-            return {"success": False, "error": "下载文件损坏，请删除临时文件后重试"}
-        except Exception as e:
-            return {"success": False, "error": f"解压失败: {str(e)}"}
-
-        try:
-            os.remove(zip_path)
-        except Exception:
-            pass
-
-        # The zip structure has flaresolverr/ as the root folder inside the zip
-        # So the exe ends up at: .../temp/book-downloader/flaresolverr/flaresolverr/flaresolverr.exe
-        exe_path = os.path.join(extract_base, "flaresolverr", "flaresolverr.exe")
-        if not os.path.exists(exe_path):
-            for root, dirs, files in os.walk(install_path):
-                for f in files:
-                    if f.lower() == "flaresolverr.exe":
-                        exe_path = os.path.join(root, f)
-                        break
-
-        if os.path.exists(exe_path):
-            _flare_dl_state = {"downloaded": 0, "total": 0, "done": True, "error": "", "status": "done"}
-            return {"success": True, "path": os.path.abspath(exe_path)}
-        return {"success": False, "error": "解压后未找到 flaresolverr.exe"}
+        return {"success": False, "error": "未找到 flaresolverr.exe，请重试"}
     except Exception as e:
         traceback.print_exc()
         return {"success": False, "error": f"安装异常: {str(e)}"}
