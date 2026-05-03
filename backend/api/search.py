@@ -692,48 +692,31 @@ async def check_ocr(engine: str = Query(default="")):
                         return {"ok": False, "engine": "tesseract", "message": "Tesseract 已通过 winget 注册但可能未完整安装，点击安装按钮重新安装"}
                 except FileNotFoundError:
                     pass
-        elif engine == "paddleocr":
-            try:
-                import paddleocr
-                result = subprocess.run(
-                    [sys.executable, "-m", "paddleocr", "--version"],
-                    capture_output=True, text=True, timeout=5
-                )
-                ver = result.stdout.strip().split("\n")[0] if result.returncode == 0 else "已安装"
-                return {"ok": True, "engine": "paddleocr", "version": ver}
-            except ImportError:
-                pass
         elif engine == "easyocr":
             # Use system Python to check (pip install goes to system Python, not frozen exe)
-            py = _pip_install_cmd()[0]  # just the python executable
+            py = _pip_install_cmd()[0]
             r = subprocess.run([py, "-c", "import easyocr; print('ok')"],
                                capture_output=True, text=True, timeout=10)
             if r.returncode == 0:
                 return {"ok": True, "engine": "easyocr"}
-            # Fallback: check inside frozen exe
             try:
-                import site
-                user_site = site.getusersitepackages()
-                if user_site not in sys.path:
-                    sys.path.insert(0, user_site)
+                import site; user_site = site.getusersitepackages()
+                if user_site not in sys.path: sys.path.insert(0, user_site)
                 import easyocr
                 return {"ok": True, "engine": "easyocr"}
             except ImportError:
                 pass
         elif engine == "paddleocr":
-            # Use system Python to check (pip install goes to system Python, not frozen exe)
-            py = _pip_install_cmd()[0]  # just the python executable
+            # Use system Python to check (pip install goes to system Python)
+            py = _pip_install_cmd()[0]
             r = subprocess.run([py, "-c", "import paddleocr; print(paddleocr.__version__)"],
                                capture_output=True, text=True, timeout=10)
             if r.returncode == 0:
                 ver = r.stdout.strip().split("\n")[0]
                 return {"ok": True, "engine": "paddleocr", "version": ver if ver != "ok" else "已安装"}
-            # Fallback: check inside frozen exe
             try:
-                import site
-                user_site = site.getusersitepackages()
-                if user_site not in sys.path:
-                    sys.path.insert(0, user_site)
+                import site; user_site = site.getusersitepackages()
+                if user_site not in sys.path: sys.path.insert(0, user_site)
                 import paddleocr
                 return {"ok": True, "engine": "paddleocr"}
             except ImportError:

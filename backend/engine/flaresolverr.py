@@ -22,7 +22,7 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     search_paths = [
         # User-configured path first (from flaresolverr_path config)
-        config.get("flaresolverr_path", ""),
+        os.path.join(config.get("flaresolverr_path", ""), "flaresolverr.exe"),
         # Default install: program_root/tools/flaresolverr/flaresolverr/flaresolverr.exe
         os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr", "flaresolverr.exe"),
         # Also check one level up
@@ -36,7 +36,7 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
         if path and os.path.exists(path):
             return os.path.abspath(path)
 
-    # Walk search
+    # Walk search: check common locations first, then full drive search
     for base in [
         os.path.join(base_dir, "tools", "flaresolverr"),
         os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr"),
@@ -46,6 +46,14 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
                 for f in files:
                     if f.lower() == "flaresolverr.exe":
                         return os.path.abspath(os.path.join(root, f))
+
+    # Last resort: walk the entire project directory
+    for root, dirs, files in os.walk(base_dir):
+        # Skip large system directories and hidden folders
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "__pycache__", "node_modules")]
+        for f in files:
+            if f.lower() == "flaresolverr.exe":
+                return os.path.abspath(os.path.join(root, f))
 
     return None
 
