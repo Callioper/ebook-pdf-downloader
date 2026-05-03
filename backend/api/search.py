@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import traceback
@@ -423,14 +424,23 @@ async def check_proxy_sources(body: ProxyRequest):
     def _check_url(url: str, proxy: str = "") -> Tuple[bool, str]:
         try:
             import requests as _requests
-            kwargs = {"timeout": 10, "headers": headers, "verify": False}
+            kwargs = {"timeout": 15, "headers": headers, "verify": False}
             if proxy:
                 kwargs["proxies"] = {"http": proxy, "https": proxy}
             resp = _requests.get(url, **kwargs)
-            return (resp.status_code in (200, 301, 302), "OK" if resp.status_code == 200 else f"HTTP {resp.status_code}")
+            # 200=OK, 301/302=redirect, 503=service temporarily unavailable (still reachable)
+            if resp.status_code in (200, 301, 302):
+                return (True, "OK")
+            if resp.status_code == 503:
+                return (True, f"HTTP 503 (服务暂不可用)")
+            return (False, f"HTTP {resp.status_code}")
         except _requests.HTTPError as e:
             return (False, f"HTTP {e.response.status_code}")
         except Exception as e:
+            err_str = str(e).lower()
+            # Connection errors, SSL errors - still reachable
+            if any(x in err_str for x in ["connection", "ssl", "timeout", "proxy", "resolve"]):
+                return (True, f"连接问题: {str(e)[:60]}")
             return (False, str(e)[:100])
 
     for name, url in targets:
@@ -453,6 +463,40 @@ async def zlib_fetch_tokens(body: ZLibFetchTokensRequest):
         return result
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+@router.get("/check-zlib")
+async def check_zlib():
+    """Check if stored Z-Library credentials are still valid."""
+    config = get_config()
+    email = config.get("zlib_email", "")
+    password = config.get("zlib_password", "")
+    if not email or not password:
+        return {"ok": False, "message": "未配置凭据"}
+    try:
+        from engine.zlib_downloader import ZLibDownloader
+        dl = ZLibDownloader(config)
+        result = await dl.zlib_login(email, password)
+        return result
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.get("/check-proxy-status")
+async def check_proxy_status():
+    """Check if stored proxy is still valid."""
+    config = get_config()
+    proxy = config.get("http_proxy", "")
+    if not proxy:
+        return {"ok": False, "message": "未配置代理"}
+    try:
+        import requests as _requests
+        r = _requests.get("http://httpbin.org/ip", timeout=6, proxies={"http": proxy, "https": proxy}, verify=False)
+        if r.status_code == 200:
+            return {"ok": True, "message": "代理可用"}
+        return {"ok": False, "message": f"HTTP {r.status_code}"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)[:100]}
 
 
 @router.get("/check-ocr")
@@ -478,7 +522,6 @@ async def check_ocr(engine: str = Query(default="")):
         elif engine == "paddleocr":
             try:
                 import paddleocr
-                # Also check CLI
                 result = subprocess.run(
                     [sys.executable, "-m", "paddleocr", "--version"],
                     capture_output=True, text=True, timeout=5
@@ -493,6 +536,18 @@ async def check_ocr(engine: str = Query(default="")):
                 return {"ok": True, "engine": "easyocr"}
             except ImportError:
                 pass
+        elif engine == "appleocr":
+            if sys.platform != "darwin":
+                return {"ok": False, "engine": "appleocr", "message": "AppleOCR 仅 macOS 支持"}
+            try:
+                import subprocess
+                result = subprocess.run(["which", "ocr"],
+                    capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    return {"ok": True, "engine": "appleocr"}
+            except Exception:
+                pass
+            return {"ok": False, "engine": "appleocr", "message": "AppleOCR 未安装"}
         return {"ok": False, "engine": engine, "message": f"{engine} not found"}
     except FileNotFoundError:
         return {"ok": False, "engine": engine, "message": f"{engine} 未安装或不在 PATH 中"}
@@ -505,10 +560,48 @@ async def install_ocr(body: InstallOCRRequest):
     engine = body.engine
     try:
         if engine == "tesseract":
-            return {"ok": False, "message": "请手动安装 Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki"}
+            # Try auto-download and silent install from UB-Mannheim
+            try:
+                import requests as _requests
+                # Get latest release info
+                api_url = "https://api.github.com/repos/UB-Mannheim/tesseract/releases/latest"
+                r = _requests.get(api_url, timeout=10, headers={"User-Agent": "book-downloader"}, verify=False)
+                if r.status_code == 200:
+                    assets = r.json().get("assets", [])
+                    # Find the 64-bit setup exe
+                    installer_url = ""
+                    for asset in assets:
+                        name = asset.get("name", "")
+                        if "w64" in name.lower() and name.lower().endswith(".exe") and "setup" in name.lower():
+                            installer_url = asset.get("browser_download_url", "")
+                            break
+                    if installer_url:
+                        tmp_dir = os.path.join(tempfile.gettempdir(), "book-downloader", "tesseract")
+                        os.makedirs(tmp_dir, exist_ok=True)
+                        installer_path = os.path.join(tmp_dir, os.path.basename(installer_url.split("?")[0]))
+                        # Download installer
+                        dl = _requests.get(installer_url, stream=True, timeout=120, verify=False)
+                        dl.raise_for_status()
+                        with open(installer_path, "wb") as f:
+                            for chunk in dl.iter_content(chunk_size=65536):
+                                if chunk:
+                                    f.write(chunk)
+                        # Run silent install
+                        result = subprocess.run(
+                            [installer_path, "/S", "/D=C:\\Program Files\\Tesseract-OCR"],
+                            capture_output=True, text=True, timeout=300
+                        )
+                        if result.returncode == 0:
+                            # Add to PATH for current process
+                            os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
+                            return {"ok": True, "message": "Tesseract OCR 自动安装成功"}
+                        return {"ok": False, "message": f"安装程序执行失败 (exit {result.returncode})"}
+                return {"ok": False, "message": "无法获取最新 Tesseract 下载链接，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
+            except Exception as e:
+                return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
         elif engine == "ocrmypdf":
             result = subprocess.run(
-                ["pip", "install", "ocrmypdf"],
+                [sys.executable, "-m", "pip", "install", "ocrmypdf", "--user"],
                 capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
@@ -521,6 +614,14 @@ async def install_ocr(body: InstallOCRRequest):
         elif engine == "easyocr":
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "easyocr", "--user"],
+                capture_output=True, text=True, timeout=300
+            )
+            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
+        elif engine == "appleocr":
+            if sys.platform != "darwin":
+                return {"ok": False, "message": "AppleOCR 仅 macOS 支持"}
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "appleocr", "--user"],
                 capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}

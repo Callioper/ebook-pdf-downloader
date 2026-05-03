@@ -240,6 +240,73 @@ export default function ConfigSettings() {
 
   useEffect(() => { fetchConfig() }, [fetchConfig])
 
+  // Restore Z-Lib login state from stored credentials
+  useEffect(() => {
+    if (!config || !form.zlib_email || !form.zlib_password) return
+    if (zlibChecked) return // already manually checked
+    const restoreZlib = async () => {
+      try {
+        const res = await fetch('/api/v1/check-zlib')
+        const data = await res.json()
+        if (!mountedRef.current) return
+        if (data.ok) {
+          setZlibConnected(true)
+          setZlibMsg('已连接')
+          setZlibChecked(true)
+          if (data.balance) setZlibBalance(data.balance)
+        }
+      } catch { /* silent */ }
+    }
+    restoreZlib()
+  }, [config, form.zlib_email, form.zlib_password, zlibChecked])
+
+  // Restore proxy state from stored config
+  useEffect(() => {
+    if (!config || !form.http_proxy) return
+    if (proxyChecked) return // already manually checked
+    const restoreProxy = async () => {
+      try {
+        const res = await fetch('/api/v1/check-proxy-status')
+        const data = await res.json()
+        if (!mountedRef.current) return
+        if (data.ok) {
+          setProxyStatus('green')
+          setProxyMsg(data.message || '代理可用')
+        } else {
+          setProxyStatus('red')
+          setProxyMsg(data.message || '代理不可用')
+        }
+        setProxyChecked(true)
+      } catch { /* silent */ }
+    }
+    restoreProxy()
+  }, [config, form.http_proxy, proxyChecked])
+
+  // Restore source connectivity state (runs once on mount)
+  const sourceRestoredRef = useRef(false)
+  useEffect(() => {
+    if (!config || sourceRestoredRef.current) return
+    sourceRestoredRef.current = true
+    const restoreSourceStatus = async () => {
+      try {
+        const res = await fetch('/api/v1/check-proxy-sources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ http_proxy: form.http_proxy || '' }),
+        })
+        const data = await res.json()
+        if (!mountedRef.current) return
+        const results = data.results || {}
+        const details = data.details || {}
+        setAaProxyStatus(results.annas_archive ? 'green' : 'red')
+        setZlProxyStatus(results.zlibrary ? 'green' : 'red')
+        setAaProxyDetail(details.annas_archive || '')
+        setZlProxyDetail(details.zlibrary || '')
+      } catch { /* silent */ }
+    }
+    restoreSourceStatus()
+  }, [config])
+
   const checkFlare = useCallback(async () => {
     setFlareChecking(true)
     setFlareInstallFailed(false)
@@ -278,124 +345,48 @@ export default function ConfigSettings() {
     } finally {
       if (mountedRef.current) setOcrChecking(false)
     }
-  }, [form.ocr_engine])
-
-  const checkDbConnectivity = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/status')
-      const data = await res.json()
-      if (!mountedRef.current) return
-      const edb = data?.ebookDatabase
-      const reachable = edb?.reachable || false
-      const dbs: string[] = edb?.dbs || []
-      setDbNames(dbs)
-      if (reachable && dbs.length > 0) {
-        setDbStatus('green')
-      } else if (reachable) {
-        setDbStatus('yellow')
-      } else {
-        setDbStatus('red')
-      }
-    } catch {
-      if (mountedRef.current) {
-        setDbStatus('red')
-        setDbNames([])
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (config) checkDbConnectivity()
-  }, [config, checkDbConnectivity])
-
-  useEffect(() => {
-    if (config) checkOcr()
-  }, [config, checkOcr])
+}, [form.ocr_engine])
 
   const handleDetectPaths = async () => {
     setDbDetecting(true)
-    setDetectedPaths([])
     try {
-      const res = await fetch('/api/v1/detect-paths')
-      const data = await res.json()
+      const [pathsRes, statusRes] = await Promise.all([
+        fetch('/api/v1/detect-paths'),
+        fetch('/api/v1/status'),
+      ])
+      const pathsData = await pathsRes.json()
+      const statusData = await statusRes.json()
       if (!mountedRef.current) return
-      const raw = data.paths || []
-      const paths = raw.map((p: any) => (typeof p === 'string' ? p : p.path || ''))
-      .filter(Boolean)
-      setDetectedPaths(paths)
-      if (paths.length > 0) {
-        setForm((p) => ({ ...p, ebook_db_path: paths[0] }))
-      } else {
-        setDbStatus('red')
+      const db = statusData.ebookDatabase || {}
+      setDbNames(db.dbs || [])
+      setDbStatus(db.dbs?.length > 0 ? 'green' : 'yellow')
+      const allPaths = [...(pathsData.paths || [])]
+      if (statusData.ebookDatabase?.dbs?.length > 0) {
+        for (const p of statusData.ebookDatabase.dbs) {
+          if (!allPaths.includes(p)) allPaths.push(p)
+        }
       }
+      setDetectedPaths(allPaths)
     } catch {
-      if (mountedRef.current) {
-        setDetectedPaths([])
-        setDbStatus('red')
-      }
+      if (mountedRef.current) setDbStatus('red')
     } finally {
       if (mountedRef.current) setDbDetecting(false)
     }
   }
 
-
-  const handleCheckProxy = async () => {
-    setProxyChecking(true)
-    setProxyStatus(null)
-    setProxyMsg('')
-    setProxyChecked(false)
+  const checkDbConnectivity = async () => {
+    setDbDetecting(true)
     try {
-      const res = await fetch('/api/v1/check-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ http_proxy: form.http_proxy }),
-      })
+      const res = await fetch('/api/v1/available-dbs')
       const data = await res.json()
       if (!mountedRef.current) return
-      setProxyStatus(data.ok ? 'green' : 'red')
-      setProxyMsg(data.message || (data.ok ? '代理可用' : '代理不可用'))
-      setProxyChecked(true)
-      if (data.ok) {
-        // Auto-save after successful proxy test
-        try {
-          await fetch('/api/v1/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(form),
-          })
-        } catch { /* silent */ }
-      }
+      const dbs = data.dbs || []
+      setDbNames(dbs)
+      setDbStatus(dbs.length > 0 ? 'green' : 'yellow')
     } catch {
-      if (mountedRef.current) {
-        setProxyStatus('red')
-        setProxyMsg('检测失败')
-        setProxyChecked(true)
-      }
+      if (mountedRef.current) setDbStatus('red')
     } finally {
-      if (mountedRef.current) setProxyChecking(false)
-    }
-  }
-
-  const handleCheckProxySources = async () => {
-    const proxy = form.http_proxy || ''
-    try {
-      const res = await fetch('/api/v1/check-proxy-sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ http_proxy: proxy }),
-      })
-      const data = await res.json()
-      const results = data.results || {}
-      const details = data.details || {}
-      setAaProxyStatus(results.annas_archive ? 'green' : 'red')
-      setZlProxyStatus(results.zlibrary ? 'green' : 'red')
-      setAaProxyDetail(details.annas_archive || '')
-      setZlProxyDetail(details.zlibrary || '')
-    } catch {
-      setAaProxyStatus('red')
-      setZlProxyStatus('red')
-      setAaProxyDetail('')
-      setZlProxyDetail('')
+      if (mountedRef.current) setDbDetecting(false)
     }
   }
 
@@ -405,8 +396,8 @@ export default function ConfigSettings() {
       return
     }
     setZlibChecking(true)
+    setZlibBalance('')
     setZlibMsg('')
-    setZlibChecked(false)
     try {
       const res = await fetch('/api/v1/zlib-fetch-tokens', {
         method: 'POST',
@@ -415,49 +406,79 @@ export default function ConfigSettings() {
       })
       const data = await res.json()
       if (!mountedRef.current) return
+      setZlibChecked(true)
       if (data.ok) {
         setZlibConnected(true)
         setZlibMsg('已连接')
-        setZlibChecked(true)
-        // Show balance if available
-        if (data.balance !== undefined) {
-          setZlibBalance(data.balance)
-        } else if (data.downloads_remaining !== undefined) {
-          setZlibBalance(`剩余下载: ${data.downloads_remaining}`)
-        } else if (data.user_email) {
-          setZlibBalance(data.user_email)
-        }
-        // Auto-save after successful login
-        try {
-          await fetch('/api/v1/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(form),
-          })
-        } catch { /* silent */ }
+        if (data.balance) setZlibBalance(data.balance)
       } else {
         setZlibConnected(false)
-        setZlibMsg('连接失败: ' + (data.message || '未知错误'))
-        setZlibChecked(true)
-        setZlibBalance('')
+        setZlibMsg(data.message || '登录失败')
       }
-    } catch (e: any) {
+    } catch {
       if (mountedRef.current) {
-        setZlibConnected(false)
-        setZlibMsg('请求失败: ' + (e.message || ''))
         setZlibChecked(true)
+        setZlibConnected(false)
+        setZlibMsg('请求失败')
       }
     } finally {
       if (mountedRef.current) setZlibChecking(false)
     }
   }
 
+  const handleCheckProxy = async () => {
+    setProxyChecking(true)
+    setProxyMsg('')
+    try {
+      const res = await fetch('/api/v1/check-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ http_proxy: form.http_proxy || '' }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setProxyChecked(true)
+      if (data.ok) {
+        setProxyStatus('green')
+        setProxyMsg(data.message || '代理可用')
+      } else {
+        setProxyStatus('red')
+        setProxyMsg(data.message || '代理不可用')
+      }
+    } catch {
+      if (mountedRef.current) {
+        setProxyChecked(true)
+        setProxyStatus('red')
+        setProxyMsg('检测失败')
+      }
+    } finally {
+      if (mountedRef.current) setProxyChecking(false)
+    }
+  }
+
+  const handleCheckProxySources = async () => {
+    try {
+      const res = await fetch('/api/v1/check-proxy-sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ http_proxy: form.http_proxy || '' }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      const results = data.results || {}
+      const details = data.details || {}
+      setAaProxyStatus(results.annas_archive ? 'green' : 'red')
+      setZlProxyStatus(results.zlibrary ? 'green' : 'red')
+      setAaProxyDetail(details.annas_archive || '')
+      setZlProxyDetail(details.zlibrary || '')
+    } catch { /* silent */ }
+  }
+
   const handleInstallFlare = async () => {
     setFlareInstalling(true)
     setFlareProgress(0)
-    setFlareStatusText('正在下载 FlareSolverr ...')
+    setFlareStatusText('准备下载...')
     setFlareInstallFailed(false)
-    setFlareStatusText('正在下载 FlareSolverr ...')
     try {
       const res = await fetch('/api/v1/install-flare', {
         method: 'POST',
@@ -466,110 +487,115 @@ export default function ConfigSettings() {
       })
       const data = await res.json()
       if (!data.success) {
-        setFlareStatusText('启动下载失败: ' + (data.error || '未知错误'))
-        setFlareInstalling(false)
+        setFlareStatusText(data.error || '安装失败')
         setFlareInstallFailed(true)
         return
       }
       // Poll download progress
-      const pollProgress = async () => {
-        const progRes = await fetch('/api/v1/flare-download-progress')
-        const prog = await progRes.json()
-        if (!mountedRef.current) return
-        if (prog.total > 0) {
-          const pct = Math.round((prog.downloaded / prog.total) * 100)
-          setFlareProgress(pct)
-          setFlareStatusText(`下载中 ${pct}% ...`)
-        }
-        if (prog.done || prog.status === 'error' || prog.status === 'extracting') {
-          if (prog.status === 'error' || prog.error) {
-            setFlareStatusText('下载失败: ' + (prog.error || '未知错误'))
-            setFlareInstalling(false)
-            setFlareInstallFailed(true)
-            return
+      if (flarePollRef.current) clearInterval(flarePollRef.current)
+      flarePollRef.current = setInterval(async () => {
+        try {
+          const pr = await fetch('/api/v1/flare-download-progress')
+          const pd = await pr.json()
+          if (!mountedRef.current) return
+          if (pd.total > 0) {
+            setFlareProgress(Math.round((pd.downloaded / pd.total) * 100))
           }
-          // Done downloading, now extract
-          setFlareStatusText('下载完成，正在解压 ...')
-          setFlareProgress(100)
-          try {
-            const extRes = await fetch('/api/v1/install-flare-complete', { method: 'POST' })
-            const extData = await extRes.json()
-            if (extData.success) {
+          if (pd.status === 'downloading') {
+            setFlareStatusText(`下载中... ${Math.round(pd.downloaded / 1024)} KB / ${Math.round(pd.total / 1024)} KB`)
+          } else if (pd.status === 'extracting') {
+            setFlareStatusText('解压中...')
+          } else if (pd.done) {
+            if (pd.error) {
+              setFlareStatusText(`下载失败: ${pd.error}`)
+              setFlareInstallFailed(true)
+              if (flarePollRef.current) clearInterval(flarePollRef.current)
+              return
+            }
+            // Finalize installation
+            const fin = await fetch('/api/v1/install-flare-complete', { method: 'POST' })
+            const fd = await fin.json()
+            if (!mountedRef.current) return
+            if (fd.success) {
               setFlareInstalled(true)
-              setFlareInstalling(false)
-              setFlareStatusText('安装完成，正在启动 ...')
-              try {
-                const startRes = await fetch('/api/v1/start-flare', { method: 'POST' })
-                const startData = await startRes.json()
-                if (startData.success) {
-                  setFlareRunning(true)
-                  setFlareStatusText('FlareSolverr 已启动')
-                } else {
-                  setFlareStatusText('启动失败: ' + (startData.error || '未知错误'))
-                }
-              } catch {
-                setFlareStatusText('启动请求失败')
-              }
+              setFlareStatusText('安装完成')
             } else {
-              setFlareStatusText('解压失败: ' + (extData.error || '未知错误'))
-              setFlareInstalling(false)
+              setFlareStatusText(fd.error || '安装失败')
               setFlareInstallFailed(true)
             }
-          } catch {
-            setFlareStatusText('解压请求失败')
-            setFlareInstalling(false)
-            setFlareInstallFailed(true)
+            if (flarePollRef.current) clearInterval(flarePollRef.current)
           }
-          return
-        }
-        // Continue polling
-        setTimeout(pollProgress, 500)
+        } catch { /* silent */ }
+      }, 1500)
+    } catch {
+      if (mountedRef.current) {
+        setFlareStatusText('安装请求失败')
+        setFlareInstallFailed(true)
       }
-      setTimeout(pollProgress, 500)
-    } catch (e: any) {
-      setFlareInstalling(false)
-      setFlareStatusText('安装请求失败: ' + (e.message || ''))
-      setFlareInstallFailed(true)
+    } finally {
+      if (mountedRef.current) setFlareInstalling(false)
     }
   }
 
   const handleStartFlare = async () => {
-    setFlareStatusText('正在启动 FlareSolverr ...')
+    setFlareChecking(true)
     try {
       const res = await fetch('/api/v1/start-flare', { method: 'POST' })
       const data = await res.json()
+      if (!mountedRef.current) return
       if (data.success) {
         setFlareRunning(true)
-        setFlareStatusText('FlareSolverr 已启动')
+        setFlareStatusText('已启动')
       } else {
-        setFlareStatusText('启动失败: ' + (data.error || '未知错误'))
+        setFlareStatusText(data.error || '启动失败')
       }
     } catch {
-      setFlareStatusText('启动请求失败')
+      if (mountedRef.current) setFlareStatusText('启动请求失败')
+    } finally {
+      if (mountedRef.current) setFlareChecking(false)
     }
   }
 
   const handleStopFlare = async () => {
-    setFlareStatusText('正在停止 FlareSolverr ...')
     try {
       const res = await fetch('/api/v1/stop-flare', { method: 'POST' })
       const data = await res.json()
+      if (!mountedRef.current) return
       if (data.success) {
         setFlareRunning(false)
-        setFlareStatusText('FlareSolverr 已停止')
-      } else {
-        setFlareStatusText('停止失败: ' + (data.error || '未知错误'))
+        setFlareStatusText('已停止')
       }
     } catch {
-      setFlareStatusText('停止请求失败')
+      if (mountedRef.current) setFlareStatusText('停止请求失败')
+    }
+  }
+
+  const handleDetectOcrEngine = async (engine: string) => {
+    setOcrEngines(prev => ({ ...prev, [engine]: { ...prev[engine], installing: false, msg: '检测中...' } }))
+    try {
+      const res = await fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(engine)}`)
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setOcrEngines(prev => ({
+        ...prev,
+        [engine]: {
+          installed: data.ok || false,
+          installing: false,
+          msg: data.version || data.message || (data.ok ? '已安装' : '未检测到'),
+        },
+      }))
+    } catch {
+      if (mountedRef.current) {
+        setOcrEngines(prev => ({
+          ...prev,
+          [engine]: { installed: false, installing: false, msg: '检测失败' },
+        }))
+      }
     }
   }
 
   const handleInstallOcrEngine = async (engine: string) => {
-    setOcrEngines((prev) => ({
-      ...prev,
-      [engine]: { ...(prev[engine] || { installed: false, msg: '' }), installing: true, msg: '' },
-    }))
+    setOcrEngines(prev => ({ ...prev, [engine]: { ...prev[engine], installing: true, msg: '安装中...' } }))
     try {
       const res = await fetch('/api/v1/install-ocr', {
         method: 'POST',
@@ -578,41 +604,19 @@ export default function ConfigSettings() {
       })
       const data = await res.json()
       if (!mountedRef.current) return
-      if (data.ok) {
-        setOcrEngines((prev) => ({
-          ...prev,
-          [engine]: { installed: true, installing: false, msg: '安装成功' },
-        }))
-      } else {
-        setOcrEngines((prev) => ({
-          ...prev,
-          [engine]: { ...(prev[engine] || { installed: false, msg: '' }), installing: false, msg: data.message || '安装失败' },
-        }))
-      }
-    } catch (e: any) {
-      if (mountedRef.current) {
-        setOcrEngines((prev) => ({
-          ...prev,
-          [engine]: { ...(prev[engine] || { installed: false, msg: '' }), installing: false, msg: e.message || '请求失败' },
-        }))
-      }
-    }
-  }
-
-  const handleDetectOcrEngine = async (engine: string) => {
-    try {
-      const res = await fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(engine)}`)
-      const data = await res.json()
-      if (!mountedRef.current) return
-      setOcrEngines((prev) => ({
+      setOcrEngines(prev => ({
         ...prev,
-        [engine]: { ...(prev[engine] || { installing: false, msg: '' }), installed: data.ok || false, msg: data.ok ? (data.version || '已安装') : (data.message || '未安装') },
+        [engine]: {
+          installed: data.ok || false,
+          installing: false,
+          msg: data.message || (data.ok ? '安装成功' : '安装失败'),
+        },
       }))
     } catch {
       if (mountedRef.current) {
-        setOcrEngines((prev) => ({
+        setOcrEngines(prev => ({
           ...prev,
-          [engine]: { ...(prev[engine] || { installing: false, msg: '' }), installed: false, msg: '检测失败' },
+          [engine]: { installed: false, installing: false, msg: '安装请求失败' },
         }))
       }
     }
