@@ -99,6 +99,16 @@ export default function Layout() {
       .finally(() => setChecking(false))
   }
 
+  // Shutdown backend when page/electron window is closed
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Use sendBeacon — reliable during page unload (unlike fetch)
+      navigator.sendBeacon('/api/v1/shutdown', '')
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
   useEffect(() => {
     checkUpdate()
 

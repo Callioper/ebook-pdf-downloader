@@ -17,9 +17,13 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import urllib3
+warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
 
 from fastapi import APIRouter, File, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -458,7 +462,7 @@ async def check_proxy_sources(body: ProxyRequest):
         ok, detail = _check_url(url, proxy_url if proxy_url else "")
         results[name] = ok
         details[name] = detail
-    return {"ok": True, "results": results, "details": details}
+    return {"ok": True, "results": results, "details": details, "proxy_configured": bool(proxy_url)}
 
 
 @router.post("/zlib-fetch-tokens")
@@ -551,7 +555,6 @@ async def check_ocr(engine: str = Query(default="")):
             if sys.platform != "darwin":
                 return {"ok": False, "engine": "appleocr", "message": "AppleOCR 仅 macOS 支持"}
             try:
-                import subprocess
                 result = subprocess.run(["which", "ocr"],
                     capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:

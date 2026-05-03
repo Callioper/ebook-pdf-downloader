@@ -728,10 +728,10 @@ export default function ConfigSettings() {
             </button>
           </div>
 
-          {detectedPaths.length > 0 && (
+          {Array.isArray(detectedPaths) && detectedPaths.length > 0 && (
             <div className="text-xs text-gray-500 space-y-1">
               <span className="font-medium">检测到的路径:</span>
-              {detectedPaths.map((p, i) => (
+              {detectedPaths.filter(p => p && typeof p === 'string').map((p, i) => (
                 <button
                   key={i}
                   type="button"

@@ -12,6 +12,16 @@
 - OCR 用 subprocess 调用而非 Python import
 - Z-Library 用 curl_cffi 而非 requests
 
+## 系统知识（出现过的坑，记住避免）
+- `start /B` 在同一控制台启动进程 → bash tool 会卡死等待进程结束。
+  正确做法：用 `pty_spawn` 启动长时间运行的进程，或用 `start "" cmd /c` 在新窗口启动。
+- `requirements.txt` 锁定版本前必须先查 venv 实际安装版本，不能直接改 `>=` → `==`。
+  用 `venv\Scripts\python.exe -m pip list --format=freeze` 获取实际版本。
+- 中文注释/字符串在 Windows 上 `open()` 默认 `gbk` 编码会报错。
+  所有 `open()` 调用必须显式指定 `encoding="utf-8"`。
+- 代码修改后必须重建 exe（`python release.py`），否则用户运行的仍然是旧版。
+- 关闭浏览器/前端页面时后端不会自动退出，需要前端主动调用 `/api/v1/shutdown`。
+
 ## AI 常见错误（千万不要犯）
 - 不要用空 except: pass 静默异常 — 至少打印错误信息
 - 不要删除前端 Handler 函数而不检查 JSX 引用 — 导致 TS 编译错误
