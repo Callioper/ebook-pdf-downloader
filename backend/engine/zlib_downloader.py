@@ -81,7 +81,12 @@ class ZLibDownloader:
                                 return {"ok": False, "message": resp.get("error", "登录失败")}
                             self._logged_in = True
                             self._cookies = dict(session.cookies)
-                            return {"ok": True, "message": "登录成功"}
+                            # Try to fetch account balance
+                            balance = self._fetch_balance(session, imp)
+                            result = {"ok": True, "message": "登录成功"}
+                            if balance:
+                                result["balance"] = balance
+                            return result
                         except Exception:
                             pass
                 except Exception as e:
@@ -106,12 +111,57 @@ class ZLibDownloader:
                         data = r.json()
                         if data.get("success") == 1:
                             self._logged_in = True
-                            return {"ok": True, "message": "登录成功"}
+                            balance = self._fetch_balance(session, imp)
+                            result = {"ok": True, "message": "登录成功"}
+                            if balance:
+                                result["balance"] = balance
+                            return result
                         return {"ok": False, "message": data.get("error", "邮箱或密码错误")}
                 except Exception as e:
                     last_error = str(e)
                     time.sleep(1)
         return {"ok": False, "message": f"连接失败: {last_error}"}
+
+    def _fetch_balance(self, session, imp: str) -> Optional[str]:
+        """Fetch account balance/info after successful login."""
+        # Try to get user info endpoint
+        try:
+            # EAPI user info endpoint
+            r = session.get(
+                f"{Z_LIB_DOMAIN}/eapi/user/profile",
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                impersonate=imp,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                # Look for download limits, deposit info, subscription status
+                if data.get("downloads"):
+                    return f"剩余下载: {data.get('downloads')}"
+                if data.get("deposit"):
+                    return f"余额: ${data.get('deposit')}"
+                if data.get("premium"):
+                    return f"高级会员: {data.get('premium')}"
+                if data.get("email"):
+                    return data.get("email")
+        except Exception:
+            pass
+        # Try alternative endpoints
+        try:
+            r2 = session.get(
+                f"{Z_LIB_DOMAIN}/eapi/user/stats",
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                impersonate=imp,
+                timeout=10,
+            )
+            if r2.status_code == 200:
+                data = r2.json()
+                if data.get("limits", {}).get("dl"):
+                    dl = data["limits"]["dl"]
+                    return f"今日下载: {dl.get('used', 0)}/{dl.get('total', '∞')}"
+        except Exception:
+            pass
+        return None
 
     async def zlib_search(self, query: str, page: int = 1, limit: int = 10) -> Dict[str, Any]:
         if not self._logged_in:

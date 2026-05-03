@@ -34,6 +34,21 @@ _flare_install_state: Dict[str, Any] = {
     "path": None,
 }
 
+_flare_dl_state: Dict[str, Any] = {
+    "downloaded": 0,
+    "total": 0,
+    "done": False,
+    "error": "",
+    "status": "idle",
+    "install_path": "",
+}
+
+
+def _flare_report_progress(block_count, block_size, total_size):
+    global _flare_dl_state
+    _flare_dl_state["downloaded"] = min(block_count * block_size, total_size)
+    _flare_dl_state["total"] = total_size
+
 
 class ProxyRequest(BaseModel):
     http_proxy: str = ""
@@ -259,66 +274,53 @@ async def upload_cookies(file: UploadFile = File(...)):
     return {"ok": True, "saved_to": cookie_file}
 
 
+_browse_lock = threading.Lock()
+
+
+def _run_folder_dialog() -> str:
+    """Open native Windows folder picker via tkinter filedialog."""
+    if os.name != "nt":
+        return ""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        root.overrideredirect(True)
+        root.geometry('0x0+0+0')
+        root.lift()
+        root.focus_force()
+        root.update_idletasks()
+        root.after(200, lambda: root.lift())
+        path = filedialog.askdirectory(
+            parent=root, title="Select database folder",
+            mustexist=True,
+        )
+        root.destroy()
+        return str(path) if path else ""
+    except Exception:
+        return ""
+
+
 @router.get("/browse-folder")
 async def browse_folder():
-    if os.name != "nt":
-        return {"path": "", "error": "not supported on this platform"}
-    for method in ["powershell", "vbs"]:
-        try:
-            path = ""
-            if method == "powershell":
-                ps_script = os.path.join(tempfile.gettempdir(), "bdf_browse.ps1")
-                with open(ps_script, "w") as f:
-                    f.write(
-                        'Add-Type -AssemblyName System.Windows.Forms\n'
-                        '$f = New-Object System.Windows.Forms.FolderBrowserDialog\n'
-                        '$f.Description = "Select database folder containing DX_*.db files"\n'
-                        '$f.ShowNewFolderButton = $false\n'
-                        '$r = $f.ShowDialog()\n'
-                        'if ($r -eq "OK") { $f.SelectedPath } else { "" }\n'
-                    )
-                proc = subprocess.run(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                     "-WindowStyle", "Normal", "-File", ps_script],
-                    capture_output=True, text=True, timeout=120,
-                )
-                path = proc.stdout.strip()
-                try:
-                    os.remove(ps_script)
-                except Exception:
-                    pass
-            else:
-                vbs_path = os.path.join(tempfile.gettempdir(), "bdf_browse.vbs")
-                with open(vbs_path, "w") as f:
-                    f.write(
-                        'Set objShell = CreateObject("Shell.Application")\n'
-                        'Set objFolder = objShell.BrowseForFolder(0, "Select database folder", &H51, 0)\n'
-                        'If Not objFolder Is Nothing Then\n'
-                        '  If Not IsNull(objFolder.Self) Then\n'
-                        '    WScript.Echo objFolder.Self.Path\n'
-                        '  End If\n'
-                        'End If\n'
-                    )
-                proc = subprocess.run(
-                    ["cscript", "//Nologo", vbs_path],
-                    capture_output=True, text=True, timeout=120,
-                )
-                path = proc.stdout.strip()
-                try:
-                    os.remove(vbs_path)
-                except Exception:
-                    pass
-            if path:
-                return {"path": path}
-        except Exception as e:
-            if method == "vbs":
-                return {"path": "", "error": str(e)}
-    return {"path": "", "error": "unable to open folder dialog"}
+    if not _browse_lock.acquire(blocking=False):
+        return {"path": "", "error": "dialog already open"}
+    try:
+        loop = asyncio.get_running_loop()
+        path = await loop.run_in_executor(None, _run_folder_dialog)
+        if path:
+            return {"path": path}
+        return {"path": "", "error": "unable to open folder dialog"}
+    finally:
+        _browse_lock.release()
 
 
 @router.get("/detect-paths")
 async def detect_paths():
-    paths = detect_database_paths()
+    loop = asyncio.get_running_loop()
+    paths = await loop.run_in_executor(None, detect_database_paths)
     return {"paths": paths}
 
 
@@ -390,7 +392,9 @@ async def check_proxy(body: ProxyRequest):
         req = urllib.request.Request("http://httpbin.org/ip", headers={"User-Agent": "Mozilla/5.0"})
         with opener.open(req, timeout=6) as resp:
             resp.read()
-        return {"ok": True, "message": "Proxy is working"}
+        # Persist proxy on success
+        update_config({"http_proxy": proxy_url})
+        return {"ok": True, "message": "代理可用"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -400,10 +404,6 @@ async def check_proxy_sources(body: ProxyRequest):
     proxy_url = body.http_proxy or get_config().get("http_proxy", "")
     results = {}
     details = {}
-    try:
-        from curl_cffi import requests as curl_requests
-    except ImportError:
-        import requests as curl_requests
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -414,18 +414,24 @@ async def check_proxy_sources(body: ProxyRequest):
         ("zlibrary", "https://z-lib.sk"),
         ("httpbin", "http://httpbin.org/ip"),
     ]
-    for name, url in targets:
+
+    def _check_url(url: str, proxy: str = "") -> Tuple[bool, str]:
         try:
-            if proxy_url:
-                proxies = {"http": proxy_url, "https": proxy_url}
-                resp = curl_requests.get(url, timeout=8, headers=headers, proxies=proxies)
-            else:
-                resp = curl_requests.get(url, timeout=8, headers=headers)
-            results[name] = resp.status_code == 200
-            details[name] = "OK" if resp.status_code == 200 else f"HTTP {resp.status_code}"
+            import requests as _requests
+            kwargs = {"timeout": 10, "headers": headers, "verify": False}
+            if proxy:
+                kwargs["proxies"] = {"http": proxy, "https": proxy}
+            resp = _requests.get(url, **kwargs)
+            return (resp.status_code in (200, 301, 302), "OK" if resp.status_code == 200 else f"HTTP {resp.status_code}")
+        except _requests.HTTPError as e:
+            return (False, f"HTTP {e.response.status_code}")
         except Exception as e:
-            results[name] = False
-            details[name] = str(e)[:200]
+            return (False, str(e)[:100])
+
+    for name, url in targets:
+        ok, detail = _check_url(url, proxy_url if proxy_url else "")
+        results[name] = ok
+        details[name] = detail
     return {"ok": True, "results": results, "details": details}
 
 
@@ -436,6 +442,9 @@ async def zlib_fetch_tokens(body: ZLibFetchTokensRequest):
         config = get_config()
         dl = ZLibDownloader(config)
         result = await dl.zlib_login(body.email, body.password)
+        # Persist credentials on success
+        if result.get("ok"):
+            update_config({"zlib_email": body.email, "zlib_password": body.password})
         return result
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -448,7 +457,13 @@ async def check_ocr(engine: str = Query(default="")):
         engine = config.get("ocr_engine", "tesseract")
     try:
         if engine == "ocrmypdf":
-            result = subprocess.run(["ocrmypdf", "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                ["python", "-m", "ocrmypdf", "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0:
+                # Fallback: try plain ocrmypdf
+                result = subprocess.run(["ocrmypdf", "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return {"ok": True, "engine": "ocrmypdf", "version": result.stdout.strip().split("\n")[0]}
         elif engine == "tesseract":
@@ -458,7 +473,13 @@ async def check_ocr(engine: str = Query(default="")):
         elif engine == "paddleocr":
             try:
                 import paddleocr
-                return {"ok": True, "engine": "paddleocr"}
+                # Also check CLI
+                result = subprocess.run(
+                    [sys.executable, "-m", "paddleocr", "--version"],
+                    capture_output=True, text=True, timeout=5
+                )
+                ver = result.stdout.strip().split("\n")[0] if result.returncode == 0 else "已安装"
+                return {"ok": True, "engine": "paddleocr", "version": ver}
             except ImportError:
                 pass
         elif engine == "easyocr":
@@ -468,6 +489,8 @@ async def check_ocr(engine: str = Query(default="")):
             except ImportError:
                 pass
         return {"ok": False, "engine": engine, "message": f"{engine} not found"}
+    except FileNotFoundError:
+        return {"ok": False, "engine": engine, "message": f"{engine} 未安装或不在 PATH 中"}
     except Exception as e:
         return {"ok": False, "engine": engine, "message": str(e)}
 
@@ -486,13 +509,13 @@ async def install_ocr(body: InstallOCRRequest):
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
         elif engine == "paddleocr":
             result = subprocess.run(
-                ["pip", "install", "paddlepaddle", "paddleocr"],
+                [sys.executable, "-m", "pip", "install", "paddlepaddle", "paddleocr", "--user"],
                 capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
         elif engine == "easyocr":
             result = subprocess.run(
-                ["pip", "install", "easyocr"],
+                [sys.executable, "-m", "pip", "install", "easyocr", "--user"],
                 capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
@@ -504,37 +527,106 @@ async def install_ocr(body: InstallOCRRequest):
 
 @router.post("/install-flare")
 async def install_flare(body: InstallFlareRequest):
+    global _flare_dl_state
     try:
-        install_path = body.install_path
-        if not install_path:
-            install_path = os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr")
+        custom_path = body.install_path
+        if not custom_path:
+            # Default to program's tools directory for easy discovery
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            install_path = os.path.join(base_dir, "tools", "flaresolverr")
+        else:
+            install_path = custom_path
 
         zip_path = os.path.join(install_path, "flaresolverr.zip")
         os.makedirs(install_path, exist_ok=True)
+        _flare_dl_state["install_path"] = install_path
 
-        try:
-            urllib.request.urlretrieve(FLARE_INSTALL_URL, zip_path)
-        except urllib.error.HTTPError as e:
-            return {"success": False, "error": f"下载失败 (HTTP {e.code}): GitHub 返回 {e.code} 错误，请检查网络或手动安装"}
-        except urllib.error.URLError as e:
-            return {"success": False, "error": f"下载失败 (网络错误): {e.reason}，请检查网络连接或使用代理后重试"}
-        except Exception as e:
-            return {"success": False, "error": f"下载失败: {str(e) or '未知下载错误'}"}
+        def _do_download():
+            global _flare_dl_state
+            try:
+                import requests as _requests
+                _flare_dl_state["status"] = "downloading"
+                _flare_dl_state["downloaded"] = 0
+                _flare_dl_state["total"] = 0
+                _flare_dl_state["done"] = False
+                _flare_dl_state["error"] = ""
+
+                resp = _requests.get(FLARE_INSTALL_URL, stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"})
+                resp.raise_for_status()
+                total = int(resp.headers.get("Content-Length", 0))
+                _flare_dl_state["total"] = total
+                downloaded = 0
+                with open(zip_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            _flare_dl_state["downloaded"] = downloaded
+                _flare_dl_state["status"] = "extracting"
+                _flare_dl_state["done"] = True
+            except _requests.HTTPError as e:
+                _flare_dl_state["error"] = f"下载失败 (HTTP {e.response.status_code})"
+                _flare_dl_state["done"] = True
+                _flare_dl_state["status"] = "error"
+            except Exception as e:
+                _flare_dl_state["error"] = f"下载失败: {str(e)}"
+                _flare_dl_state["done"] = True
+                _flare_dl_state["status"] = "error"
+
+        threading.Thread(target=_do_download, daemon=True).start()
+        return {"success": True, "status": "downloading", "message": "开始下载 FlareSolverr ...", "install_path": install_path}
+    except Exception as e:
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/flare-download-progress")
+async def flare_download_progress():
+    global _flare_dl_state
+    return {
+        "downloaded": _flare_dl_state["downloaded"],
+        "total": _flare_dl_state["total"],
+        "done": _flare_dl_state["done"],
+        "error": _flare_dl_state["error"],
+        "status": _flare_dl_state["status"],
+    }
+
+
+@router.post("/install-flare-complete")
+async def install_flare_complete():
+    """Called by frontend after download done to finalize installation."""
+    global _flare_dl_state
+    try:
+        install_path = os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr")
+        zip_path = os.path.join(install_path, "flaresolverr.zip")
+
+        if not os.path.exists(zip_path):
+            # Already cleaned up or never downloaded
+            exe_path = os.path.join(install_path, "flaresolverr.exe")
+            if os.path.exists(exe_path):
+                return {"success": True, "path": os.path.abspath(exe_path)}
+            return {"success": False, "error": "未找到下载文件，请重新尝试自动下载或手动安装"}
+
+        # The zip extracts to .../temp/book-downloader/flaresolverr/
+        # which already contains flaresolverr/ subfolder from the zip structure
+        extract_base = install_path
 
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(install_path)
+                zf.extractall(extract_base)
         except zipfile.BadZipFile:
-            return {"success": False, "error": "下载文件损坏 (非有效 ZIP)，请删除临时文件后重试"}
+            return {"success": False, "error": "下载文件损坏，请删除临时文件后重试"}
         except Exception as e:
-            return {"success": False, "error": f"解压失败: {str(e) or '未知解压错误'}"}
+            return {"success": False, "error": f"解压失败: {str(e)}"}
 
         try:
             os.remove(zip_path)
         except Exception:
             pass
 
-        exe_path = os.path.join(install_path, "flaresolverr.exe")
+        # The zip structure has flaresolverr/ as the root folder inside the zip
+        # So the exe ends up at: .../temp/book-downloader/flaresolverr/flaresolverr/flaresolverr.exe
+        exe_path = os.path.join(extract_base, "flaresolverr", "flaresolverr.exe")
         if not os.path.exists(exe_path):
             for root, dirs, files in os.walk(install_path):
                 for f in files:
@@ -543,11 +635,12 @@ async def install_flare(body: InstallFlareRequest):
                         break
 
         if os.path.exists(exe_path):
+            _flare_dl_state = {"downloaded": 0, "total": 0, "done": True, "error": "", "status": "done"}
             return {"success": True, "path": os.path.abspath(exe_path)}
-        return {"success": False, "error": "解压后未找到 flaresolverr.exe，请确认压缩包结构是否正确"}
+        return {"success": False, "error": "解压后未找到 flaresolverr.exe"}
     except Exception as e:
         traceback.print_exc()
-        return {"success": False, "error": f"安装异常: {str(e) or '未知错误'}"}
+        return {"success": False, "error": f"安装异常: {str(e)}"}
 
 
 @router.get("/check-flare")
@@ -577,6 +670,26 @@ async def stop_flare():
         from engine.flaresolverr import stop_flaresolverr
         stop_flaresolverr()
         return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class ConfigureFlarePathRequest(BaseModel):
+    path: str
+
+
+@router.post("/configure-flare-path")
+async def configure_flare_path(body: ConfigureFlarePathRequest):
+    """Configure a custom FlareSolverr path by updating config."""
+    try:
+        path = body.path.strip()
+        if not path:
+            return {"success": False, "error": "路径不能为空"}
+        exe_path = os.path.join(path, "flaresolverr.exe")
+        if not os.path.exists(exe_path):
+            return {"success": False, "error": f"未找到 flaresolverr.exe，路径: {path}"}
+        update_config({"flaresolverr_path": path})
+        return {"success": True, "path": os.path.abspath(exe_path)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

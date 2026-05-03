@@ -23,16 +23,26 @@ interface AppConfig {
 }
 
 function FolderPicker({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [picking, setPicking] = useState(false)
+  const pickingRef = useRef(false)
 
   const pickFolder = async () => {
+    if (pickingRef.current) return
+    pickingRef.current = true
+    setPicking(true)
     try {
       const res = await fetch('/api/v1/browse-folder')
       const data = await res.json()
       if (data.path) {
         onChange(data.path)
+      } else if (data.error) {
+        console.warn('Folder picker:', data.error)
       }
-    } catch {}
+    } catch (e) {
+      console.warn('Folder picker failed:', e)
+    }
+    pickingRef.current = false
+    setPicking(false)
   }
 
   return (
@@ -48,10 +58,11 @@ function FolderPicker({ value, onChange, placeholder }: { value: string; onChang
       <button
         type="button"
         onClick={pickFolder}
-        className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 shrink-0"
+        disabled={picking}
+        className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         title="打开文件夹选择对话框"
       >
-        ...
+        {picking ? '...' : '...'}
       </button>
     </div>
   )
@@ -122,7 +133,7 @@ const DEFAULT_CONFIG: AppConfig = {
   zlib_email: '',
   zlib_password: '',
   aa_membership_key: '',
-  ocr_engine: 'tesseract',
+  ocr_engine: 'ocrmypdf',
 }
 
 const OCR_ENGINES = [
@@ -156,6 +167,8 @@ export default function ConfigSettings() {
   const [zlibChecking, setZlibChecking] = useState(false)
   const [zlibConnected, setZlibConnected] = useState(false)
   const [zlibMsg, setZlibMsg] = useState('')
+  const [zlibChecked, setZlibChecked] = useState(false)
+  const [zlibBalance, setZlibBalance] = useState('')
 
   const [flareRunning, setFlareRunning] = useState(false)
   const [flareInstalled, setFlareInstalled] = useState(false)
@@ -164,11 +177,13 @@ export default function ConfigSettings() {
   const [flareProgress, setFlareProgress] = useState(0)
   const [flareStatusText, setFlareStatusText] = useState('')
   const [flareInstallFailed, setFlareInstallFailed] = useState(false)
+  const [flareManualPath, setFlareManualPath] = useState('')
   const flarePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [proxyChecking, setProxyChecking] = useState(false)
   const [proxyStatus, setProxyStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
   const [proxyMsg, setProxyMsg] = useState('')
+  const [proxyChecked, setProxyChecked] = useState(false)
   const [aaProxyStatus, setAaProxyStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
   const [zlProxyStatus, setZlProxyStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
   const [aaProxyDetail, setAaProxyDetail] = useState('')
@@ -328,6 +343,7 @@ export default function ConfigSettings() {
     setProxyChecking(true)
     setProxyStatus(null)
     setProxyMsg('')
+    setProxyChecked(false)
     try {
       const res = await fetch('/api/v1/check-proxy', {
         method: 'POST',
@@ -338,10 +354,22 @@ export default function ConfigSettings() {
       if (!mountedRef.current) return
       setProxyStatus(data.ok ? 'green' : 'red')
       setProxyMsg(data.message || (data.ok ? '代理可用' : '代理不可用'))
+      setProxyChecked(true)
+      if (data.ok) {
+        // Auto-save after successful proxy test
+        try {
+          await fetch('/api/v1/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          })
+        } catch { /* silent */ }
+      }
     } catch {
       if (mountedRef.current) {
         setProxyStatus('red')
         setProxyMsg('检测失败')
+        setProxyChecked(true)
       }
     } finally {
       if (mountedRef.current) setProxyChecking(false)
@@ -378,6 +406,7 @@ export default function ConfigSettings() {
     }
     setZlibChecking(true)
     setZlibMsg('')
+    setZlibChecked(false)
     try {
       const res = await fetch('/api/v1/zlib-fetch-tokens', {
         method: 'POST',
@@ -389,14 +418,34 @@ export default function ConfigSettings() {
       if (data.ok) {
         setZlibConnected(true)
         setZlibMsg('已连接')
+        setZlibChecked(true)
+        // Show balance if available
+        if (data.balance !== undefined) {
+          setZlibBalance(data.balance)
+        } else if (data.downloads_remaining !== undefined) {
+          setZlibBalance(`剩余下载: ${data.downloads_remaining}`)
+        } else if (data.user_email) {
+          setZlibBalance(data.user_email)
+        }
+        // Auto-save after successful login
+        try {
+          await fetch('/api/v1/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          })
+        } catch { /* silent */ }
       } else {
         setZlibConnected(false)
         setZlibMsg('连接失败: ' + (data.message || '未知错误'))
+        setZlibChecked(true)
+        setZlibBalance('')
       }
     } catch (e: any) {
       if (mountedRef.current) {
         setZlibConnected(false)
         setZlibMsg('请求失败: ' + (e.message || ''))
+        setZlibChecked(true)
       }
     } finally {
       if (mountedRef.current) setZlibChecking(false)
@@ -408,6 +457,7 @@ export default function ConfigSettings() {
     setFlareProgress(0)
     setFlareStatusText('正在下载 FlareSolverr ...')
     setFlareInstallFailed(false)
+    setFlareStatusText('正在下载 FlareSolverr ...')
     try {
       const res = await fetch('/api/v1/install-flare', {
         method: 'POST',
@@ -416,29 +466,66 @@ export default function ConfigSettings() {
       })
       const data = await res.json()
       if (!data.success) {
-        setFlareStatusText('安装失败: ' + (data.error || '未知错误'))
+        setFlareStatusText('启动下载失败: ' + (data.error || '未知错误'))
         setFlareInstalling(false)
         setFlareInstallFailed(true)
         return
       }
-      if (mountedRef.current) {
-        setFlareProgress(100)
-        setFlareInstalled(true)
-        setFlareInstalling(false)
-        setFlareStatusText('安装完成，正在启动 ...')
-      }
-      try {
-        const startRes = await fetch('/api/v1/start-flare', { method: 'POST' })
-        const startData = await startRes.json()
-        if (startData.success) {
-          setFlareRunning(true)
-          setFlareStatusText('FlareSolverr 已启动')
-        } else {
-          setFlareStatusText('启动失败: ' + (startData.error || '未知错误'))
+      // Poll download progress
+      const pollProgress = async () => {
+        const progRes = await fetch('/api/v1/flare-download-progress')
+        const prog = await progRes.json()
+        if (!mountedRef.current) return
+        if (prog.total > 0) {
+          const pct = Math.round((prog.downloaded / prog.total) * 100)
+          setFlareProgress(pct)
+          setFlareStatusText(`下载中 ${pct}% ...`)
         }
-      } catch {
-        setFlareStatusText('启动请求失败')
+        if (prog.done || prog.status === 'error' || prog.status === 'extracting') {
+          if (prog.status === 'error' || prog.error) {
+            setFlareStatusText('下载失败: ' + (prog.error || '未知错误'))
+            setFlareInstalling(false)
+            setFlareInstallFailed(true)
+            return
+          }
+          // Done downloading, now extract
+          setFlareStatusText('下载完成，正在解压 ...')
+          setFlareProgress(100)
+          try {
+            const extRes = await fetch('/api/v1/install-flare-complete', { method: 'POST' })
+            const extData = await extRes.json()
+            if (extData.success) {
+              setFlareInstalled(true)
+              setFlareInstalling(false)
+              setFlareStatusText('安装完成，正在启动 ...')
+              try {
+                const startRes = await fetch('/api/v1/start-flare', { method: 'POST' })
+                const startData = await startRes.json()
+                if (startData.success) {
+                  setFlareRunning(true)
+                  setFlareStatusText('FlareSolverr 已启动')
+                } else {
+                  setFlareStatusText('启动失败: ' + (startData.error || '未知错误'))
+                }
+              } catch {
+                setFlareStatusText('启动请求失败')
+              }
+            } else {
+              setFlareStatusText('解压失败: ' + (extData.error || '未知错误'))
+              setFlareInstalling(false)
+              setFlareInstallFailed(true)
+            }
+          } catch {
+            setFlareStatusText('解压请求失败')
+            setFlareInstalling(false)
+            setFlareInstallFailed(true)
+          }
+          return
+        }
+        // Continue polling
+        setTimeout(pollProgress, 500)
       }
+      setTimeout(pollProgress, 500)
     } catch (e: any) {
       setFlareInstalling(false)
       setFlareStatusText('安装请求失败: ' + (e.message || ''))
@@ -711,18 +798,22 @@ export default function ConfigSettings() {
                 disabled={zlibChecking}
                 className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {zlibChecking ? '检测中...' : '检测连通性'}
+                {zlibChecking ? '登录中...' : '登录'}
               </button>
-              {zlibConnected && (
-                <span className="text-xs text-green-600 font-medium">已连接</span>
+              {zlibChecking ? (
+                <span className="text-xs text-blue-500">登录中...</span>
+              ) : zlibChecked && (
+                <span className={`text-xs font-medium ${zlibConnected ? 'text-green-600' : 'text-red-500'}`}>
+                  {zlibConnected ? '已连接' : '未连接'}
+                </span>
               )}
-              {zlibMsg && !zlibConnected && (
-                <span className="text-xs text-red-500">{zlibMsg}</span>
+              {zlibBalance && (
+                <span className="text-xs text-gray-500">{zlibBalance}</span>
               )}
             </div>
-            {zlibMsg && zlibConnected && (
-              <p className="text-xs mt-1.5 text-green-600">{zlibMsg}</p>
-            )}
+            {!zlibChecking && zlibMsg && !zlibConnected && (
+                <span className="text-xs text-red-500">{zlibMsg}</span>
+              )}
           </div>
 
           <div className="border-t border-gray-200 pt-3">
@@ -759,6 +850,58 @@ export default function ConfigSettings() {
                       解压后将 <code className="bg-yellow-100 px-1 rounded">flaresolverr.exe</code> 放到
                       <code className="bg-yellow-100 px-1 rounded">tools/flaresolverr/</code> 目录下
                     </p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <input
+                        type="text"
+                        value={flareManualPath}
+                        onChange={(e) => setFlareManualPath(e.target.value)}
+                        placeholder="或点击...选择 flaresolverr.exe 所在目录"
+                        spellCheck={false}
+                        className="flex-1 rounded border border-yellow-300 px-2 py-1 text-xs font-mono focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const res = await fetch('/api/v1/browse-folder')
+                            const data = await res.json()
+                            if (data.path) {
+                              setFlareManualPath(data.path)
+                            }
+                          } catch { /* silent */ }
+                        }}
+                        className="px-2 py-1 text-xs rounded border border-yellow-300 bg-white hover:bg-yellow-50 text-yellow-700"
+                      >
+                        ...
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const path = flareManualPath.trim()
+                          if (!path) return
+                          try {
+                            const res = await fetch('/api/v1/configure-flare-path', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ path }),
+                            })
+                            const data = await res.json()
+                            if (data.success) {
+                              setFlareInstalled(true)
+                              setFlareInstallFailed(false)
+                              setFlareStatusText('目录配置成功')
+                            } else {
+                              setFlareStatusText('配置失败: ' + (data.error || ''))
+                            }
+                          } catch {
+                            setFlareStatusText('配置请求失败')
+                          }
+                        }}
+                        className="px-2 py-1 text-xs rounded bg-yellow-600 text-white hover:bg-yellow-700"
+                      >
+                        配置目录
+                      </button>
+                    </div>
                   </div>
                 )}
                 <div className="flex items-center gap-2">
@@ -833,10 +976,21 @@ export default function ConfigSettings() {
               disabled={proxyChecking}
               className="px-3 py-1.5 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
             >
-              {proxyChecking ? '检测中...' : '检测代理'}
+              {proxyChecking ? '登录中...' : '登录'}
             </button>
-            <StatusDot status={proxyStatus} />
-            {proxyMsg && <span className="text-xs text-gray-500">{proxyMsg}</span>}
+            {proxyChecking ? (
+              <span className="text-xs text-purple-500">检测中...</span>
+            ) : proxyChecked ? (
+              <>
+                <StatusDot status={proxyStatus} />
+                {proxyStatus === 'green' && (
+                  <span className="text-xs text-green-600 font-medium">已连接</span>
+                )}
+                {!proxyStatus && <span className="text-xs text-red-500">{proxyMsg}</span>}
+              </>
+            ) : (
+              <StatusDot status={proxyStatus} />
+            )}
           </div>
 
           <div className="border-t border-gray-200 pt-3">
@@ -874,10 +1028,11 @@ export default function ConfigSettings() {
       />
       {expanded.ocr && (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+          {/* OCRmyPDF 独立状态区 */}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">OCRmyPDF 状态</label>
             <div className="flex items-center gap-2">
-              <StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : 'red'} />
+              <StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : ocrEngines['ocrmypdf']?.msg ? 'red' : null} />
               <span className="text-xs text-gray-500">
                 {ocrEngines['ocrmypdf']?.msg || '点击检测'}
               </span>
@@ -899,10 +1054,11 @@ export default function ConfigSettings() {
             </div>
           </div>
 
+          {/* 引擎切换区 */}
           <div className="border-t border-gray-200 pt-3">
-            <span className="text-xs font-medium text-gray-600">OCR 引擎</span>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {OCR_ENGINES.map((eng) => {
+            <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
+            <div className="grid grid-cols-2 gap-2">
+              {OCR_ENGINES.filter(e => e.key !== 'ocrmypdf').map((eng) => {
                 const info = ocrEngines[eng.key]
                 const isSelected = form.ocr_engine === eng.key
                 return (

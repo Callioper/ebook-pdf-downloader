@@ -3,6 +3,7 @@ import sqlite3
 import shutil
 import sys
 from pathlib import Path
+import time as _time
 from typing import Any, Dict, List
 
 
@@ -121,10 +122,11 @@ class SearchEngine:
 search_engine = SearchEngine()
 
 
-def detect_database_paths() -> List[Dict[str, Any]]:
+def detect_database_paths(timeout: float = 30.0) -> List[Dict[str, Any]]:
     """Find directories containing DX_2.0-5.0.db or DX_6.0.db files."""
     candidates: List[Dict[str, Any]] = []
     seen: set = set()
+    deadline = _time.time() + timeout
     try:
         home = Path.home()
     except Exception:
@@ -144,7 +146,7 @@ def detect_database_paths() -> List[Dict[str, Any]]:
         except (PermissionError, OSError):
             pass
 
-    def scan_dir(base: Path, max_depth: int = 2):
+    def _safe_scan_dir(base: Path, max_depth: int = 3):
         try:
             if not base.exists() or not base.is_dir():
                 return
@@ -156,13 +158,13 @@ def detect_database_paths() -> List[Dict[str, Any]]:
                     if child.is_dir():
                         check_path(child)
                         if max_depth > 1:
-                            scan_dir(child, max_depth - 1)
+                            _safe_scan_dir(child, max_depth - 1)
                 except (PermissionError, OSError):
                     pass
         except (PermissionError, OSError):
             pass
 
-    # Known project paths
+    # === Priority paths (fast check) ===
     for p in [
         Path(__file__).resolve().parent / "data",
         home / "EbookDatabase" / "instance",
@@ -174,38 +176,136 @@ def detect_database_paths() -> List[Dict[str, Any]]:
             continue
         check_path(p)
 
-    # Common directory names to scan under drives / user dirs
-    known_names = ["BookDownloader", "EbookDatabase", "EBook", "ebook", "books", "ebooks",
-                   "LibGen", "libgen", "pdf", "PDF", "data", "db", "database"]
+    # === Common directory names ===
+    known_names = [
+        "BookDownloader", "book-downloader", "EbookDatabase", "EBook", "ebook", "ebooks",
+        "books", "book", "LibGen", "libgen", "pdf", "PDF", "data", "db", "database",
+        "instance", "ebook_database", "eBook Database", "ebook_db", "DB",
+        "calibre", "Calibre", "Calibre 书库",
+    ]
 
-    # Scan Windows drive roots for known directories
+    # === Direct scan all drives for DB files at root level ===
     if os.name == "nt":
-        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":  # skip A: and B: (floppy)
+        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            try:
+                root = Path(f"{drive}:\\")
+                if not os.path.exists(str(root)):
+                    continue
+                for db_name in target_files:
+                    db_path = root / db_name
+                    if db_path.exists():
+                        candidates.append({"path": str(root), "dbs": [db_name], "exists": True})
+                        break
+            except (PermissionError, OSError):
+                continue
+
+    # === Scan drive roots for known directory names (depth 1 into match) ===
+    if os.name == "nt":
+        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
             try:
                 root = Path(f"{drive}:\\")
                 if not os.path.exists(str(root)):
                     continue
                 for name in known_names:
-                    check_path(root / name)
+                    p = root / name
+                    if p.exists() and p.is_dir():
+                        _safe_scan_dir(p, max_depth=1)
             except (PermissionError, OSError):
                 continue
 
-    # Scan user home subdirs
-    for sub in ["Downloads", "Documents", "Desktop"]:
+    # === Scan all drive root subdirs (depth 2: subdir -> known_name -> db) ===
+    if os.name == "nt":
+        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            try:
+                root = Path(f"{drive}:\\")
+                if not os.path.exists(str(root)):
+                    continue
+                for child in root.iterdir():
+                    try:
+                        if child.is_dir():
+                            for name in known_names:
+                                p = child / name
+                                if p.exists() and p.is_dir():
+                                    _safe_scan_dir(p, max_depth=1)
+                    except (PermissionError, OSError):
+                        pass
+            except (PermissionError, OSError):
+                continue
+
+    # === Scan user home subdirs (English + Chinese) at depth 2 ===
+    for sub in ["Downloads", "下载", "Documents", "文档", "Desktop", "桌面"]:
         p = home / sub
-        if p.exists():
+        if not p.exists():
+            continue
+        _safe_scan_dir(p, max_depth=2)
+
+    # === Scan common Windows special folders ===
+    for env_var in ["USERPROFILE", "APPDATA", "LOCALAPPDATA", "OneDrive", "OneDriveCommercial"]:
+        val = os.environ.get(env_var, "")
+        if val and os.path.isdir(val):
+            p = Path(val)
             check_path(p)
             for name in known_names:
                 check_path(p / name)
-    # Deeper scan of Downloads (common place for downloaded DBs)
-    downloads = home / "Downloads"
-    if downloads.exists():
-        try:
-            for child in downloads.iterdir():
-                if child.is_dir():
-                    check_path(child)
-        except (PermissionError, OSError):
-            pass
+            _safe_scan_dir(p, max_depth=1)
+
+    # === Scan Program Files directories ===
+    for prog_dir in [os.environ.get("ProgramFiles", ""), os.environ.get("ProgramFiles(x86)", ""),
+                     os.environ.get("ProgramW6432", "")]:
+        if not prog_dir or not os.path.isdir(prog_dir):
+            continue
+        p = Path(prog_dir)
+        for name in known_names:
+            check_path(p / name)
+
+    # === Scan siblings of project root ===
+    try:
+        project_root = Path(__file__).resolve().parent.parent
+        check_path(project_root / "data")
+        for child in project_root.iterdir():
+            if child.is_dir() and child.name not in ("backend", "frontend", ".git", "node_modules", "venv"):
+                check_path(child)
+                for name in known_names:
+                    check_path(child / name)
+    except Exception:
+        pass
+
+    # === Deep recursive scan if no results yet (os.walk on all drives) ===
+    if not candidates and os.name == "nt":
+        _skip_dirs = {
+            "Windows", "Program Files", "Program Files (x86)", "ProgramData",
+            "Windows.old", "$RECYCLE.BIN", "System Volume Information",
+            "node_modules", "__pycache__", ".git", "venv", ".venv", ".idea",
+            "Recovery", "Boot", "EFI", "MSOCache", "PerfLogs",
+        }
+        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            if _time.time() > deadline:
+                break
+            walk_root = Path(f"{drive}:\\")
+            if not walk_root.exists():
+                continue
+            try:
+                for dirpath_str, dirnames, filenames in os.walk(str(walk_root), followlinks=False):
+                    if _time.time() > deadline:
+                        break
+                    dirnames[:] = [d for d in dirnames if d not in _skip_dirs]
+                    depth = len(dirpath_str) - len(str(walk_root)) - dirpath_str.count(os.sep)
+                    if depth > 8:
+                        dirnames.clear()
+                        continue
+                    has_db = any(tf in filenames for tf in target_files)
+                    if has_db:
+                        dirpath = Path(dirpath_str)
+                        dbs = [f for f in target_files if (dirpath / f).exists()]
+                        if dbs:
+                            candidates.append({"path": dirpath_str, "dbs": dbs, "exists": True})
+                            break
+                    if len(candidates) >= 5:
+                        break
+            except (PermissionError, OSError):
+                continue
+            if len(candidates) >= 5:
+                break
 
     candidates.sort(key=lambda c: len(c.get("dbs", [])), reverse=True)
     return candidates if candidates else []

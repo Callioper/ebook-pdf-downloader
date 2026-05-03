@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +24,6 @@ from version import VERSION
 from engine.flaresolverr import stop_flaresolverr
 
 logger = logging.getLogger("book-downloader")
-_edge_process: Optional[subprocess.Popen] = None
 
 
 def get_frontend_dir() -> Optional[str]:
@@ -61,6 +61,15 @@ app.add_middleware(
 app.include_router(search_router)
 app.include_router(tasks_router)
 app.include_router(ws_router)
+
+_last_heartbeat = 0.0
+
+
+@app.get("/api/v1/heartbeat")
+async def heartbeat():
+    global _last_heartbeat
+    _last_heartbeat = time.time()
+    return {"ok": True}
 
 
 @app.get("/api/v1/health")
@@ -108,49 +117,30 @@ else:
 
 
 def main():
-    config = init_config()
-    host = config.get("host", "0.0.0.0")
-    port = config.get("port", 8000)
-
-    db_path = config.get("ebook_db_path", "")
-    if db_path:
-        search_engine.set_db_dir(db_path)
-
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        reload=False,
-        log_level="info",
-    )
+    try:
+        config = init_config()
+        host = config.get("host", "0.0.0.0")
+        port = config.get("port", 8000)
+        db_path = config.get("ebook_db_path", "")
+        if db_path:
+            search_engine.set_db_dir(db_path)
+        uvicorn.run(app, host=host, port=port, reload=False, log_level="info")
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        os._exit(1)
 
 
 if __name__ == "__main__":
-    import time
     import webbrowser
     import urllib.request
 
-    if "--no-browser" in sys.argv:
-        main()
-    else:
+    if "--no-browser" not in sys.argv:
+        # Open browser as subprocess, then run server in main thread
         config_data = init_config()
         port = config_data.get("port", 8000)
-
-        server_thread = threading.Thread(target=main, daemon=True)
-        server_thread.start()
-
         url = f"http://localhost:{port}"
-        print(f"\n  Book Downloader: {url}\n")
 
-        # Wait for server
-        for _ in range(50):
-            try:
-                urllib.request.urlopen(f"{url}/api/v1/health", timeout=0.5)
-                break
-            except Exception:
-                time.sleep(0.1)
-
-        # Try Edge app mode first
         opened = False
         for edge_path in [
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -158,7 +148,7 @@ if __name__ == "__main__":
         ]:
             if os.path.exists(edge_path):
                 try:
-                    _edge_process = subprocess.Popen(
+                    subprocess.Popen(
                         [edge_path, f"--app={url}", "--new-window", "--window-size=1200,800"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     )
@@ -170,18 +160,4 @@ if __name__ == "__main__":
         if not opened:
             webbrowser.open(url)
 
-        if _edge_process:
-            def _poll_edge():
-                while _edge_process is not None and _edge_process.poll() is None:
-                    time.sleep(2)
-                stop_flaresolverr()
-                os._exit(0)
-
-            threading.Thread(target=_poll_edge, daemon=True).start()
-
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\nShutting down...")
-            stop_flaresolverr()
+    main()

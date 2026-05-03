@@ -11,24 +11,28 @@ _flare_process: Optional[subprocess.Popen] = None
 
 
 def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
-    search_paths = [
-        os.path.join(config.get("tmp_dir", ""), "flaresolverr", "flaresolverr.exe"),
-        os.path.join(config.get("tmp_dir", ""), "flaresolverr", "flaresolverr", "flaresolverr.exe"),
-        os.path.join(os.path.dirname(__file__), "..", "tools", "flaresolverr", "flaresolverr.exe"),
-        os.path.join(os.path.dirname(__file__), "..", "tools", "flaresolverr", "flaresolverr", "flaresolverr.exe"),
-    ]
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    search_paths.append(os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr.exe"))
-    search_paths.append(os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr", "flaresolverr.exe"))
-    search_paths.append(os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr", "flaresolverr.exe"))
-    search_paths.append(os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr", "flaresolverr", "flaresolverr.exe"))
+    search_paths = [
+        # User-configured path first (from flaresolverr_path config)
+        config.get("flaresolverr_path", ""),
+        # Default install: program_root/tools/flaresolverr/flaresolverr/flaresolverr.exe
+        os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr", "flaresolverr.exe"),
+        # Also check one level up
+        os.path.join(base_dir, "tools", "flaresolverr", "flaresolverr.exe"),
+        # Legacy temp locations
+        os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr", "flaresolverr", "flaresolverr.exe"),
+        os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr", "flaresolverr.exe"),
+    ]
 
     for path in search_paths:
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             return os.path.abspath(path)
 
-    for base in search_paths:
-        base = os.path.dirname(base)
+    # Walk search
+    for base in [
+        os.path.join(base_dir, "tools", "flaresolverr"),
+        os.path.join(tempfile.gettempdir(), "book-downloader", "flaresolverr"),
+    ]:
         if os.path.isdir(base):
             for root, dirs, files in os.walk(base):
                 for f in files:
@@ -62,18 +66,19 @@ async def start_flaresolverr(config: Dict[str, Any]) -> bool:
         return False
 
     try:
+        cwd = os.path.dirname(exe_path)
         _flare_process = subprocess.Popen(
             [exe_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            cwd=os.path.dirname(exe_path),
+            cwd=cwd,
         )
-        for _ in range(15):
+        for _ in range(20):
             await asyncio.sleep(1)
             if await check_flaresolverr(config):
                 return True
         return False
-    except Exception:
+    except Exception as e:
         return False
 
 
