@@ -695,10 +695,11 @@ async def check_ocr(engine: str = Query(default="")):
         elif engine == "easyocr":
             # Use system Python to check (pip install goes to system Python, not frozen exe)
             py = _pip_install_cmd()[0]
-            r = subprocess.run([py, "-c", "import easyocr; print('ok')"],
+            r = subprocess.run([py, "-c", "import easyocr; print(easyocr.__version__)"],
                                capture_output=True, text=True, timeout=10)
             if r.returncode == 0:
-                return {"ok": True, "engine": "easyocr"}
+                ver = r.stdout.strip().split("\n")[0]
+                return {"ok": True, "engine": "easyocr", "version": ver}
             try:
                 import site; user_site = site.getusersitepackages()
                 if user_site not in sys.path: sys.path.insert(0, user_site)
@@ -774,74 +775,79 @@ async def install_ocr(body: InstallOCRRequest):
     engine = body.engine
     try:
         if engine == "tesseract":
-            # Try winget first (built-in on Win11), then fallback to download+install
+            # Try multiple install methods
             try:
                 if os.name == "nt":
-                    # Method 1: winget
+                    # Method 1: winget (built-in on Win11)
                     try:
                         result = subprocess.run(
                             ["winget", "install", "--exact", "--id", "UB-Mannheim.TesseractOCR",
                              "--silent", "--accept-package-agreements"],
-                            capture_output=True, text=True, timeout=60
+                            capture_output=True, text=True, timeout=120
                         )
                         if result.returncode == 0:
-                            try:
-                                os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
-                            except Exception:
-                                pass
                             return {"ok": True, "message": "Tesseract OCR 安装成功（winget）"}
                     except FileNotFoundError:
-                        pass  # winget not available, fall through
+                        pass
 
-                    # Method 2: Download from UB-Mannheim GitHub + ShellExecuteW runas
+                    # Method 2: choco (chocolatey)
+                    try:
+                        result = subprocess.run(
+                            ["choco", "install", "tesseract", "-y"],
+                            capture_output=True, text=True, timeout=120
+                        )
+                        if result.returncode == 0:
+                            return {"ok": True, "message": "Tesseract OCR 安装成功（choco）"}
+                    except FileNotFoundError:
+                        pass
+
+                    # Method 3: Direct download from UB-Mannheim (with mirror fallback)
                     import requests as _requests
-                    tess_urls = [
-                        "https://github.com/UB-Mannheim/tesseract/releases/latest",
-                        "https://ghproxy.net/https://github.com/UB-Mannheim/tesseract/releases/latest",
-                        "https://github.moeyy.xyz/https://github.com/UB-Mannheim/tesseract/releases/latest",
+                    # Try known direct download URLs first (no API needed)
+                    direct_urls = [
+                        "https://github.com/UB-Mannheim/tesseract/releases/download/v5.5.0.20241111/tesseract-ocr-w64-setup-5.5.0.20241111.exe",
+                        "https://github.com/UB-Mannheim/tesseract/releases/download/v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe",
                     ]
-                    api_data = None
-                    for api_url in tess_urls:
-                        try:
-                            r = _requests.get(api_url, timeout=10, headers={"User-Agent": "book-downloader"}, verify=False)
-                            if r.status_code == 200:
-                                if "api.github.com" in api_url or "releases/latest" in api_url:
-                                    try:
-                                        api_data = r.json()
-                                        break
-                                    except Exception:
-                                        continue
-                        except Exception:
-                            continue
-                    if api_data is not None:
-                        assets = api_data.get("assets", [])
-                        installer_url = ""
-                        for asset in assets:
-                            name = asset.get("name", "")
-                            if "w64" in name.lower() and name.lower().endswith(".exe") and "setup" in name.lower():
-                                installer_url = asset.get("browser_download_url", "")
-                                break
-                        if installer_url:
-                            tmp_dir = os.path.join(tempfile.gettempdir(), "book-downloader", "tesseract")
-                            os.makedirs(tmp_dir, exist_ok=True)
-                            installer_path = os.path.join(tmp_dir, os.path.basename(installer_url.split("?")[0]))
-                            dl = _requests.get(installer_url, stream=True, timeout=120, verify=False)
-                            dl.raise_for_status()
-                            with open(installer_path, "wb") as f:
-                                for chunk in dl.iter_content(chunk_size=65536):
-                                    if chunk:
-                                        f.write(chunk)
-                            import ctypes
-                            ret = ctypes.windll.shell32.ShellExecuteW(
-                                None, "runas", installer_path,
-                                "/S /D=C:\\Program Files\\Tesseract-OCR", None, 0
-                            )
-                            if ret > 32:
-                                import time as _t
-                                _t.sleep(5)
-                                os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
-                                return {"ok": True, "message": "Tesseract OCR 安装已启动（请确认 UAC 弹窗）"}
-                return {"ok": False, "message": "请手动安装 Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki"}
+                    mirror_prefixes = [
+                        "",  # direct
+                        "https://ghproxy.net/",
+                        "https://github.moeyy.xyz/",
+                    ]
+                    installer_path = None
+                    for direct_url in direct_urls:
+                        for prefix in mirror_prefixes:
+                            dl_url = prefix + direct_url if prefix else direct_url
+                            try:
+                                tmp_dir = os.path.join(tempfile.gettempdir(), "book-downloader", "tesseract")
+                                os.makedirs(tmp_dir, exist_ok=True)
+                                installer_path = os.path.join(tmp_dir, "tesseract-setup.exe")
+                                dl = _requests.get(dl_url, stream=True, timeout=120, verify=False)
+                                dl.raise_for_status()
+                                with open(installer_path, "wb") as f:
+                                    for chunk in dl.iter_content(chunk_size=65536):
+                                        if chunk:
+                                            f.write(chunk)
+                                # Verify it's really an exe
+                                if os.path.getsize(installer_path) > 5 * 1024 * 1024:
+                                    break  # success
+                            except Exception:
+                                installer_path = None
+                                continue
+                        if installer_path:
+                            break
+
+                    if installer_path and os.path.getsize(installer_path) > 5 * 1024 * 1024:
+                        import ctypes
+                        ret = ctypes.windll.shell32.ShellExecuteW(
+                            None, "runas", installer_path,
+                            "/S /D=C:\\Program Files\\Tesseract-OCR", None, 0
+                        )
+                        if ret > 32:
+                            import time as _t
+                            _t.sleep(5)
+                            os.environ["PATH"] += os.pathsep + r"C:\Program Files\Tesseract-OCR"
+                            return {"ok": True, "message": "Tesseract OCR 安装已启动（请确认 UAC 弹窗）"}
+                return {"ok": False, "message": "请手动安装 Tesseract OCR:\n  winget install --id UB-Mannheim.TesseractOCR\n  choco install tesseract\n  或下载: https://github.com/UB-Mannheim/tesseract/releases"}
             except Exception as e:
                 return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}。请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
         elif engine == "ocrmypdf":

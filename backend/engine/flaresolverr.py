@@ -47,13 +47,23 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
                     if f.lower() == "flaresolverr.exe":
                         return os.path.abspath(os.path.join(root, f))
 
-    # Last resort: walk the entire project directory
-    for root, dirs, files in os.walk(base_dir):
-        # Skip large system directories and hidden folders
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "__pycache__", "node_modules")]
-        for f in files:
-            if f.lower() == "flaresolverr.exe":
-                return os.path.abspath(os.path.join(root, f))
+    # Last resort: walk the config path (if set) and its parent, then project dir
+    config_path = config.get("flaresolverr_path", "")
+    if config_path and os.path.isdir(config_path):
+        # The exe might be in a subdir of the config path
+        for root, dirs, files in os.walk(config_path):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for f in files:
+                if f.lower() == "flaresolverr.exe":
+                    return os.path.abspath(os.path.join(root, f))
+
+    # Walk the project directory
+    if os.path.isdir(base_dir):
+        for root, dirs, files in os.walk(base_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "__pycache__", "node_modules")]
+            for f in files:
+                if f.lower() == "flaresolverr.exe":
+                    return os.path.abspath(os.path.join(root, f))
 
     return None
 
