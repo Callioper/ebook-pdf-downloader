@@ -104,11 +104,14 @@ class SearchEngine:
                 seen.add(key)
                 deduped.append(b)
 
+        # Re-count after dedup so total matches actual displayed count
+        real_total = len(deduped)
+
         return {
             "books": deduped,
-            "total": total,
-            "totalRecords": total,
-            "totalPages": max(1, (total + page_size - 1) // page_size),
+            "total": real_total,
+            "totalRecords": real_total,
+            "totalPages": max(1, (real_total + page_size - 1) // page_size),
         }
 
     def available_dbs(self) -> List[str]:

@@ -38,6 +38,11 @@ router = APIRouter(prefix="/api/v1")
 HTML_TAG_RE = re.compile(r'<[^>]+>')
 
 FLARE_INSTALL_URL = "https://github.com/FlareSolverr/FlareSolverr/releases/download/v3.4.6/flaresolverr_windows_x64.zip"
+FLARE_MIRROR_URLS = [
+    # GitHub mirror (for CN users where github.com is slow/unreachable)
+    "https://ghproxy.net/https://github.com/FlareSolverr/FlareSolverr/releases/download/v3.4.6/flaresolverr_windows_x64.zip",
+    "https://github.moeyy.xyz/https://github.com/FlareSolverr/FlareSolverr/releases/download/v3.4.6/flaresolverr_windows_x64.zip",
+]
 
 _flare_install_state: Dict[str, Any] = {
     "downloading": False,
@@ -80,14 +85,78 @@ class InstallFlareRequest(BaseModel):
     install_path: str = ""
 
 
-def _search_annas_archive(query: str, proxy: str = "") -> List[Dict[str, str]]:
+def _extract_aa_search_metadata(html: str) -> List[Dict[str, Any]]:
+    """Extract book metadata from Anna's Archive search results page HTML.
+    Search result cards contain: title, author, year, publisher, format, size, language."""
     results = []
+    seen = set()
+    # Each result is typically in a div with href to /md5/...
+    for m in re.finditer(r'href="/md5/([a-f0-9]{32})"[^>]*>\s*([^<]+)', html):
+        md5 = m.group(1)
+        if md5 in seen:
+            continue
+        seen.add(md5)
+        book: Dict[str, Any] = {"md5": md5, "source": "annas_archive",
+                                "md5_url": f"https://annas-archive.gd/md5/{md5}"}
+        # Extract title from the link text
+        title = HTML_TAG_RE.sub('', m.group(2)).strip()
+        if title:
+            book["title"] = title
+        results.append(book)
+
+    if not results:
+        return results
+
+    # Parse search result cards for additional metadata
+    # Split by md5 links to get individual result blocks
+    blocks = re.split(r'<a[^>]*href="/md5/[a-f0-9]{32}"', html)
+    if len(blocks) <= 1:
+        return results
+
+    # Skip first block (before first result)
+    for i, block in enumerate(blocks[1:], start=0):
+        if i >= len(results):
+            break
+        book = results[i]
+        # Extract year - look for 4-digit year near "year" or similar labels
+        year_m = re.search(r'(?:年|Year|year)[^：:]*[：:]\s*(\d{4})', block)
+        if year_m:
+            book["year"] = year_m.group(1)
+        # Extract publisher
+        pub_m = re.search(r'(?:出版社?|Publisher|publisher)[^：:]*[：:]\s*([^<\n]+)', block)
+        if pub_m:
+            book["publisher"] = pub_m.group(1).strip()
+        # Extract format/extension
+        fmt_m = re.search(r'(?:格式|文件类型|Format|format)[^：:]*[：:]\s*(\w+)', block)
+        if fmt_m:
+            book["format"] = fmt_m.group(1).strip()
+        # Extract file size
+        size_m = re.search(r'(?:大小|文件大小|Size|size)[^：:]*[：:]\s*([\d. ]+\s*(?:MB|GB|KB|MiB|GiB))', block)
+        if size_m:
+            book["size"] = size_m.group(1).strip()
+        # Extract author
+        auth_m = re.search(r'(?:作者|Author|author)[^：:]*[：:]\s*([^<\n]+)', block)
+        if auth_m:
+            book["author"] = auth_m.group(1).strip()
+        # Extract language
+        lang_m = re.search(r'(?:语言|Language|lang)[^：:]*[：:]\s*(\w+)', block)
+        if lang_m:
+            book["language"] = lang_m.group(1).strip()
+        # Extract ISBN
+        isbn_m = re.search(r'[Ii][Ss][Bb][Nn][^：:]*[：:]\s*([\dX-]+)', block)
+        if isbn_m:
+            book["isbn"] = isbn_m.group(1).strip()
+
+    return results
+
+
+def _search_annas_archive(query: str, proxy: str = "") -> List[Dict[str, Any]]:
     encoded = urllib.parse.quote(query)
     url = f"https://annas-archive.gd/search?q={encoded}"
     try:
         import requests as _requests
         kwargs = {
-            "timeout": 10,
+            "timeout": 15,
             "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
             "verify": False,
         }
@@ -95,16 +164,20 @@ def _search_annas_archive(query: str, proxy: str = "") -> List[Dict[str, str]]:
             kwargs["proxies"] = {"http": proxy, "https": proxy}
         resp = _requests.get(url, **kwargs)
         if resp.status_code == 200:
-            html = resp.text
-            seen = set()
-            for m in re.finditer(r'href="/md5/([a-f0-9]{32})"', html):
-                md5 = m.group(1)
-                if md5 not in seen:
-                    seen.add(md5)
-                    results.append({"md5": md5, "md5_url": f"https://annas-archive.gd/md5/{md5}"})
+            results = _extract_aa_search_metadata(resp.text)
+            if not results:
+                # Fallback: old behavior - only extract MD5 links
+                seen = set()
+                for m in re.finditer(r'href="/md5/([a-f0-9]{32})"', resp.text):
+                    md5 = m.group(1)
+                    if md5 not in seen:
+                        seen.add(md5)
+                        results.append({"md5": md5, "source": "annas_archive",
+                                        "md5_url": f"https://annas-archive.gd/md5/{md5}"})
+            return results
     except Exception as e:
         logger.warning(f"Failed to search Anna's Archive: {e}")
-    return results
+    return []
 
 
 def _fetch_md5_page_info(md5: str, proxy: str = "") -> Dict[str, Any]:
@@ -113,7 +186,7 @@ def _fetch_md5_page_info(md5: str, proxy: str = "") -> Dict[str, Any]:
     try:
         import requests as _requests
         kwargs = {
-            "timeout": 10,
+            "timeout": 15,
             "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
             "verify": False,
         }
@@ -127,19 +200,22 @@ def _fetch_md5_page_info(md5: str, proxy: str = "") -> Dict[str, Any]:
         if title_m:
             raw_title = HTML_TAG_RE.sub('', title_m.group(1)).strip()
             info["title"] = raw_title
-        for label, key in [
-            (r'Author[s]?', "author"),
-            (r'Language', "language"),
-            (r'Format', "format"),
-            (r'File size', "size"),
-            (r'Year', "year"),
-            (r'ISBN', "isbn"),
-            (r'Publisher', "publisher"),
-        ]:
-            pattern = re.compile(rf'<[^>]*>{label}</[^>]*>\s*<[^>]*>(.*?)</[^>]*>', re.IGNORECASE | re.DOTALL)
-            m = pattern.search(html)
+        # More flexible patterns - handle various HTML structures on AA pages
+        patterns = [
+            (r'Author[s]?[：:\s]*([^<>\n]{2,80})', "author"),
+            (r'(?:Language|语言)[：:\s]*([A-Za-z]{2,20})', "language"),
+            (r'(?:Format|格式)[：:\s]*(\w+)', "format"),
+            (r'(?:File size|Size|文件大小)[：:\s]*([\d. ]+\s*(?:MB|GB|KB|MiB|GiB))', "size"),
+            (r'(?:Year|年份)[：:\s]*(\d{4})', "year"),
+            (r'[Ii][Ss][Bb][Nn][：:\s]*([\dX-]{10,17})', "isbn"),
+            (r'(?:Publisher|出版社)[：:\s]*([^<>\n]{2,100})', "publisher"),
+        ]
+        for pattern, key in patterns:
+            if key in info:
+                continue
+            m = re.search(pattern, html)
             if m:
-                val = HTML_TAG_RE.sub('', m.group(1)).strip()
+                val = m.group(1).strip()
                 if val:
                     info[key] = val
         if "title" not in info:
@@ -162,7 +238,13 @@ async def _search_zlib(query: str, proxy: str = "") -> List[Dict[str, Any]]:
         dl = ZLibDownloader(config)
         result = await dl.zlib_search(query, page=1, limit=10)
         books = []
-        for item in result.get("books", result.get("results", []))[:10]:
+        # Handle multiple possible result key names from Z-Lib eAPI
+        items = result.get("books") or result.get("results") or result.get("data") or []
+        if isinstance(items, dict):
+            items = items.get("books", items.get("results", []))
+        for item in (items if isinstance(items, list) else [])[:10]:
+            if not item.get("title"):
+                continue
             books.append({
                 "source": "zlibrary",
                 "title": item.get("title", ""),
@@ -171,7 +253,7 @@ async def _search_zlib(query: str, proxy: str = "") -> List[Dict[str, Any]]:
                 "publisher": item.get("publisher", ""),
                 "year": str(item.get("year", "")),
                 "language": item.get("language", ""),
-                "format": item.get("extension", ""),
+                "format": item.get("extension", item.get("format", "")),
                 "size": item.get("filesize", item.get("size", "")),
                 "md5": item.get("md5", ""),
                 "book_id": str(item.get("id", "")),
@@ -682,7 +764,12 @@ async def install_ocr(body: InstallOCRRequest):
                 return {"ok": False, "message": f"自动安装失败: {str(e)[:100]}，请手动安装: https://github.com/UB-Mannheim/tesseract/wiki"}
         elif engine in ("ocrmypdf", "paddleocr", "easyocr"):
             if getattr(sys, 'frozen', False):
-                return {"ok": False, "message": f"打包版不支持自动安装{engine}，请从源码运行: cd backend && pip install {engine}"}
+                tips = {
+                    "ocrmypdf": "pip install ocrmypdf",
+                    "paddleocr": "pip install ocrmypdf-paddleocr (详见 https://github.com/clefru/ocrmypdf-paddleocr)",
+                    "easyocr": "pip install ocrmypdf-easyocr (详见 https://github.com/ocrmypdf/OCRmyPDF-EasyOCR)",
+                }
+                return {"ok": False, "message": f"打包版不支持自动安装 {engine}。请从源码运行后手动安装: cd backend && {tips.get(engine, 'pip install ' + engine)}"}
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", engine, "--user"],
                 capture_output=True, text=True, timeout=300
@@ -728,19 +815,37 @@ async def install_flare(body: InstallFlareRequest):
                 _flare_dl_state["done"] = False
                 _flare_dl_state["error"] = ""
 
-                resp = _requests.get(FLARE_INSTALL_URL, stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"})
-                resp.raise_for_status()
-                total = int(resp.headers.get("Content-Length", 0))
-                _flare_dl_state["total"] = total
-                downloaded = 0
-                with open(zip_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            _flare_dl_state["downloaded"] = downloaded
-                _flare_dl_state["status"] = "extracting"
-                _flare_dl_state["done"] = True
+                # Try primary URL first, then mirrors
+                urls_to_try = [FLARE_INSTALL_URL] + list(FLARE_MIRROR_URLS)
+                last_error = ""
+                for dl_url in urls_to_try:
+                    try:
+                        resp = _requests.get(dl_url, stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"})
+                        resp.raise_for_status()
+                        total = int(resp.headers.get("Content-Length", 0))
+                        _flare_dl_state["total"] = total
+                        downloaded = 0
+                        with open(zip_path, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=65536):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    _flare_dl_state["downloaded"] = downloaded
+                        _flare_dl_state["status"] = "extracting"
+                        _flare_dl_state["done"] = True
+                        last_error = ""
+                        break  # success, stop trying
+                    except Exception as e:
+                        last_error = str(e)
+                        _flare_dl_state["status"] = "downloading"
+                        _flare_dl_state["total"] = 0
+                        _flare_dl_state["downloaded"] = 0
+                        continue
+
+                if last_error:
+                    _flare_dl_state["error"] = f"所有下载地址均失败 (最后错误: {last_error[:100]})"
+                    _flare_dl_state["done"] = True
+                    _flare_dl_state["status"] = "error"
             except _requests.HTTPError as e:
                 _flare_dl_state["error"] = f"下载失败 (HTTP {e.response.status_code})"
                 _flare_dl_state["done"] = True
