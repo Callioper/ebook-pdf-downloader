@@ -1086,7 +1086,7 @@ async def check_flare(body: Optional[Dict[str, Any]] = None):
 async def start_flare():
     try:
         from engine.flaresolverr import start_flaresolverr
-        ok = start_flaresolverr(get_config())
+        ok = await start_flaresolverr(get_config())
         return {"success": ok}
     except Exception as e:
         return {"success": False, "error": str(e)}

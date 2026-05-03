@@ -1104,7 +1104,13 @@ export default function ConfigSettings() {
       {/* ============ OCR ============ */}
       <SectionHeader
         title="OCR"
-        summary={<><StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : ocrEngines['ocrmypdf']?.msg ? 'red' : null} /> {ocrEngines['ocrmypdf']?.msg || '未检测'} · <StatusDot status={ocrStatus} /> {ocrStatus === 'green' ? (ocrMsg.includes('已安装') ? ocrMsg : `已安装 ${ocrMsg}`) : ocrStatus === 'red' ? '未安装' : '未检测'}</>}
+        summary={<>
+  <StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : ocrEngines['ocrmypdf']?.msg ? 'red' : null} />
+  <span className="text-xs">OCRmyPDF {ocrEngines['ocrmypdf']?.installed ? (ocrEngines['ocrmypdf']?.msg || '已安装') : '未安装'}</span>
+  <span className="text-xs text-gray-300 mx-1">·</span>
+  <StatusDot status={ocrStatus} />
+  <span className="text-xs">{form.ocr_engine === 'ocrmypdf' ? 'OCRmyPDF' : (OCR_ENGINES.find(e => e.key === form.ocr_engine)?.name || form.ocr_engine)} {ocrStatus === 'green' ? (ocrMsg || '已安装') : '未安装'}</span>
+</>}
         color="orange"
         expanded={expanded.ocr}
         onToggle={() => toggleSection('ocr')}

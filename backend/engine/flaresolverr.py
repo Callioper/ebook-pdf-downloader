@@ -66,27 +66,37 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
     if os.path.isdir(base_dir):
         walk_dirs.append(base_dir)
 
-    # Drive root scan (like DB detection): scan common directories on each drive
+    # Drive-level scan: for each drive, scan first-level dirs and subdirs named 'flaresolverr'
     if os.name == "nt":
-        known_names = ["BookDownloader", "book-downloader", "FlareSolverr", "flaresolverr", "tools", "apps", "Program Files"]
+        known_names = {"flaresolverr", "FlareSolverr", "tools", "apps"}
         for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
             drive_root = f"{drive_letter}:\\"
             if not os.path.isdir(drive_root):
                 continue
-            # Quick check: known names at drive root
-            for name in known_names:
-                base = os.path.join(drive_root, name)
-                if os.path.isdir(base):
-                    walk_dirs.append(base)
-                    # Also check one level deep inside known directories
-                    try:
-                        for entry in os.listdir(base):
-                            child = os.path.join(base, entry)
-                            if os.path.isdir(child) and not entry.startswith("."):
-                                if entry.lower() in ("flaresolverr", "bin", "app", "apps"):
-                                    walk_dirs.append(child)
-                    except (PermissionError, OSError):
-                        pass
+            # Scan first-level directories on this drive
+            try:
+                for entry in os.listdir(drive_root):
+                    child = os.path.join(drive_root, entry)
+                    if not os.path.isdir(child) or entry.startswith("."):
+                        continue
+                    # Quick check: known dir names at first level
+                    if entry.lower() in known_names:
+                        walk_dirs.append(child)
+                    # Always check for 'flaresolverr' subdir inside any first-level dir
+                    flaresolverr_sub = os.path.join(child, "flaresolverr")
+                    if os.path.isdir(flaresolverr_sub):
+                        walk_dirs.append(flaresolverr_sub)
+                    # Also check child for flaresolverr.exe directly (depth 1 quick scan)
+                    flaresolverr_exe = os.path.join(child, "flaresolverr.exe")
+                    if os.path.exists(flaresolverr_exe):
+                        try:
+                            from config import update_config
+                            update_config({"flaresolverr_path": os.path.dirname(os.path.abspath(flaresolverr_exe))})
+                        except Exception:
+                            pass
+                        return os.path.abspath(flaresolverr_exe)
+            except (PermissionError, OSError):
+                continue
 
     seen = set()
     for walk_base in walk_dirs:
