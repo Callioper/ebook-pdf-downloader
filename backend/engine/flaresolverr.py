@@ -31,7 +31,6 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
             p = os.path.join(cfg_path, sub, "flaresolverr.exe")
             if p not in search_paths:
                 search_paths.append(p)
-        # Also check the EXACT path if it looks like an exe path
         if cfg_path.lower().endswith(".exe"):
             search_paths.insert(0, cfg_path)
 
@@ -47,14 +46,17 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
         if path and os.path.exists(path):
             return os.path.abspath(path)
 
-    # Walk search directories
+    # Walk search directories (like database smart detection)
     walk_dirs = []
+
     # Config path parent (user's install dir)
-    if cfg_path and os.path.isdir(os.path.dirname(cfg_path)):
-        walk_dirs.append(os.path.dirname(cfg_path))
-    # Config path itself
-    if cfg_path and os.path.isdir(cfg_path):
-        walk_dirs.append(cfg_path)
+    if cfg_path:
+        parent = os.path.dirname(cfg_path)
+        if os.path.isdir(parent):
+            walk_dirs.append(parent)
+        if os.path.isdir(cfg_path):
+            walk_dirs.append(cfg_path)
+
     # Common locations
     walk_dirs += [
         os.path.join(base_dir, "tools", "flaresolverr"),
@@ -63,6 +65,28 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
     # Project root
     if os.path.isdir(base_dir):
         walk_dirs.append(base_dir)
+
+    # Drive root scan (like DB detection): scan common directories on each drive
+    if os.name == "nt":
+        known_names = ["BookDownloader", "book-downloader", "FlareSolverr", "flaresolverr", "tools", "apps", "Program Files"]
+        for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive_root = f"{drive_letter}:\\"
+            if not os.path.isdir(drive_root):
+                continue
+            # Quick check: known names at drive root
+            for name in known_names:
+                base = os.path.join(drive_root, name)
+                if os.path.isdir(base):
+                    walk_dirs.append(base)
+                    # Also check one level deep inside known directories
+                    try:
+                        for entry in os.listdir(base):
+                            child = os.path.join(base, entry)
+                            if os.path.isdir(child) and not entry.startswith("."):
+                                if entry.lower() in ("flaresolverr", "bin", "app", "apps"):
+                                    walk_dirs.append(child)
+                    except (PermissionError, OSError):
+                        pass
 
     seen = set()
     for walk_base in walk_dirs:
@@ -74,6 +98,12 @@ def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
                 dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "__pycache__", "node_modules")]
                 for f in files:
                     if f.lower() == "flaresolverr.exe":
+                        # Save to config so next lookups are instant
+                        try:
+                            from config import update_config
+                            update_config({"flaresolverr_path": os.path.dirname(os.path.abspath(os.path.join(root, f)))})
+                        except Exception:
+                            pass
                         return os.path.abspath(os.path.join(root, f))
         except (PermissionError, OSError):
             continue
