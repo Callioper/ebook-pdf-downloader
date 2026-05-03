@@ -222,7 +222,19 @@ class ZLibDownloader:
                                 filepath = os.path.join(output_dir, f"{book_id}.{ext}")
                                 with open(filepath, "wb") as f:
                                     f.write(dl_r.content)
-                                return True
+                                # Validate: actual PDF must have at least 1KB and be binary (not JSON error page)
+                                if os.path.getsize(filepath) > 1024:
+                                    # Quick check: PDF files start with %PDF
+                                    with open(filepath, "rb") as f:
+                                        header = f.read(4)
+                                    if ext == "pdf" and header != b"%PDF":
+                                        logger.warning(f"ZL download for {book_id} returned non-PDF content")
+                                        try:
+                                            os.remove(filepath)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        return True
                     return False
                 except Exception:
                     time.sleep(1)

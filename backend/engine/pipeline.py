@@ -111,84 +111,109 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
     return report
 
 
-async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Optional[str]:
-    """Search Anna's Archive by SS code and download the PDF. Returns the file path or None."""
-    import requests as _req
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    kwargs = {"timeout": 15, "headers": headers, "verify": False}
-    if proxy:
-        kwargs["proxies"] = {"http": proxy, "https": proxy}
-
-    # Step 1: Search AA by SS code → get MD5
+async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> Optional[str]:
+    """Fetch a web page, trying FlareSolverr first (for Cloudflare bypass), then direct."""
     try:
-        resp = _req.get(f"https://annas-archive.gd/search?q={ss_code}", **kwargs)
-        if resp.status_code != 200:
-            return None
-        html = resp.text
-        # Extract first MD5 from search results
-        md5_m = re.search(r'href="/md5/([a-f0-9]{32})"', html)
-        if not md5_m:
-            return None
-        md5 = md5_m.group(1)
-    except Exception as e:
+        from engine.flaresolverr import get_page_content
+        result = await get_page_content(url, proxy)
+        if result:
+            return result
+    except ImportError:
+        pass
+    # Direct fallback
+    import requests as _req
+    try:
+        h = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        kwargs = {"timeout": timeout, "headers": h, "verify": False}
+        if proxy:
+            kwargs["proxies"] = {"http": proxy, "https": proxy}
+        r = _req.get(url, **kwargs)
+        return r.text if r.status_code == 200 else None
+    except Exception:
         return None
 
-    # Step 2: Visit MD5 page to extract download link
+
+async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "") -> Optional[str]:
+    """Search Anna's Archive by SS code and download the PDF. Returns the file path or None.
+    Uses FlareSolverr for Cloudflare bypass when available."""
+    # Step 1: Search AA by SS code → get MD5
+    html = await _get_page_with_flare(f"https://annas-archive.gd/search?q={ss_code}", proxy)
+    if not html:
+        return None
+    md5_m = re.search(r'href="/md5/([a-f0-9]{32})"', html)
+    if not md5_m:
+        return None
+    md5 = md5_m.group(1)
+
+    # Step 2: Visit MD5 page → extract download link
+    md5_html = await _get_page_with_flare(f"https://annas-archive.gd/md5/{md5}", proxy, timeout=30)
+    if not md5_html:
+        return None
+
+    dl_url = None
+    # Pattern 1: /d/{md5} redirect via direct check
+    import requests as _req
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    kwargs = {"timeout": 15, "headers": headers, "verify": False, "allow_redirects": False}
+    if proxy:
+        kwargs["proxies"] = {"http": proxy, "https": proxy}
     try:
-        resp = _req.get(f"https://annas-archive.gd/md5/{md5}", **kwargs)
-        if resp.status_code != 200:
-            return None
-        html = resp.text
+        resp = _req.get(f"https://annas-archive.gd/d/{md5}", **kwargs)
+        if resp.status_code in (301, 302, 303, 307):
+            dl_url = resp.headers.get("Location")
+    except Exception:
+        pass
 
-        # Try various download link patterns on AA pages
-        dl_url = None
-        # Pattern 1: direct download link from /d/ redirect page
-        dl_m = re.search(r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*)"', html)
-        if dl_m:
-            dl_url = dl_m.group(1)
-        # Pattern 2: data-attribute with download URL
-        if not dl_url:
-            dl_m = re.search(r'data-(?:url|file|download)="(https?://[^"]*)"', html)
-            if dl_m:
-                dl_url = dl_m.group(1)
-        # Pattern 3: download through AA's own proxy
-        if not dl_url:
-            dl_m = re.search(r'https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*\.(?:pdf|epub|mobi)', html)
-            if dl_m:
-                dl_url = dl_m.group(0)
-        # Pattern 4: /d/{md5} redirect page
-        if not dl_url:
-            try:
-                resp2 = _req.get(f"https://annas-archive.gd/d/{md5}", allow_redirects=False, **kwargs)
-                if resp2.status_code in (301, 302, 303, 307) and resp2.headers.get("Location"):
-                    dl_url = resp2.headers["Location"]
-            except Exception:
-                pass
+    # Pattern 2: direct file link in HTML
+    if not dl_url:
+        for p in [
+            r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*\.(?:pdf|epub|mobi)[^"]*)"',
+            r'href="(https?://[^"]*\.(?:pdf|epub|mobi)\?[^"]*)"',
+            r'href="(https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*)"',
+        ]:
+            m = re.search(p, md5_html)
+            if m:
+                dl_url = m.group(1)
+                break
 
-        if not dl_url:
-            return None
+    # Pattern 3: data attributes
+    if not dl_url:
+        m = re.search(r'data-(?:url|file|download)="(https?://[^"]*)"', md5_html)
+        if m:
+            dl_url = m.group(1)
 
-        # Step 3: Download the file
-        file_resp = _req.get(dl_url, stream=True, timeout=60, **kwargs)
+    if not dl_url:
+        return None
+
+    # Step 3: Download the file
+    try:
+        f_kwargs = {"timeout": 60, "headers": headers, "verify": False, "stream": True}
+        if proxy:
+            f_kwargs["proxies"] = {"http": proxy, "https": proxy}
+        file_resp = _req.get(dl_url, **f_kwargs)
         file_resp.raise_for_status()
 
-        # Determine filename from Content-Disposition or URL
         import urllib.parse as _up
-        fname = f"{md5}.pdf"
         cd = file_resp.headers.get("Content-Disposition", "")
+        fname = f"{md5}.pdf"
         if cd and "filename=" in cd:
             fname = cd.split("filename=")[-1].strip("\"' ")
-        elif dl_url:
-            fname = os.path.basename(_up.urlparse(dl_url).path) or fname
+        else:
+            url_path = _up.urlparse(dl_url).path
+            if url_path:
+                fname = os.path.basename(url_path) or fname
 
         filepath = os.path.join(tmp_dir, fname)
         with open(filepath, "wb") as f:
             for chunk in file_resp.iter_content(chunk_size=65536):
                 if chunk:
                     f.write(chunk)
-        return filepath if os.path.getsize(filepath) > 1024 else None
+
+        if os.path.getsize(filepath) > 1024:
+            return filepath
     except Exception:
-        return None
+        pass
+    return None
 
 
 async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
@@ -235,18 +260,29 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
             items = result.get("books") or result.get("results") or result.get("data") or []
             if isinstance(items, dict):
                 items = items.get("books", items.get("results", []))
-            for item in (items if isinstance(items, list) else []):
-                book_id = str(item.get("id", ""))
-                book_hash = item.get("hash", "")
-                if book_id and book_hash:
-                    ok = await dl.zlib_download_book(book_id, book_hash, report["tmp_dir"])
-                    if ok:
-                        task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
-                        report["download_source"] = "zlibrary"
-                        downloaded = True
-                        break
-                    else:
-                        task_store.add_log(task_id, f"Z-Library download attempt failed for book {book_id}")
+                for item in (items if isinstance(items, list) else []):
+                    book_id = str(item.get("id", ""))
+                    book_hash = item.get("hash", "")
+                    if book_id and book_hash:
+                        ok = await dl.zlib_download_book(book_id, book_hash, report["tmp_dir"])
+                        if ok:
+                            # Verify the file was actually saved and has content
+                            saved_files = list(Path(report["tmp_dir"]).glob(f"{book_id}.*"))
+                            valid = False
+                            for f in saved_files:
+                                if f.stat().st_size > 1024:
+                                    valid = True
+                                    report["download_path"] = str(f)
+                                    break
+                            if valid:
+                                task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
+                                report["download_source"] = "zlibrary"
+                                downloaded = True
+                                break
+                            else:
+                                task_store.add_log(task_id, f"Z-Library file for {book_id} is empty or invalid")
+                        else:
+                            task_store.add_log(task_id, f"Z-Library download attempt failed for book {book_id}")
         except Exception as e:
             task_store.add_log(task_id, f"Z-Library download error: {e}")
 
