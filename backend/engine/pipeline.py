@@ -994,16 +994,19 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
     pdf_path = report.get("pdf_path", "")
 
     if not bookmark:
-        task_store.add_log(task_id, "No bookmark provided, trying NLC bookmark getter...")
+        task_store.add_log(task_id, "No bookmark provided, trying shukui.net (by ISBN)...")
         try:
             from backend.nlc.bookmarkget import get_bookmark
-            nlc_path = config.get("ebook_data_geter_path", "")
-            book_id = report.get("book_id", "")
-            if book_id and nlc_path:
-                bookmark = await get_bookmark(book_id, nlc_path)
+            isbn = report.get("isbn", "")
+            if isbn:
+                bookmark = await get_bookmark(isbn)
                 if bookmark:
-                    task_store.add_log(task_id, "Bookmark fetched from NLC")
+                    task_store.add_log(task_id, "Bookmark fetched from shukui.net")
                     report["bookmark"] = bookmark
+                else:
+                    task_store.add_log(task_id, "Bookmark not found on shukui.net")
+            else:
+                task_store.add_log(task_id, "No ISBN available for bookmark lookup")
         except ImportError:
             task_store.add_log(task_id, "NLC bookmark module not available")
         except Exception as e:
