@@ -400,8 +400,19 @@ async def _download_via_aa_and_stacks(
     stacks_timeout = config.get("stacks_timeout", 300)
     use_stacks = bool(stacks_api_key)
 
+    # 即使没有 API key，也尝试检测 stacks 是否运行（端口可达即认为可用）
+    if not use_stacks:
+        try:
+            import requests as _req
+            hc = _req.get(f"{stacks_url}/api/health", timeout=3)
+            if hc.status_code < 500:  # 任何非 5xx 响应都表明服务在运行
+                use_stacks = True
+                task_store.add_log(task_id, f"AA: stacks detected at {stacks_url} (no API key, may use limited endpoints)")
+        except Exception:
+            task_store.add_log(task_id, f"AA: stacks not reachable at {stacks_url}")
+
     if use_stacks:
-        task_store.add_log(task_id, f"AA: stacks enabled ({stacks_url})")
+        task_store.add_log(task_id, f"AA: stacks {'configured' if stacks_api_key else 'reachable'} ({stacks_url})")
 
         # Step C: 遍历 MD5 尝试下载
         for i, entry in enumerate(all_md5_entries[:10]):
@@ -455,10 +466,6 @@ async def _download_via_aa_and_stacks(
                     task_store.add_log(task_id, "AA: stacks_client module not available")
                 except Exception as e:
                     task_store.add_log(task_id, f"AA: stacks error: {str(e)[:100]}")
-            else:
-                task_store.add_log(task_id, "AA: stacks not available (no API key of Docker service), "
-                                           "skipping AA download. Fall back to Z-Library...")
-                # 参考代码设计：AA 下载只通过 stacks，不可用时直接降级
 
             # 只试第一个 MD5（参考代码只选 best MD5）
             break
@@ -938,18 +945,32 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
     await _emit(task_id, "step_progress", {"step": "finalize", "progress": 0})
 
     pdf_path = report.get("pdf_path", "")
+    download_dir = config.get("download_dir", "")
     finished_dir = config.get("finished_dir", "")
 
-    if pdf_path and os.path.exists(pdf_path) and finished_dir:
-        try:
-            os.makedirs(finished_dir, exist_ok=True)
-            dest_pdf = os.path.join(finished_dir, os.path.basename(pdf_path))
-            if os.path.abspath(pdf_path) != os.path.abspath(dest_pdf):
-                shutil.move(pdf_path, dest_pdf)
-                report["pdf_path"] = dest_pdf
-                task_store.add_log(task_id, f"PDF moved to finished dir: {dest_pdf}")
-        except Exception as e:
-            task_store.add_log(task_id, f"Finalize move error: {e}")
+    if pdf_path and os.path.exists(pdf_path):
+        # 确定目标目录：优先 download_dir，其次 finished_dir
+        target_dir = download_dir or finished_dir
+        if target_dir:
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+                ext = os.path.splitext(pdf_path)[1] or ".pdf"
+                # 文件名格式: SSID_书名.扩展名
+                ss_code = report.get("ss_code", "")
+                title = report.get("title", "book")
+                safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
+                if ss_code:
+                    new_name = f"{ss_code}_{safe_title}{ext}"
+                else:
+                    new_name = f"{safe_title}{ext}"
+                dest_pdf = os.path.join(target_dir, new_name)
+                if os.path.abspath(pdf_path) != os.path.abspath(dest_pdf):
+                    shutil.move(pdf_path, dest_pdf)
+                    report["pdf_path"] = dest_pdf
+                    task_store.add_log(task_id, f"PDF saved: {dest_pdf}")
+                task_store.add_log(task_id, f"任务输出: {dest_pdf}")
+            except Exception as e:
+                task_store.add_log(task_id, f"Finalize move error: {e}")
 
     tmp_dir = report.get("tmp_dir", "")
     if tmp_dir and os.path.exists(tmp_dir):
