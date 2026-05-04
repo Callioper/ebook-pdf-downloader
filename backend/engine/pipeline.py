@@ -463,6 +463,8 @@ async def _download_via_aa_and_stacks(
                     else:
                         err = result.get("error", "")
                         task_store.add_log(task_id, f"AA: stacks add_task failed: {err}")
+                        if "401" in str(err) or "Authentication" in str(err):
+                            task_store.add_log(task_id, "💡 需要 API Key — 设置 → stacks → 获取 API Key 后填入")
                 except ImportError:
                     task_store.add_log(task_id, "AA: stacks_client module not available")
                 except Exception as e:
@@ -470,9 +472,10 @@ async def _download_via_aa_and_stacks(
 
             # stacks 不可用或失败 → FlareSolverr 兜底下载
             # 通过 FlareSolverr session 获取 /d/{md5} 的 CDN 重定向 URL
-            task_store.add_log(task_id, f"AA: trying FlareSolverr direct download (port {_get_flare_port(config)})...")
             try:
-                from engine.flaresolverr import _flare_url, _get_flare_port
+                from engine.flaresolverr import _get_flare_port
+                port = _get_flare_port(config)
+                task_store.add_log(task_id, f"AA: trying FlareSolverr direct download (port {port})...")
                 fs_url = await resolve_download_url(md5, proxy)
                 if fs_url and "annas-archive" not in fs_url.lower():
                     task_store.add_log(task_id, f"AA: CDN URL from FlareSolverr: {fs_url[:80]}")
