@@ -1291,9 +1291,18 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
         if ocr_engine == "tesseract":
             task_store.add_log(task_id, "Running OCRmyPDF with Tesseract...")
+
+            # Check if PDF already has text layer (skip if born-digital)
+            if not _is_scanned(pdf_path):
+                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
+                report["ocr_done"] = True
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
+                "--ocr-engine", "tesseract",
                 "-l", ocr_lang,
                 "-j", str(ocr_jobs),
                 "--output-type", "pdf",
@@ -1318,6 +1327,46 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             except asyncio.TimeoutError:
                 proc.kill()
                 task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
+        elif ocr_engine == "easyocr":
+            task_store.add_log(task_id, "Running OCRmyPDF with EasyOCR...")
+
+            if not _is_scanned(pdf_path):
+                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
+                report["ocr_done"] = True
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            cmd = [
+                _py_for_ocr, "-m", "ocrmypdf",
+                "--ocr-engine", "tesseract",
+                "--plugin", "ocrmypdf_easyocr",
+                "-l", ocr_lang or "chi_sim+eng",
+                "-j", "1",
+                "--output-type", "pdf",
+                "--pdf-renderer", "sandwich",
+                pdf_path,
+                output_pdf,
+            ]
+
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
+                if proc.returncode == 0:
+                    os.replace(output_pdf, pdf_path)
+                    task_store.add_log(task_id, "OCR completed successfully")
+                    report["ocr_done"] = True
+                else:
+                    task_store.add_log(task_id, f"OCR failed: {stderr.decode(errors='replace')}")
+            except asyncio.TimeoutError:
+                proc.kill()
+                task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
+
         elif ocr_engine == "paddleocr":
             task_store.add_log(task_id, "Running OCRmyPDF with PaddleOCR...")
             
@@ -1331,6 +1380,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
+                "--ocr-engine", "tesseract",
                 "--plugin", "ocrmypdf_paddleocr",
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", "1",  # PaddleOCR thread safety
