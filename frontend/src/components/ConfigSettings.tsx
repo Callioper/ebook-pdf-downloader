@@ -1027,8 +1027,28 @@ export default function ConfigSettings() {
                     setStacksChecking(true)
                     try {
                       const url = form.stacks_base_url || 'http://localhost:7788'
-                      const res = await fetch(url + '/api/health', { signal: AbortSignal.timeout(5000) })
-                      setStacksStatus(res.ok ? 'green' : 'red')
+                      // Step 1: Test health
+                      const health = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
+                      if (!health.ok) { setStacksStatus('red'); return }
+
+                      // Step 2: Test API key (if configured)
+                      const key = form.stacks_api_key || ''
+                      if (key) {
+                        try {
+                          const keyTest = await fetch(url + '/api/key/test', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key }),
+                            signal: AbortSignal.timeout(3000),
+                          })
+                          const kd = await keyTest.json()
+                          setStacksStatus(kd.valid ? 'green' : 'yellow')
+                        } catch {
+                          setStacksStatus('yellow') // reachable but key test failed
+                        }
+                      } else {
+                        setStacksStatus('yellow') // reachable but no key
+                      }
                     } catch {
                       setStacksStatus('red')
                     } finally {

@@ -462,9 +462,9 @@ async def _download_via_aa_and_stacks(
                                     task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download")
                     else:
                         err = result.get("error", "")
-                        task_store.add_log(task_id, f"AA: stacks add_task failed: {err}")
-                        if "401" in str(err) or "Authentication" in str(err):
-                            task_store.add_log(task_id, "💡 需要 API Key — 设置 → stacks → 获取 API Key 后填入")
+                        task_store.add_log(task_id, f"AA: stacks add_task fail (401): {err}")
+                        task_store.add_log(task_id, "💡 打开 http://localhost:7788 → Settings → Authentication → 复制 Admin API Key → 填入设置页 stacks API Key")
+                        task_store.add_log(task_id, "💡 默认账号密码: admin / stacks（首次启动时设置）")
                 except ImportError:
                     task_store.add_log(task_id, "AA: stacks_client module not available")
                 except Exception as e:
