@@ -85,34 +85,279 @@ async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[
 
 
 async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
-    task_store.add_log(task_id, "Step 2/7: Fetching ISBN from NLC...")
+    """
+    Step 2/7: 获取图书元数据和书签
+
+    三种路径（根据输入类型自动选择）:
+      1. SS码模式: 直接用 SS码查 EbookDatabase（最准确）
+      2. 书名模式: 提取主标题 → fuzzy EbookDatabase
+      3. ISBN模式: 精确匹配 EbookDatabase → 未命中时 NLC fallback candidate
+
+    共享补全逻辑: EbookDatabase 为主 → NLC 补全(作者/出版社/年/内容提要) → 书葵网书签
+    """
+    task_store.add_log(task_id, "Step 2/7: Fetching book metadata & bookmark...")
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 0})
 
-    if report.get("isbn"):
-        task_store.add_log(task_id, f"ISBN already present: {report['isbn']}")
-        await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 100})
-        return report
+    ss_code = report.get("ss_code", "")
+    title = report.get("title", "")
+    isbn = report.get("isbn", "")
+    db_path = config.get("ebook_db_path", "")
 
+    book_from_db = None
+
+    # ═══════════════ Phase 1: 主搜索 ═══════════════
+
+    # Path A: SS码模式 — 优先，最准确
+    if ss_code and not book_from_db:
+        task_store.add_log(task_id, f"Path: SS code mode — searching by SS={ss_code}")
+        await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 20})
+        book_from_db = _search_db_by_ss(ss_code, db_path)
+        if book_from_db:
+            task_store.add_log(task_id, f"Found in DB via SS code: {book_from_db.get('title', '')}")
+            # Merge DB data into report
+            _merge_db_book(book_from_db, report)
+
+    # Path B: 书名模式 — 提取主标题后 fuzzy 搜索
+    if not book_from_db and title:
+        main_title = _extract_main_title(title)
+        if main_title != title:
+            task_store.add_log(task_id, f"Path: Title mode — main title: '{main_title}'")
+        else:
+            task_store.add_log(task_id, "Path: Title mode — searching DB by title")
+        await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 30})
+        book_from_db = _search_db_by_title(main_title, db_path)
+        if book_from_db:
+            task_store.add_log(task_id, f"Found in DB via title: {book_from_db.get('title', '')}")
+            _merge_db_book(book_from_db, report)
+        else:
+            task_store.add_log(task_id, f"No DB match for title '{main_title}', will use NLC")
+
+    # Path C: ISBN模式 — 精确匹配 EbookDatabase
+    if not book_from_db and isbn:
+        task_store.add_log(task_id, f"Path: ISBN mode — searching DB by ISBN={isbn}")
+        await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 40})
+        book_from_db = _search_db_by_isbn(isbn, db_path)
+        if book_from_db:
+            task_store.add_log(task_id, f"Found in DB via ISBN: {book_from_db.get('title', '')}")
+            _merge_db_book(book_from_db, report)
+        else:
+            task_store.add_log(task_id, f"No DB match for ISBN {isbn}, creating NLC fallback candidate")
+            # ISBN fallback: 标记 _fallback=True (无 SS码，步骤3只能走 AA MD5 搜索)
+            report["_fallback"] = True
+
+    # ═══════════════ Phase 2: NLC 补全 ═══════════════
+
+    await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 60})
+
+    # 如果有 ISBN 且缺少元数据，从 NLC 补全
+    if report.get("isbn"):
+        missing = []
+        if not report.get("authors"):
+            missing.append("authors")
+        if not report.get("publisher"):
+            missing.append("publisher")
+        if missing:
+            await _fetch_nlc_metadata(task_id, report, config)
+
+    # ═══════════════ Phase 3: 书葵网书签 ═══════════════
+
+    await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 80})
+
+    if report.get("isbn"):
+        await _fetch_bookmark(task_id, report, config)
+
+    # 记录完成状态
+    await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 100})
+    task_store.add_log(task_id, "Step 2/7: metadata & bookmark fetch complete")
+    return report
+
+
+# ═══════════════════════════ 辅助函数 ═══════════════════════════
+
+
+def _extract_main_title(title: str) -> str:
+    """
+    提取主标题，去除副标题分隔符。
+    分隔符: ：:  —— --- － ( ) （ ）【 】［ ］
+    """
+    import re
+    if not title:
+        return ""
+    # 常见副标题分隔符（从前往后分割）
+    for sep in ["：", ":", "　", "——", "---", "－", "—", "‧", "•"]:
+        idx = title.find(sep)
+        if idx > 0 and idx < len(title) - 1:
+            candidate = title[:idx].strip()
+            if len(candidate) >= 2:  # 主标题至少2字
+                return candidate
+    # 去掉括号内的副标题
+    title = re.sub(r'[（(][^）)]*[）)]', '', title).strip()
+    return title
+
+
+def _search_db_by_ss(ss_code: str, db_path: str) -> Optional[Dict[str, Any]]:
+    """通过 SS 码搜索 EbookDatabase"""
+    try:
+        from search_engine import SearchEngine
+        se = SearchEngine()
+        se.set_db_dir(db_path)
+        result = se.search(field="ss_code", query=ss_code, page=1, page_size=1)
+        books = result.get("books", [])
+        if books:
+            return books[0]
+    except Exception as e:
+        logger.warning(f"DB search by SS failed: {e}")
+    return None
+
+
+def _search_db_by_title(title: str, db_path: str) -> Optional[Dict[str, Any]]:
+    """通过书名 fuzzy 搜索 EbookDatabase"""
+    try:
+        from search_engine import SearchEngine
+        se = SearchEngine()
+        se.set_db_dir(db_path)
+        result = se.search(field="title", query=title, page=1, page_size=5)
+        books = result.get("books", [])
+        # 选标题最匹配的
+        if books:
+            best = books[0]
+            for book in books[1:]:
+                if _title_similarity(book.get("title", ""), title) > _title_similarity(best.get("title", ""), title):
+                    best = book
+            return best
+    except Exception as e:
+        logger.warning(f"DB search by title failed: {e}")
+    return None
+
+
+def _search_db_by_isbn(isbn: str, db_path: str) -> Optional[Dict[str, Any]]:
+    """通过 ISBN 精确搜索 EbookDatabase"""
+    try:
+        from search_engine import SearchEngine
+        se = SearchEngine()
+        se.set_db_dir(db_path)
+        clean_isbn = isbn.replace("-", "").replace(" ", "")
+        result = se.search(field="isbn", query=clean_isbn, page=1, page_size=1)
+        books = result.get("books", [])
+        if books:
+            return books[0]
+        # Try partial match
+        result = se.search(field="isbn", query=isbn, page=1, page_size=3)
+        for b in result.get("books", []):
+            db_isbn = b.get("isbn", "").replace("-", "").replace(" ", "")
+            if clean_isbn == db_isbn or clean_isbn in db_isbn or db_isbn in clean_isbn:
+                return b
+    except Exception as e:
+        logger.warning(f"DB search by ISBN failed: {e}")
+    return None
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """简单标题相似度（字符重叠率）"""
+    if not a or not b:
+        return 0
+    a_chars = set(a.lower())
+    b_chars = set(b.lower())
+    overlap = len(a_chars & b_chars)
+    return overlap / max(len(a_chars), len(b_chars), 1)
+
+
+def _merge_db_book(book: Dict[str, Any], report: Dict[str, Any]):
+    """将 EbookDatabase 的数据合并到 report 中，不覆盖已有值"""
+    fields = {
+        "book_id": ("book_id", "id"),
+        "title": ("title",),
+        "isbn": ("isbn",),
+        "ss_code": ("ss_code",),
+        "authors": ("author", "authors"),
+        "publisher": ("publisher",),
+    }
+    for report_key, db_keys in fields.items():
+        if report.get(report_key):
+            continue
+        for db_key in db_keys:
+            val = book.get(db_key, "")
+            if val:
+                if isinstance(val, str) and val.strip():
+                    report[report_key] = val.strip()
+                    break
+                elif not isinstance(val, str) and val:
+                    report[report_key] = val
+                    break
+
+    # second_pass_code 不是真实 MD5，不能给 stacks 使用
+    second_pass = book.get("second_pass_code", "")
+    if second_pass and not report.get("_second_pass_code"):
+        report["_second_pass_code"] = second_pass
+        logger.debug(f"Stored second_pass_code for {report.get('book_id', '?')}")
+
+
+async def _fetch_nlc_metadata(task_id: str, report: Dict[str, Any], config: Dict[str, Any]):
+    """从 NLC 国家图书馆补全作者/出版社/出版年/内容提要/主题词"""
+    isbn = report.get("isbn", "")
+    if not isbn:
+        return
+
+    task_store.add_log(task_id, f"NLC: fetching metadata for ISBN={isbn}")
     try:
         from backend.nlc.nlc_isbn import crawl_isbn
-        nlc_path = config.get("ebook_data_geter_path", "")
-        title = report.get("title", "")
-        if title and nlc_path:
-            await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 30})
-            isbn = await crawl_isbn(title, nlc_path)
-            if isbn:
-                report["isbn"] = isbn
-                task_store.add_log(task_id, f"ISBN fetched: {isbn}")
-                task_store.update(task_id, {"isbn": isbn})
-            else:
-                task_store.add_log(task_id, "ISBN not found on NLC")
-    except ImportError:
-        task_store.add_log(task_id, "NLC ISBN module not available, skipping")
-    except Exception as e:
-        task_store.add_log(task_id, f"ISBN fetch error: {e}")
 
-    await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 100})
-    return report
+        nlc_path = config.get("ebook_data_geter_path", "")
+        if nlc_path:
+            # crawl_isbn 目前只返回 ISBN，这里可以根据需要扩展
+            fetched_isbn = await crawl_isbn(report.get("title", ""), nlc_path)
+            if fetched_isbn and not report.get("isbn"):
+                report["isbn"] = fetched_isbn
+                task_store.add_log(task_id, f"NLC: ISBN confirmed: {fetched_isbn}")
+
+        # NLC API 可以直接补全作者/出版社/年/内容提要/主题词
+        # 目前 nlc_isbn 模块只实现了 ISBN 查询，后续可扩展
+    except ImportError:
+        task_store.add_log(task_id, "NLC: module not available")
+    except Exception as e:
+        task_store.add_log(task_id, f"NLC: error: {str(e)[:100]}")
+
+
+async def _fetch_bookmark(task_id: str, report: Dict[str, Any], config: Dict[str, Any]):
+    """从书葵网 (shukui.net) 获取目录书签"""
+    isbn = report.get("isbn", "")
+    if not isbn:
+        return
+
+    task_store.add_log(task_id, f"Bookmark: fetching from shukui.net for ISBN={isbn}")
+    try:
+        from backend.nlc.bookmarkget import get_bookmark
+
+        nlc_path = config.get("ebook_data_geter_path", "")
+        bookmark_raw = await get_bookmark(isbn, nlc_path)
+        if bookmark_raw:
+            report["bookmark"] = bookmark_raw
+            # 书葵网书签是扁平的，用中文命名规则推断层级
+            lines = [l.strip() for l in bookmark_raw.split("\n") if l.strip()]
+            # 推断层级:
+            #   第X部分/第X篇 → level 1
+            #   第X章 → level 2
+            #   第X节 → level 3
+            #   纯数字编号 → level 4
+            top_count = 0
+            chapter_count = 0
+            section_count = 0
+            import re
+            for line in lines:
+                if re.match(r'^第[一二三四五六七八九十百千]+[部分篇]|^Part\s+\d+', line, re.IGNORECASE):
+                    top_count += 1
+                elif re.match(r'^第[一二三四五六七八九十百千]+章', line):
+                    chapter_count += 1
+                elif re.match(r'^第[一二三四五六七八九十百千]+节', line):
+                    section_count += 1
+            task_store.add_log(task_id,
+                f"Bookmark: {len(lines)} entries (top={top_count}, chapter={chapter_count}, section={section_count})")
+        else:
+            task_store.add_log(task_id, "Bookmark: not found on shukui.net")
+    except ImportError:
+        task_store.add_log(task_id, "Bookmark: module not available")
+    except Exception as e:
+        task_store.add_log(task_id, f"Bookmark: error: {str(e)[:100]}")
 
 
 async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> Optional[str]:

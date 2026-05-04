@@ -111,6 +111,9 @@ async def search_aa(
 
     logger.info(f"AA search '{query}': found {len(results)} MD5 entries")
     return results[:max_results]
+
+
+def _calc_title_relevance(title: str, preferred: str) -> int:
     """计算标题匹配度（0-100），基于字符重叠和关键词命中"""
     import unicodedata
     t = unicodedata.normalize("NFKC", title.lower()).strip()
