@@ -445,71 +445,77 @@ async def _download_via_aa_and_stacks(
             # 唯一下载路径: stacks（参考代码做法—不用直连/FlareSolverr）
             # stacks 不可用或失败时直接返回 None，走 ZL 降级
             if use_stacks:
-                task_store.add_log(task_id, f"AA: submitting MD5 to stacks...")
                 try:
                     from engine.stacks_client import StacksClient
                     sc = StacksClient(base_url=stacks_url, api_key=str(stacks_api_key or ""))
                     download_dir = config.get("download_dir", "")
-                    result = await sc.add_task(md5)
-                    if result.get("ok"):
-                        # 处理"已在历史中"的情况
-                        if result.get("already_downloaded"):
-                            # 查 stacks 状态获取 filepath（文件名可能是 SSID 而非 MD5）
-                            task_store.add_log(task_id, "AA: task already in stacks history, checking file...")
-                            status_resp = await sc.get_status()
-                            hist_path = None
-                            if status_resp.get("ok"):
-                                for item in status_resp["data"].get("recent_history", []):
-                                    if isinstance(item, dict) and item.get("md5") == md5:
-                                        cp = item.get("filepath", "")
-                                        if cp:
-                                            hist_path = sc._resolve_host_path(cp, md5, download_dir)
-                                            break
-                            if hist_path and os.path.getsize(hist_path) > 1024:
-                                task_store.add_log(task_id, f"AA: found in stacks history: {os.path.basename(hist_path)}")
+
+                    # 第1步: 先查 stacks 历史（避免 add_task 401 或超时）
+                    task_store.add_log(task_id, "AA: checking stacks history...")
+                    try:
+                        status_resp = await asyncio.wait_for(sc.get_status(), timeout=8)
+                    except asyncio.TimeoutError:
+                        task_store.add_log(task_id, "AA: stacks status timed out")
+                        raise  # 走 FlareSolverr 兜底
+
+                    if status_resp.get("ok"):
+                        recent = status_resp["data"].get("recent_history", [])
+                        for item in recent:
+                            if isinstance(item, dict) and item.get("md5") == md5:
+                                cp = item.get("filepath", "")
+                                if cp:
+                                    hp = sc._resolve_host_path(cp, md5, download_dir)
+                                    if hp and os.path.getsize(hp) > 1024:
+                                        task_store.add_log(task_id, f"AA: found in history: {os.path.basename(hp)}")
+                                        if download_dir:
+                                            os.makedirs(download_dir, exist_ok=True)
+                                            ss_code = report.get("ss_code", "")
+                                            safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
+                                            ext = os.path.splitext(hp)[1] or ".pdf"
+                                            dest = os.path.join(download_dir, f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}")
+                                            shutil.copy2(hp, dest)
+                                            task_store.add_log(task_id, f"AA: copied from history: {dest}")
+                                            return dest
+                                        return hp
+                                    # 文件不存在，retry
+                                    task_store.add_log(task_id, "AA: history file missing, retrying...")
+                                    await asyncio.wait_for(sc.history_retry(md5), timeout=5)
+                                    break
+
+                    # 第2步: 提交新任务
+                    task_store.add_log(task_id, "AA: submitting MD5 to stacks...")
+                    result = await asyncio.wait_for(sc.add_task(md5), timeout=15)
+
+                    def _stacks_log(msg):
+                        task_store.add_log(task_id, f"stacks: {msg}")
+                    filepath = await asyncio.wait_for(
+                        sc.wait_for_download(md5, timeout=stacks_timeout, log_callback=_stacks_log, download_dir=download_dir),
+                        timeout=stacks_timeout + 30,
+                    )
+                    if filepath:
+                        fixed = sc.validate_and_fix_file(filepath, tmp_dir)
+                        if fixed:
+                            task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
+                            if verify_md5(fixed, md5):
+                                # 复制到 download_dir
+                                download_dir = config.get("download_dir", "")
                                 if download_dir:
                                     os.makedirs(download_dir, exist_ok=True)
                                     ss_code = report.get("ss_code", "")
-                                    safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
-                                    ext = os.path.splitext(hist_path)[1] or ".pdf"
+                                    title = report.get("title", "book")
+                                    safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
+                                    ext = os.path.splitext(fixed)[1] or ".pdf"
                                     dest = os.path.join(download_dir, f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}")
-                                    shutil.copy2(hist_path, dest)
-                                    task_store.add_log(task_id, f"AA: copied from history: {dest}")
+                                    shutil.copy2(fixed, dest)
+                                    task_store.add_log(task_id, f"AA: copied to download dir: {dest}")
                                     return dest
-                                return hist_path
-                            # 文件不存在 → 清除历史重试
-                            task_store.add_log(task_id, "AA: file not found locally, clearing history & retrying...")
-                            await sc.history_retry(md5)
-                        def _stacks_log(msg):
-                            task_store.add_log(task_id, f"stacks: {msg}")
-                        filepath = await sc.wait_for_download(md5, timeout=stacks_timeout, log_callback=_stacks_log, download_dir=download_dir)
-                        if filepath:
-                            fixed = sc.validate_and_fix_file(filepath, tmp_dir)
-                            if fixed:
-                                task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
-                                if verify_md5(fixed, md5):
-                                    # 复制到 download_dir（设置中的下载目录）
-                                    download_dir = config.get("download_dir", "")
-                                    if download_dir:
-                                        os.makedirs(download_dir, exist_ok=True)
-                                        ss_code = report.get("ss_code", "")
-                                        title = report.get("title", "book")
-                                        safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
-                                        ext = os.path.splitext(fixed)[1] or ".pdf"
-                                        dest = os.path.join(download_dir, f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}")
-                                        shutil.copy2(fixed, dest)
-                                        task_store.add_log(task_id, f"AA: copied to download dir: {dest}")
-                                        return dest
-                                    return fixed
-                                else:
-                                    task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download")
-                    else:
-                        err = result.get("error", "")
-                        task_store.add_log(task_id, f"AA: stacks add_task fail (401): {err}")
-                        task_store.add_log(task_id, "💡 打开 http://localhost:7788 → Settings → Authentication → 复制 Admin API Key → 填入设置页 stacks API Key")
-                        task_store.add_log(task_id, "💡 默认账号密码: admin / stacks（首次启动时设置）")
+                                return fixed
+                            else:
+                                task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download")
                 except ImportError:
                     task_store.add_log(task_id, "AA: stacks_client module not available")
+                except asyncio.TimeoutError:
+                    task_store.add_log(task_id, "AA: stacks timeout, trying fallback...")
                 except Exception as e:
                     task_store.add_log(task_id, f"AA: stacks error: {str(e)[:100]}")
 
