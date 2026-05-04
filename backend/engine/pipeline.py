@@ -1341,6 +1341,25 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         else:
             task_store.add_log(task_id, "OCR: no system Python found for ocrmypdf — please install: python -m pip install ocrmypdf")
 
+    # ── Ensure the right OCR plugin is (un)installed ──
+    try:
+        import subprocess as _sp
+        _pip_cmd = [_py_for_ocr, "-m", "pip"]
+        if ocr_engine == "easyocr":
+            _r = _sp.run(_pip_cmd + ["install", "ocrmypdf-easyocr"],
+                         capture_output=True, text=True, timeout=30)
+            if _r.returncode != 0:
+                task_store.add_log(task_id, f"EasyOCR plugin install failed: {_r.stderr[-200:]}")
+        else:
+            _r = _sp.run(_pip_cmd + ["list", "--format=columns"],
+                         capture_output=True, text=True, timeout=15)
+            if "ocrmypdf-easyocr" in _r.stdout:
+                _sp.run(_pip_cmd + ["uninstall", "-y", "ocrmypdf-easyocr"],
+                        capture_output=True, timeout=15)
+                task_store.add_log(task_id, "OCR: uninstalled ocrmypdf-easyocr")
+    except Exception as _e:
+        task_store.add_log(task_id, f"OCR: plugin management warning: {_e}")
+
     try:
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
 
@@ -1357,6 +1376,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
+                "--plugin", "ocrmypdf.builtin_plugins.tesseract",
                 "--ocr-engine", "tesseract",
                 "-l", ocr_lang,
                 "-j", str(ocr_jobs),
