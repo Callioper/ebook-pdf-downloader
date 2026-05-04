@@ -449,11 +449,22 @@ async def _download_via_aa_and_stacks(
                     import requests as _req
 
                     def _find_stacks_file(fname: str, dl_dir: str = "") -> Optional[str]:
+                        # Extract SSID (e.g. "12928975" from "12928975.zip")
+                        ssid = fname.split(".")[0] if "." in fname else ""
                         for base in [Path.home()/"stacks"/"stacks"/"download",
                                      Path.home()/"stacks"/"download"] + ([Path(dl_dir)] if dl_dir else []):
+                            # 1. Exact match
                             cand = base / fname
                             if cand.exists() and cand.stat().st_size > 1024:
                                 return str(cand)
+                            # 2. SSID prefix match (stacks names files by SSID, pipeline renames to SSID_title.ext)
+                            if ssid:
+                                for p in base.glob(f"{ssid}_*.*"):
+                                    if p.stat().st_size > 1024:
+                                        return str(p)
+                                for p in base.glob(f"{ssid}.*"):
+                                    if p.stat().st_size > 1024:
+                                        return str(p)
                         return None
 
                     def _docker_cp_stacks(container_path: str) -> Optional[str]:
