@@ -1376,7 +1376,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
-                "--plugin", "ocrmypdf.builtin_plugins.tesseract",
+                "--plugin", "ocrmypdf.builtin_plugins.tesseract_ocr",
                 "--ocr-engine", "tesseract",
                 "-l", ocr_lang,
                 "-j", str(ocr_jobs),
