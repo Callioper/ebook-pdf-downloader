@@ -12,3 +12,9 @@ python-multipart==0.0.27
 bencodepy==0.9.5
 pyinstaller==6.20.0
 zstandard==0.25.0
+ocrmypdf==17.4.2
+fpdf2==2.8.7
+pdfminer.six==20260107
+pluggy==1.6.0
+pypdfium2==5.7.1
+uharfbuzz==0.54.1
