@@ -1439,8 +1439,8 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
     finished_dir = config.get("finished_dir", "")
 
     if pdf_path and os.path.exists(pdf_path):
-        # 确定目标目录：优先 download_dir，其次 finished_dir
-        target_dir = download_dir or finished_dir
+        # 确定目标目录：优先 finished_dir（最终输出），其次 download_dir（临时存放）
+        target_dir = finished_dir or download_dir
         if target_dir:
             try:
                 os.makedirs(target_dir, exist_ok=True)
