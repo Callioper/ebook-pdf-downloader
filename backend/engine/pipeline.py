@@ -488,8 +488,11 @@ async def _download_via_aa_and_stacks(
                             if sr.status_code == 200:
                                 sd = sr.json()
                                 for item in sd.get("recent_history", []):
-                                    if isinstance(item, dict) and item.get("md5") == md5:
-                                        fp = item.get("filepath", "")
+                                    if not isinstance(item, dict):
+                                        continue
+                                    fp = item.get("filepath", "")
+                                    if not fp:
+                                        continue
                                         if fp:
                                             seen_fps.add(fp)
                                             fname = os.path.basename(fp)
@@ -517,6 +520,14 @@ async def _download_via_aa_and_stacks(
                                             except Exception:
                                                 pass
                                             break
+                                    # 所有历史文件都不存在 → 清除
+                                if sd.get("recent_history"):
+                                    task_store.add_log(task_id, "AA: history files missing, clearing...")
+                                    try:
+                                        _req.post(f"{url}/api/history/clear",
+                                                  headers={"X-API-Key": key} if key else {}, timeout=5)
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
 
