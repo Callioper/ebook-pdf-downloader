@@ -163,19 +163,14 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
     # （书签获取在 Step 6 通过 NLC/SS码 处理，不使用 ISBN）
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 80})
 
-    # 记录完成状态并回写到 task_store（确保前端任务详情正确显示）
-    update_fields = {
-        "title": report.get("title", ""),
-        "isbn": report.get("isbn", ""),
-    }
+    # 记录完成状态并回写到 task_store（只补全非空字段，不覆盖已有数据）
+    update_fields = {}
+    for key in ("title", "isbn", "publisher", "ss_code", "book_id"):
+        val = report.get(key)
+        if val:
+            update_fields[key] = val if isinstance(val, str) else str(val)
     if report.get("authors"):
         update_fields["authors"] = report.get("authors", [])
-    if report.get("publisher"):
-        update_fields["publisher"] = report.get("publisher", "")
-    if report.get("ss_code"):
-        update_fields["ss_code"] = report.get("ss_code", "")
-    if report.get("book_id"):
-        update_fields["book_id"] = report.get("book_id", "")
     task_store.update(task_id, update_fields)
 
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 100})
