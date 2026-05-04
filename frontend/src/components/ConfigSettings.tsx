@@ -160,10 +160,15 @@ const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
 4. 安装 Tesseract OCR 系统依赖（OCRmyPDF 需要）：
    winget install --id UB-Mannheim.TesseractOCR
 
-5. 验证安装：
+5. 将 Tesseract 添加到 PATH（如 winget 安装后未自动添加）：
+   [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Program Files\Tesseract-OCR", "User")
+   # 添加后需重启终端或 IDE 使 PATH 生效
+
+6. 验证安装：
    python -c "import ocrmypdf; print('ocrmypdf:', ocrmypdf.__version__)"
    python -c "import easyocr; print('easyocr ok')"
-   python -c "import paddleocr; print('paddleocr:', paddleocr.__version__)"`
+   python -c "import paddleocr; print('paddleocr:', paddleocr.__version__)"
+   tesseract --version`
 
 const STACKS_INSTALL_GUIDE = `## 安装 stacks + FlareSolverr（Docker Compose）
 
