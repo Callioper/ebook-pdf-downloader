@@ -45,6 +45,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "zlib_password": "",
     "aa_membership_key": "",
     "ocr_engine": "tesseract",
+    "flaresolverr_port": 8191,
     "stacks_api_key": "",
     "stacks_base_url": "http://localhost:7788",
     "stacks_timeout": 300,

@@ -1026,9 +1026,22 @@ export default function ConfigSettings() {
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
+                    )}
+                  </div>
+                  {/* FlareSolverr 端口 */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={Number(form.flaresolverr_port) || 8191}
+                      onChange={(e) => setForm((prev) => ({ ...prev, flaresolverr_port: parseInt(e.target.value) || 8191 }))}
+                      placeholder="端口号"
+                      min={1}
+                      max={65535}
+                      className="w-24 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-gray-400">FlareSolverr 端口（默认 8191）</span>
+                  </div>
+                </div>
       )}
 
       {/* ============ 网络代理 ============ */}

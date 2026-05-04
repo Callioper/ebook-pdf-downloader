@@ -390,7 +390,8 @@ async def resolve_download_url(
     d_url = f"{base_url}/d/{md5}"
     try:
         import requests as _req
-        flare_url = "http://localhost:8191/v1"
+        from engine.flaresolverr import _flare_url, set_flare_port
+        flare_url = _flare_url()
         session_name = f"aa_d_{int(time.time())}"
 
         # Create FlareSolverr session

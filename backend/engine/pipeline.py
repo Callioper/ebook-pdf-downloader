@@ -642,7 +642,8 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
     # ── 确保 FlareSolverr 运行（供 AA 访问） ──
     await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 5})
     try:
-        from engine.flaresolverr import check_flaresolverr, start_flaresolverr
+        from engine.flaresolverr import check_flaresolverr, start_flaresolverr, set_flare_port
+        set_flare_port(int(config.get("flaresolverr_port", 8191)))
         if not await check_flaresolverr(config):
             task_store.add_log(task_id, "Starting FlareSolverr for AA access...")
             started, msg = await start_flaresolverr(config)

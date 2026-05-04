@@ -18,6 +18,29 @@ logger = logging.getLogger(__name__)
 _flare_process: Optional[subprocess.Popen] = None
 
 
+def _get_flare_port(config: Optional[Dict[str, Any]] = None) -> int:
+    """获取 FlareSolverr 端口号（默认 8191）"""
+    if config:
+        return int(config.get("flaresolverr_port", 8191))
+    return 8191
+
+
+def _flare_url(port: Optional[int] = None, endpoint: str = "/v1") -> str:
+    if port is None:
+        port = _FS_PORT
+    return f"http://localhost:{port}{endpoint}"
+
+
+# Module-level port (overridden by set_flare_port)
+_FS_PORT = 8191
+
+
+def set_flare_port(port: int):
+    """Set the FlareSolverr port for all subsequent calls (no config needed)"""
+    global _FS_PORT
+    _FS_PORT = port
+
+
 def find_flaresolverr_exe(config: Dict[str, Any]) -> Optional[str]:
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     cfg_path = config.get("flaresolverr_path", "")
@@ -126,7 +149,7 @@ async def check_flaresolverr(config: Dict[str, Any]) -> bool:
     for endpoint in ["/v1", "/health"]:
         try:
             r = requests.get(
-                f"http://localhost:8191{endpoint}",
+                _flare_url(_get_flare_port(config), endpoint),
                 timeout=5,
             )
             if r.status_code == 200:
@@ -149,6 +172,8 @@ async def check_flaresolverr(config: Dict[str, Any]) -> bool:
 async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
     """Returns (success, error_message)."""
     global _flare_process
+    # Set module-level port so other functions use the right one
+    set_flare_port(_get_flare_port(config))
     if await check_flaresolverr(config):
         return (True, "already running")
 
@@ -200,15 +225,8 @@ async def start_flaresolverr(config: Dict[str, Any]) -> Tuple[bool, str]:
                 return (True, "started")
         # Timeout — get accumulated stderr
         err_text = "".join(stderr_lines)[:500]
-        try:
-            _flare_process.terminate()
-        except Exception:
-            try:
-                _flare_process.kill()
-            except Exception:
-                pass
-        _flare_process = None
-        detail = f"启动超时(30s)，端口8191无响应"
+        port = _get_flare_port(config)
+        detail = f"启动超时(30s)，端口{port}无响应"
         if err_text:
             detail += f"。错误输出: {err_text}"
         logger.warning(f"FlareSolverr start failed: {detail}")
@@ -247,7 +265,7 @@ async def download_via_flaresolverr(
     }
 
     try:
-        flare_url = "http://localhost:8191/v1"
+        flare_url = _flare_url()
         session = requests.Session()
         if proxies:
             session.proxies.update(proxies)
