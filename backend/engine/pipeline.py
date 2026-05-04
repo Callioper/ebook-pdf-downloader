@@ -1029,7 +1029,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
-        task_store.add_log(task_id, "ocrmypdf not found in PATH — 请安装: pip install ocrmypdf, 或见设置页→OCR→安装指引")
+        task_store.add_log(task_id, "ocrmypdf not found in PATH — ocrmypdf 未安装: pip install ocrmypdf, 或见设置页→OCR→安装指引。"
+                           " 注意: ocrmypdf 默认使用 Tesseract 引擎，需额外安装 tesseract.exe")
     except Exception as e:
         task_store.add_log(task_id, f"OCR error: {e}")
 

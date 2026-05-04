@@ -496,6 +496,38 @@ export default function ConfigSettings() {
     }
   }, [form.ocr_engine, ocrEngines])
 
+  // Auto-detect stacks on config load
+  const autoStacksRef = useRef(false)
+  useEffect(() => {
+    if (!config || autoStacksRef.current) return
+    autoStacksRef.current = true
+    const check = async () => {
+      setStacksChecking(true)
+      try {
+        const url = form.stacks_base_url || 'http://localhost:7788'
+        const health = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
+        if (!mountedRef.current) return
+        if (!health.ok) { setStacksStatus('red'); return }
+
+        const key = form.stacks_api_key || ''
+        if (key) {
+          try {
+            const kt = await fetch(url + '/api/key/test', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key }), signal: AbortSignal.timeout(3000),
+            })
+            const kd = await kt.json()
+            if (mountedRef.current) setStacksStatus(kd.valid ? 'green' : 'yellow')
+          } catch { if (mountedRef.current) setStacksStatus('yellow') }
+        } else {
+          if (mountedRef.current) setStacksStatus('yellow')
+        }
+      } catch { if (mountedRef.current) setStacksStatus('red') }
+      finally { if (mountedRef.current) setStacksChecking(false) }
+    }
+    check()
+  }, [config])
+
   const checkOcr = useCallback(async (engine?: string) => {
     setOcrChecking(true)
     try {
@@ -1060,6 +1092,53 @@ export default function ConfigSettings() {
                   {stacksChecking ? '检测中...' : '检测'}
                 </button>
               </div>
+              {/* 登录凭据 */}
+              <div className="flex gap-2 mt-1">
+                <input
+                  type="text"
+                  value={String(form.stacks_username || '')}
+                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_username: e.target.value }))}
+                  placeholder="用户名（默认 admin）"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <input
+                  type="password"
+                  value={String(form.stacks_password || '')}
+                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_password: e.target.value }))}
+                  placeholder="密码"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setStacksChecking(true)
+                    try {
+                      const res = await fetch('/api/v1/stacks-login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          url: form.stacks_base_url || 'http://localhost:7788',
+                          username: form.stacks_username || 'admin',
+                          password: form.stacks_password || 'stacks',
+                        }),
+                      })
+                      const data = await res.json()
+                      setStacksStatus(data.ok ? 'green' : 'red')
+                    } catch { setStacksStatus('red') }
+                    finally { setStacksChecking(false) }
+                  }}
+                  className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
+                >
+                  登录
+                </button>
+              </div>
+              <input
+                type="password"
+                value={String(form.stacks_api_key || '')}
+                onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
+                placeholder="Admin API Key（Settings → Authentication）"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mt-1"
+              />
               <details>
                 <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
                   <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
