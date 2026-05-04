@@ -54,28 +54,37 @@ class StacksClient:
         return h
 
     async def _request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """异步 HTTP 请求 — 通过 run_in_executor 避免阻塞事件循环"""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: requests.request(method, url, **kwargs))
+        """异步 HTTP 请求 — 通过 asyncio.to_thread 避免阻塞事件循环"""
+        return await asyncio.to_thread(requests.request, method, url, **kwargs)
 
     async def add_task(self, md5: str) -> Dict[str, Any]:
         """提交MD5下载任务到stacks队列"""
         try:
             payload = {"md5": md5, "action": "download"}
-            r = await self._request("POST", self._queue_endpoint, json=payload,
-                                     headers=self._headers_queue(), timeout=15)
+            r = await asyncio.wait_for(
+                self._request("POST", self._queue_endpoint, json=payload,
+                              headers=self._headers_queue(), timeout=10),
+                timeout=12,
+            )
             data = r.json() if r.text else {}
             if r.status_code in (200, 201, 202):
+                # stacks 返回 200 但 success=false 表示"已存在"
+                success = data.get("success", True) or data.get("ok", True)
+                msg = (data.get("message", "") or "").lower()
+                if not success or "already" in msg or "downloaded" in msg:
+                    logger.info(f"stacks: {md5} already in history")
+                    return {"ok": True, "already_downloaded": True, "data": data}
                 logger.info(f"stacks task submitted: md5={md5}, response={data}")
                 return {"ok": True, "data": data}
             else:
-                # "Already downloaded" — 文件已在历史中
                 msg = data.get("message", "") or r.text[:200]
                 if "already" in msg.lower() or "downloaded" in msg.lower():
-                    logger.info(f"stacks: {md5} already in history, checking local files")
                     return {"ok": True, "already_downloaded": True, "data": data}
                 logger.warning(f"stacks add_task failed: {r.status_code} {r.text[:200]}")
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except asyncio.TimeoutError:
+            logger.warning("stacks add_task timed out")
+            return {"ok": False, "error": "timeout"}
         except requests.ConnectionError:
             logger.warning("stacks service unreachable (Docker not running?)")
             return {"ok": False, "error": "stacks服务不可达"}
