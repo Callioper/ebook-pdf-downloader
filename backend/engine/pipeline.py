@@ -448,13 +448,36 @@ async def _download_via_aa_and_stacks(
                 try:
                     import requests as _req
 
-                    def _find_stacks_file(fname: str, dl_dir: str = "") -> Optional[str]:
-                        # Extract SSID (e.g. "12928975" from "12928975.zip")
+                    # ── API headers helper ──
+                    def _bearer():
+                        return {"Authorization": f"Bearer {stacks_api_key}"} if stacks_api_key else {}
+
+                    def _xkey():
+                        h = {"Content-Type": "application/json"}
+                        if stacks_api_key:
+                            h["X-API-Key"] = str(stacks_api_key)
+                        return h
+
+                    # ── 复制到目标目录 ──
+                    def _copy_dest(found_path: str, dl_dir: str) -> str:
+                        if dl_dir:
+                            fname = os.path.basename(found_path)
+                            dest = os.path.join(dl_dir, fname)
+                            shutil.copy2(found_path, dest)
+                            return dest
+                        return found_path
+
+                    # ── 查找 stacks 下载的文件 ──
+                    def _find_stacks_file(fname: str, dl_dir: str = "", extra_paths: Optional[List[str]] = None) -> Optional[str]:
                         ssid = fname.split(".")[0] if "." in fname else ""
                         bases = [Path.home()/"stacks"/"stacks"/"download",
                                  Path.home()/"stacks"/"download"]
                         if dl_dir:
                             bases.append(Path(dl_dir))
+                        if extra_paths:
+                            for p in extra_paths:
+                                if p:
+                                    bases.append(Path(p))
                         task_store.add_log(task_id, f"AA: _find_stacks_file(fname={fname}, ssid={ssid}) searching {len(bases)} paths...")
                         for base in bases:
                             task_store.add_log(task_id, f"AA:   checking base={base}")
@@ -468,27 +491,20 @@ async def _download_via_aa_and_stacks(
                                 task_store.add_log(task_id, f"AA:   exact match too small ({sz}), skipping")
                             else:
                                 task_store.add_log(task_id, f"AA:   no exact match at {cand}")
-                            # 2. SSID prefix match (stacks names files by SSID, pipeline renames to SSID_title.ext)
+                            # 2. SSID prefix match
                             if ssid:
-                                glob_pat = f"{ssid}_*.*"
-                                matches = list(base.glob(glob_pat))
-                                task_store.add_log(task_id, f"AA:   glob {glob_pat} → {len(matches)} matches")
-                                for p in matches:
-                                    sz = p.stat().st_size
-                                    task_store.add_log(task_id, f"AA:     candidate {p} (size={sz})")
-                                    if sz > 1024:
-                                        return str(p)
-                                glob_pat2 = f"{ssid}.*"
-                                matches2 = list(base.glob(glob_pat2))
-                                task_store.add_log(task_id, f"AA:   glob {glob_pat2} → {len(matches2)} matches")
-                                for p in matches2:
-                                    sz = p.stat().st_size
-                                    task_store.add_log(task_id, f"AA:     candidate {p} (size={sz})")
-                                    if sz > 1024:
-                                        return str(p)
+                                for glob_pat in (f"{ssid}_*.*", f"{ssid}.*"):
+                                    matches = list(base.glob(glob_pat))
+                                    task_store.add_log(task_id, f"AA:   glob {glob_pat} → {len(matches)} matches")
+                                    for p in matches:
+                                        sz = p.stat().st_size
+                                        task_store.add_log(task_id, f"AA:     candidate {p} (size={sz})")
+                                        if sz > 1024:
+                                            return str(p)
                         task_store.add_log(task_id, "AA:   _find_stacks_file: NOT FOUND in any path")
                         return None
 
+                    # ── docker cp 兜底 ──
                     def _docker_cp_stacks(container_path: str) -> Optional[str]:
                         import subprocess
                         try:
@@ -507,23 +523,53 @@ async def _download_via_aa_and_stacks(
                             pass
                         return None
 
+                    # ── 核心：同步下载 + 心跳检测 ──
                     def _stacks_sync_download(md5: str, dl_dir: str) -> Optional[str]:
-                        """同步方式完成 stacks 下载（参考代码模式）"""
                         url = stacks_url.rstrip("/")
                         key = str(stacks_api_key or "")
-                        seen_fps = set()  # 跟踪已尝试过的 filepath，防止无限循环
+                        seen_fps = set()
+                        extra_search_paths: List[str] = []
 
-                        # 第1步: 检查 recent_history
+                        # Step 0: 从 stacks API 获取实际下载路径
                         try:
-                            sr = _req.get(f"{url}/api/status",
-                                          headers={"Authorization": f"Bearer {key}"} if key else {},
-                                          timeout=5)
+                            cr = _req.get(f"{url}/api/config", headers=_bearer(), timeout=5)
+                            if cr.status_code == 200:
+                                cfg = cr.json()
+                                # 尝试所有可能的 key
+                                for cfg_key in ("download_directory", "download_path", "dl_path",
+                                                "downloadDir", "download_dir", "stacks_download"):
+                                    raw = cfg.get(cfg_key, "")
+                                    if raw:
+                                        p = str(raw).strip()
+                                        if p and os.path.isdir(p):
+                                            extra_search_paths.append(p)
+                                            task_store.add_log(task_id, f"AA: stacks config [{cfg_key}]={p} → added to search paths")
+                                            break
+                                else:
+                                    task_store.add_log(task_id, f"AA: stacks config response keys: {list(cfg.keys())[:10]}")
+                        except Exception as e:
+                            task_store.add_log(task_id, f"AA: could not get stacks config: {e}")
+
+                        # 如果 API 没返回路径，尝试常用默认路径
+                        if not extra_search_paths:
+                            for guess in ("D:\\stacks-data\\download",
+                                          os.path.expandvars(r"%USERPROFILE%\stacks\download")):
+                                if os.path.isdir(guess):
+                                    extra_search_paths.append(guess)
+                                    task_store.add_log(task_id, f"AA: using default search path: {guess}")
+                                    break
+                        # 始终把 download_dir 加入搜索
+                        if dl_dir and dl_dir not in extra_search_paths:
+                            extra_search_paths.append(dl_dir)
+
+                        task_store.add_log(task_id, f"AA: extra search paths: {extra_search_paths}")
+
+                        # Step 1: 检查 recent_history 中是否已有下载完成的文件
+                        try:
+                            sr = _req.get(f"{url}/api/status", headers=_bearer(), timeout=5)
                             if sr.status_code == 200:
                                 sd = sr.json()
-                                history_items = sd.get("recent_history", [])
-                                if history_items:
-                                    task_store.add_log(task_id, f"AA: checking {len(history_items)} recent_history entries...")
-                                for item in history_items:
+                                for item in sd.get("recent_history", []):
                                     if not isinstance(item, dict):
                                         continue
                                     fp = item.get("filepath", "")
@@ -532,127 +578,125 @@ async def _download_via_aa_and_stacks(
                                     task_store.add_log(task_id, f"AA: history item filepath={fp}")
                                     seen_fps.add(fp)
                                     fname = os.path.basename(fp)
-                                    # 查找主机文件
-                                    found = _find_stacks_file(fname, dl_dir)
+                                    found = _find_stacks_file(fname, "", extra_search_paths)
                                     if found:
-                                        if dl_dir:
-                                            dest = os.path.join(dl_dir, fname)
-                                            shutil.copy2(found, dest)
-                                            task_store.add_log(task_id, f"AA: found in history → {dest}")
-                                            return dest
-                                        return found
-                                    # docker cp 兜底
+                                        dest = _copy_dest(found, dl_dir)
+                                        task_store.add_log(task_id, f"AA: found in history → {dest}")
+                                        return dest
                                     task_store.add_log(task_id, "AA: trying docker cp for history file...")
                                     found = _docker_cp_stacks(fp)
                                     if found:
-                                        if dl_dir:
-                                            dest = os.path.join(dl_dir, fname)
-                                            shutil.copy2(found, dest)
-                                            task_store.add_log(task_id, f"AA: docker cp for history → {dest}")
-                                            return dest
-                                        return found
-                                    # 文件找不到 → 清除历史重新下载
-                                    task_store.add_log(task_id, "AA: history file lost, clearing & retrying...")
+                                        dest = _copy_dest(found, dl_dir)
+                                        task_store.add_log(task_id, f"AA: docker cp for history → {dest}")
+                                        return dest
+                                    task_store.add_log(task_id, "AA: history file not found on disk, clearing history & retrying...")
                                     try:
-                                        _req.post(f"{url}/api/history/clear",
-                                                  headers={"X-API-Key": key} if key else {}, timeout=5)
+                                        _req.post(f"{url}/api/history/clear", headers=_xkey(), timeout=5)
                                     except Exception as e:
                                         task_store.add_log(task_id, f"AA: history clear error: {e}")
                                     break
-                                # 所有历史文件都不存在 → 清除
-                                if sd.get("recent_history"):
-                                    task_store.add_log(task_id, "AA: history files missing, clearing...")
-                                    try:
-                                        _req.post(f"{url}/api/history/clear",
-                                                  headers={"X-API-Key": key} if key else {}, timeout=5)
-                                    except Exception as e:
-                                        task_store.add_log(task_id, f"AA: history clear error: {e}")
                         except Exception as e:
                             task_store.add_log(task_id, f"AA: history check error: {str(e)[:100]}")
 
-                        # 第2步: add_task
-                        task_store.add_log(task_id, "AA: submitting MD5 to stacks...")
-                        try:
-                            _req.post(f"{url}/api/queue/add",
-                                      json={"md5": md5, "source": "manual"},
-                                      headers={"X-API-Key": key, "Content-Type": "application/json"} if key else {},
-                                      timeout=10)
-                        except Exception:
-                            pass
+                        # Step 2: add_task — 如果 MD5 已存在，清历史重试
+                        add_ok = False
+                        for attempt in range(3):
+                            task_store.add_log(task_id, f"AA: add_task MD5={md5} attempt {attempt+1}/3...")
+                            try:
+                                ar = _req.post(f"{url}/api/queue/add",
+                                               json={"md5": md5, "source": "manual"},
+                                               headers=_xkey(), timeout=10)
+                                if ar.status_code == 200:
+                                    add_ok = True
+                                    task_store.add_log(task_id, "AA: MD5 added to queue")
+                                    break
+                                resp_text = ar.text[:200]
+                                task_store.add_log(task_id, f"AA: add_task returned {ar.status_code}: {resp_text}")
+                                # 已存在→清历史→重试
+                                if "already" in resp_text.lower() or ar.status_code in (400, 409):
+                                    task_store.add_log(task_id, "AA: task already exists, clearing history & retrying...")
+                                    try:
+                                        _req.post(f"{url}/api/history/clear", headers=_xkey(), timeout=5)
+                                    except Exception as e2:
+                                        task_store.add_log(task_id, f"AA: history clear error: {e2}")
+                                    continue
+                            except Exception as e:
+                                task_store.add_log(task_id, f"AA: add_task error: {e}")
+                                continue
+                            break  # 非冲突错误不再重试
 
-                        # 第3步: 轮询等待
-                        task_store.add_log(task_id, "AA: waiting for stacks download...")
+                        if not add_ok:
+                            task_store.add_log(task_id, "AA: failed to add MD5 to stacks queue after 3 attempts")
+                            return None
+
+                        # Step 3: 心跳轮询（每3秒检测一次）
+                        task_store.add_log(task_id, "AA: heartbeat polling for stacks download...")
                         deadline = time.time() + stacks_timeout
-                        interval = 2.0
                         while time.time() < deadline:
                             try:
-                                sr = _req.get(f"{url}/api/status",
-                                              headers={"Authorization": f"Bearer {key}"} if key else {},
-                                              timeout=5)
+                                sr = _req.get(f"{url}/api/status", headers=_bearer(), timeout=5)
                                 if sr.status_code == 200:
                                     sd = sr.json()
-                                    # 检查 queue
-                                    queue_items = sd.get("queue", [])
-                                    for item in queue_items:
+
+                                    # 3a. 检查 queue 中是否有 completed 条目
+                                    for item in sd.get("queue", []):
                                         if isinstance(item, dict) and item.get("completed_at") and item.get("filepath"):
                                             fp = item["filepath"]
-                                            task_store.add_log(task_id, f"AA: queue completed item filepath={fp}")
                                             if fp in seen_fps:
-                                                task_store.add_log(task_id, f"AA:   already seen, skipping")
                                                 continue
                                             seen_fps.add(fp)
+                                            task_store.add_log(task_id, f"AA: queue completed → {fp}")
                                             fname = os.path.basename(fp)
-                                            task_store.add_log(task_id, f"AA:   fname={fname}, calling _find_stacks_file...")
-                                            found = _find_stacks_file(fname, dl_dir)
+                                            found = _find_stacks_file(fname, "", extra_search_paths)
                                             if found:
-                                                task_store.add_log(task_id, f"AA:   found at {found}")
-                                                return found
-                                            task_store.add_log(task_id, f"AA:   _find_stacks_file failed, trying docker cp...")
+                                                dest = _copy_dest(found, dl_dir)
+                                                task_store.add_log(task_id, f"AA: stacks OK → {fname}")
+                                                return dest
                                             found = _docker_cp_stacks(fp)
                                             if found:
-                                                task_store.add_log(task_id, f"AA:   docker cp OK → {found}")
-                                                return found
-                                            task_store.add_log(task_id, f"AA:   _docker_cp_stacks also failed, returning None")
+                                                dest = _copy_dest(found, dl_dir)
+                                                task_store.add_log(task_id, f"AA: docker cp OK → {fname}")
+                                                return dest
+                                            task_store.add_log(task_id, "AA: queue completed item but file not found on disk")
                                             return None
-                                    # 检查 recent_history（跳过已尝试过的）
-                                    history_items = sd.get("recent_history", [])
-                                    for item in history_items:
+
+                                    # 3b. 检查 recent_history 中新完成的条目
+                                    for item in sd.get("recent_history", []):
                                         if isinstance(item, dict) and item.get("completed_at") and item.get("filepath"):
                                             fp = item["filepath"]
-                                            task_store.add_log(task_id, f"AA: recent_history completed item filepath={fp}")
                                             if fp in seen_fps:
-                                                task_store.add_log(task_id, f"AA:   already seen, skipping")
                                                 continue
                                             seen_fps.add(fp)
+                                            task_store.add_log(task_id, f"AA: recent_history completed → {fp}")
                                             fname = os.path.basename(fp)
-                                            task_store.add_log(task_id, f"AA:   fname={fname}, calling _find_stacks_file...")
-                                            found = _find_stacks_file(fname, dl_dir)
+                                            found = _find_stacks_file(fname, "", extra_search_paths)
                                             if found:
-                                                task_store.add_log(task_id, f"AA:   found at {found}")
-                                                if dl_dir:
-                                                    dest = os.path.join(dl_dir, fname)
-                                                    shutil.copy2(found, dest)
-                                                    task_store.add_log(task_id, f"AA: stacks OK → {fname}")
-                                                    return dest
-                                                return found
-                                            task_store.add_log(task_id, f"AA:   _find_stacks_file failed, trying docker cp...")
+                                                dest = _copy_dest(found, dl_dir)
+                                                task_store.add_log(task_id, f"AA: stacks OK → {fname}")
+                                                return dest
                                             found = _docker_cp_stacks(fp)
                                             if found:
-                                                task_store.add_log(task_id, f"AA:   docker cp OK → {found}")
-                                                if dl_dir:
-                                                    dest = os.path.join(dl_dir, fname)
-                                                    shutil.copy2(found, dest)
-                                                    return dest
-                                                return found
-                                            task_store.add_log(task_id, f"AA:   _docker_cp_stacks also failed")
+                                                dest = _copy_dest(found, dl_dir)
+                                                task_store.add_log(task_id, f"AA: docker cp OK → {fname}")
+                                                return dest
+                                            task_store.add_log(task_id, f"AA: recent_history completed item {fp} but file not found on disk, keeping polling...")
+
+                                    # 3c. 检测是否正在下载
+                                    active = [item for item in sd.get("queue", [])
+                                              if isinstance(item, dict) and item.get("md5") == md5 and not item.get("completed_at")]
+                                    remaining = int(deadline - time.time())
+                                    if active:
+                                        if remaining % 6 == 0:
+                                            task_store.add_log(task_id, f"AA: stacks downloading... ({remaining}s left)")
+                                    else:
+                                        if remaining % 15 == 0:
+                                            task_store.add_log(task_id, f"AA: stacks heartbeat ({remaining}s left)...")
                             except Exception as e:
-                                task_store.add_log(task_id, f"AA: polling error: {str(e)[:100]}")
-                            remaining = int(deadline - time.time())
-                            if remaining % 10 == 0:
-                                task_store.add_log(task_id, f"AA: stacks waiting ({remaining}s left)...")
-                            time.sleep(interval)
-                            interval = min(interval * 1.5, 10)
-                        task_store.add_log(task_id, f"AA: stacks polling timed out after {stacks_timeout}s")
+                                task_store.add_log(task_id, f"AA: heartbeat error: {str(e)[:100]}")
+
+                            time.sleep(3)  # 心跳间隔
+
+                        task_store.add_log(task_id, f"AA: stacks heartbeat polling timed out after {stacks_timeout}s")
                         return None
 
                     download_dir = config.get("download_dir", "")
