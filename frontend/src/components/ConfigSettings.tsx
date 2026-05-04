@@ -332,7 +332,23 @@ export default function ConfigSettings() {
 
   useEffect(() => { fetchConfig() }, [fetchConfig])
 
-  // Restore Z-Lib login state from stored credentials
+  // Auto-detect stacks on load
+  useEffect(() => {
+    if (!config || stacksStatus !== null) return
+    const checkStacks = async () => {
+      setStacksChecking(true)
+      try {
+        const url = form.stacks_base_url || 'http://localhost:7788'
+        const res = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
+        if (mountedRef.current) setStacksStatus(res.ok ? 'green' : 'red')
+      } catch {
+        if (mountedRef.current) setStacksStatus('red')
+      } finally {
+        if (mountedRef.current) setStacksChecking(false)
+      }
+    }
+    checkStacks()
+  }, [config])
   useEffect(() => {
     if (!config || !form.zlib_email || !form.zlib_password) return
     if (zlibChecked) return // already manually checked
@@ -1040,6 +1056,14 @@ export default function ConfigSettings() {
                   {stacksChecking ? '检测中...' : '检测'}
                 </button>
               </div>
+              <input
+                type="password"
+                value={String(form.stacks_api_key || '')}
+                onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
+                placeholder="Admin API Key（Settings → Authentication）"
+                spellCheck={false}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
               <details>
                 <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
                   <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
