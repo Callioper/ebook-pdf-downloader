@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -137,146 +137,240 @@ async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> 
         return None
 
 
-async def _download_from_aa(ss_code: str, tmp_dir: str, proxy: str = "", task_id: str = "") -> Optional[str]:
-    """Search Anna's Archive by SS code and download the PDF. Returns the file path or None.
-    Uses FlareSolverr for Cloudflare bypass when available.
-    When task_id is provided, logs are also written to task_store."""
-    def _log(msg: str):
-        logger.warning(f"AA download: {msg}")
-        if task_id:
+async def _download_via_aa_and_stacks(
+    task_id: str, config: Dict[str, Any], report: Dict[str, Any],
+    ss_code: str, isbn: str, title: str, proxy: str,
+) -> Optional[str]:
+    """
+    Anna's Archive 搜索 → 提取MD5 → stacks下载 → 直接兜底
+    返回下载文件路径，失败返回None
+    """
+    tmp_dir = report.get("tmp_dir", "")
+    if not tmp_dir:
+        return None
+
+    # Step A: 搜索 AA 获取所有 MD5 条目
+    search_queries = []
+    if ss_code:
+        search_queries.append(("SS", ss_code))
+    if isbn:
+        search_queries.append(("ISBN", isbn))
+    if title and not search_queries:
+        search_queries.append(("title", title))
+
+    from engine.aa_downloader import search_aa, get_md5_details, resolve_download_url, get_stacks_api_key
+
+    all_md5_entries = []
+    for qtype, qval in search_queries:
+        task_store.add_log(task_id, f"AA: searching by {qtype}={qval}")
+        entries = await search_aa(qval, proxy)
+        if entries:
+            task_store.add_log(task_id, f"AA: found {len(entries)} MD5 entries via {qtype}")
+            all_md5_entries.extend(entries)
+            if len(all_md5_entries) >= 5:
+                break
+        await asyncio.sleep(1)
+
+    if not all_md5_entries:
+        task_store.add_log(task_id, "AA: no MD5 entries found for any search query")
+        return None
+
+    # 去重（按MD5）
+    seen = set()
+    deduped = []
+    for e in all_md5_entries:
+        if e["md5"] not in seen:
+            seen.add(e["md5"])
+            deduped.append(e)
+    all_md5_entries = deduped
+    task_store.add_log(task_id, f"AA: {len(all_md5_entries)} unique MD5 entries to try")
+
+    # Step B: 尝试 stacks 下载（优先）
+    stacks_api_key = config.get("stacks_api_key", "") or get_stacks_api_key()
+    stacks_url = config.get("stacks_base_url", "http://localhost:7788")
+    stacks_timeout = config.get("stacks_timeout", 300)
+    use_stacks = bool(stacks_api_key)
+
+    if use_stacks:
+        task_store.add_log(task_id, f"AA: stacks enabled ({stacks_url})")
+
+    # Step C: 遍历 MD5 尝试下载
+    for i, entry in enumerate(all_md5_entries[:10]):
+        md5 = entry["md5"]
+        task_store.add_log(task_id, f"AA [{i+1}/{min(len(all_md5_entries), 10)}]: trying MD5={md5} ({entry.get('size_label', '?')})")
+
+        # 获取 MD5 详情（zlib_id 等）
+        details = await get_md5_details(md5, proxy)
+        filesize_bytes = details.get("filesize_bytes", entry.get("size_bytes", 0))
+
+        # 路径A: stacks 下载
+        if use_stacks:
+            task_store.add_log(task_id, f"AA: submitting to stacks...")
             try:
-                task_store.add_log(task_id, f"AA: {msg}")
-            except Exception:
-                pass
+                from engine.stacks_client import StacksClient
+                sc = StacksClient(base_url=stacks_url, api_key=str(stacks_api_key or ""))
+                result = await sc.add_task(md5)
+                if result.get("ok"):
+                    filepath = await sc.wait_for_download(md5, timeout=stacks_timeout)
+                    if filepath:
+                        fixed = sc.validate_and_fix_file(filepath, tmp_dir)
+                        if fixed:
+                            task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
+                            return fixed
+                    else:
+                        task_store.add_log(task_id, "AA: stacks download timeout/failed")
+                else:
+                    err = result.get("error", "")
+                    if "unreachable" in err.lower() or "connection" in err.lower():
+                        task_store.add_log(task_id, "AA: stacks service unreachable, disabling")
+                        use_stacks = False
+            except ImportError:
+                task_store.add_log(task_id, "AA: stacks_client module not available")
+                use_stacks = False
+            except Exception as e:
+                task_store.add_log(task_id, f"AA: stacks error: {e}")
 
-    import requests as _req
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        # 路径B: AA 直接下载（_get_page_with_flare 兜底）
+        task_store.add_log(task_id, f"AA: trying direct download...")
+        dl_url = await resolve_download_url(md5, proxy)
+        if dl_url:
+            task_store.add_log(task_id, f"AA: direct download URL found")
+            try:
+                import requests as _req
+                import urllib.parse as _up
+                hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                dl_kwargs = {"timeout": 120, "headers": hdrs, "verify": False, "stream": True}
+                if proxy:
+                    dl_kwargs["proxies"] = {"http": proxy, "https": proxy}
+                resp = _req.get(dl_url, **dl_kwargs)
+                resp.raise_for_status()
 
-    # Step 1: Search AA by SS code → get MD5
-    search_url = f"https://annas-archive.gd/search?q={ss_code}"
-    html = await _get_page_with_flare(search_url, proxy)
-    if not html:
-        _log(f"搜索页获取失败: {search_url}")
-        return None
-    if "Cloudflare" in html or "cf-browser-verification" in html:
-        _log("Cloudflare 验证页面，FlareSolverr 未成功绕过")
-        return None
-    md5_m = re.search(r'href="/md5/([a-f0-9]{32})"', html)
-    if not md5_m:
-        _log(f"搜索结果中未找到 MD5 链接 (SS:{ss_code})")
-        return None
-    md5 = md5_m.group(1)
-    _log(f"找到 MD5: {md5}")
+                cd = resp.headers.get("Content-Disposition", "")
+                fname = f"{md5}.pdf"
+                if cd and "filename=" in cd:
+                    fname = cd.split("filename=")[-1].strip("\"' ")
+                else:
+                    url_path = _up.urlparse(dl_url).path
+                    if url_path:
+                        fname = os.path.basename(url_path) or fname
 
-    # Step 2: Visit MD5 page → extract download link
-    md5_url = f"https://annas-archive.gd/md5/{md5}"
-    md5_html = await _get_page_with_flare(md5_url, proxy, timeout=30)
-    if not md5_html:
-        _log(f"MD5 详情页获取失败: {md5_url}")
-        return None
+                filepath = os.path.join(tmp_dir, fname)
+                with open(filepath, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                size = os.path.getsize(filepath)
+                if size > 1024:
+                    # 验证 %PDF
+                    if fname.lower().endswith(".pdf"):
+                        with open(filepath, "rb") as fh:
+                            if fh.read(4) != b"%PDF":
+                                task_store.add_log(task_id, f"AA: downloaded file is not valid PDF")
+                                os.remove(filepath)
+                                continue
+                    task_store.add_log(task_id, f"AA: direct download OK ({size/1024:.0f} KB)")
+                    return filepath
+                os.remove(filepath)
+            except Exception as e:
+                task_store.add_log(task_id, f"AA: direct download failed: {str(e)[:100]}")
 
-    dl_url = None
+        # 短暂休息避免触发速率限制
+        await asyncio.sleep(2)
 
-    # Pattern A: Extract download link directly from MD5 page HTML
-    # AA uses various patterns for download links:
-    for p in [
-        # Direct PDF/EPUB/MOBI links
-        r'href="(https?://[^"]*\.(?:pdf|epub|mobi)(?:\?[^"]*)?)"',
-        # AA download path (/d/ or /dl/ or /get/)
-        r'href="(https?://[^"]*/(?:d|dl|get)/[^"]*)"',
-        # AA's own CDN/static links with md5
-        r'href="(https?://[^"]*annas-archive[^"]*/[a-f0-9]{32}[^"]*)"',
-        # Data attributes with URLs
-        r'data-(?:url|file|download|href)="(https?://[^"]*)"',
-        # Slow download links (common in AA)
-        r'href="(/d/[a-f0-9]{32})"',
-        # Onclick with window.open
-        r"onclick=[\"']window\.open\(['\"]([^\"']+)['\"]",
-    ]:
-        m = re.search(p, md5_html)
-        if m:
-            dl_url = m.group(1)
-            # Make relative URLs absolute
-            if dl_url.startswith("/"):
-                dl_url = f"https://annas-archive.gd{dl_url}"
-            break
+    return None
 
-    # Pattern B: /d/{md5} redirect — fetch through FlareSolverr for Cloudflare bypass
-    if not dl_url:
-        d_url = f"https://annas-archive.gd/d/{md5}"
-        d_html = await _get_page_with_flare(d_url, proxy, timeout=15)
-        if d_html:
-            for p in [
-                r'href="(https?://[^"]*\.(?:pdf|epub|mobi)[^"]*)"',
-                r'<meta[^>]*url=([^"\']+)',
-                r'window\.location\s*=\s*["\']([^"\']+)',
-            ]:
-                m = re.search(p, d_html)
-                if m:
-                    dl_url = m.group(1)
-                    break
-            if not dl_url:
-                try:
-                    d_kwargs = {"timeout": 15, "headers": headers, "verify": False, "allow_redirects": False}
-                    if proxy:
-                        d_kwargs["proxies"] = {"http": proxy, "https": proxy}
-                    resp = _req.get(d_url, **d_kwargs)
-                    if resp.status_code in (301, 302, 303, 307):
-                        dl_url = resp.headers.get("Location")
-                except Exception:
-                    pass
 
-    if not dl_url:
-        _log(f"未找到下载链接 (MD5:{md5})")
-        return None
-
-    _log(f"找到下载链接: {dl_url[:80]}...")
-
-    # Step 3: Download the file
+async def _download_via_libgen(
+    task_id: str, report: Dict[str, Any], config: Dict[str, Any],
+    title: str, isbn: str, authors: List[str], proxy: str,
+) -> Optional[str]:
+    """LibGen 兜底下载（所有其他方式失败后的最后选择）"""
+    task_store.add_log(task_id, "LibGen: trying as last resort...")
     try:
-        f_kwargs = {"timeout": 60, "headers": headers, "verify": False, "stream": True}
-        if proxy:
-            f_kwargs["proxies"] = {"http": proxy, "https": proxy}
-        file_resp = _req.get(dl_url, **f_kwargs)
-        file_resp.raise_for_status()
+        import libgen_api_enhanced as lg
+        from libgen_api_enhanced import LibgenSearch
+        searcher = LibgenSearch()
+    except ImportError:
+        task_store.add_log(task_id, "LibGen: libgen-api-enhanced not installed")
+        return None
 
-        import urllib.parse as _up
-        cd = file_resp.headers.get("Content-Disposition", "")
-        fname = f"{md5}.pdf"
-        if cd and "filename=" in cd:
-            fname = cd.split("filename=")[-1].strip("\"' ")
-        else:
-            url_path = _up.urlparse(dl_url).path
-            if url_path:
-                fname = os.path.basename(url_path) or fname
+    tmp_dir = report.get("tmp_dir", "")
+    if not tmp_dir:
+        return None
 
-        filepath = os.path.join(tmp_dir, fname)
-        with open(filepath, "wb") as f:
-            for chunk in file_resp.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
+    try:
+        filters = {}
+        search_term = ""
+        try:
+            if isbn:
+                search_term = isbn
+                filters["search_in"] = "identifier"
+            elif title:
+                search_term = title
+                if authors:
+                    search_term = f"{title} {authors[0]}"
+        except TypeError:
+            pass
 
-        size = os.path.getsize(filepath)
-        if size > 1024:
-            _log(f"下载成功: {fname} ({size/1024:.0f} KB)")
-            return filepath
-        _log(f"文件太小 ({size} bytes)")
+        if not search_term:
+            return None
+
+        results = searcher.search(search_term, search_type="title")
+        if not results or not isinstance(results, list):
+            task_store.add_log(task_id, "LibGen: no results found")
+            return None
+
+        task_store.add_log(task_id, f"LibGen: found {len(results)} results")
+        for item in results[:5]:
+            try:
+                md5 = item.get("md5", item.get("Mirror_MD5", ""))
+                if md5:
+                    dl_urls = item.get("mirrors", item.get("Mirrors", []))
+                    if not dl_urls:
+                        dl_urls = [item.get("Mirror_1", ""), item.get("Mirror_2", "")]
+                    for dl_url in dl_urls:
+                        if not dl_url or not dl_url.startswith("http"):
+                            continue
+                        try:
+                            import requests as _req
+                            hdrs = {"User-Agent": "Mozilla/5.0"}
+                            kwargs = {"timeout": 60, "headers": hdrs, "verify": False}
+                            if proxy:
+                                kwargs["proxies"] = {"http": proxy, "https": proxy}
+                            resp = _req.get(dl_url, **kwargs)
+                            if resp.status_code == 200 and len(resp.content) > 1024:
+                                ext = item.get("extension", "pdf")
+                                filepath = os.path.join(tmp_dir, f"{md5}.{ext}")
+                                with open(filepath, "wb") as f:
+                                    f.write(resp.content)
+                                task_store.add_log(task_id, f"LibGen: downloaded {md5}.{ext} ({len(resp.content)/1024:.0f} KB)")
+                                return filepath
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+
+        task_store.add_log(task_id, "LibGen: all download attempts failed")
     except Exception as e:
-        _log(f"文件下载失败: {e}")
+        task_store.add_log(task_id, f"LibGen: error: {str(e)[:100]}")
     return None
 
 
 async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
-    task_store.add_log(task_id, "Step 3/7: Downloading book pages...")
+    """
+    Step 3/7: Download book PDF — 多级降级策略
+    本地检索 → Anna's Archive(stacks优先→直接兜底) → Z-Library(三层检索) → LibGen兜底
+    """
+    task_store.add_log(task_id, "Step 3/7: Downloading book PDF...")
     await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 0})
 
+    # 准备临时目录
     tmp_dir = config.get("tmp_dir", "")
     if tmp_dir:
         task_tmp = os.path.join(tmp_dir, task_id)
         os.makedirs(task_tmp, exist_ok=True)
         report["tmp_dir"] = task_tmp
     else:
-        task_store.add_log(task_id, "No tmp_dir configured, using default")
         report["tmp_dir"] = os.path.join(os.path.dirname(__file__), "tmp", task_id)
         os.makedirs(report["tmp_dir"], exist_ok=True)
 
@@ -284,99 +378,121 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
     isbn = report.get("isbn", "")
     proxy = config.get("http_proxy", "")
     title = report.get("title", "")
+    authors = report.get("authors", [])
     downloaded = False
+    download_source = ""
 
-    # === Ensure FlareSolverr is running for AA access (Cloudflare bypass) ===
-    flaresolverr_running = False
+    # ── 本地检索：检查是否已存在 ──
+    finished_dir = config.get("finished_dir", "")
+    if finished_dir and title:
+        safe_title = title.replace("/", "_").replace("\\", "_")
+        for ext in (".pdf", ".epub", ".mobi"):
+            existing = os.path.join(finished_dir, f"{safe_title}{ext}")
+            if os.path.exists(existing) and os.path.getsize(existing) > 1024:
+                task_store.add_log(task_id, f"Book already downloaded: {os.path.basename(existing)}")
+                report["download_path"] = existing
+                report["download_source"] = "local_cache"
+                await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 100})
+                return report
+
+    # ── 确保 FlareSolverr 运行（供 AA 访问） ──
+    await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 5})
     try:
         from engine.flaresolverr import check_flaresolverr, start_flaresolverr
-        if await check_flaresolverr(config):
-            flaresolverr_running = True
-        else:
-            task_store.add_log(task_id, "FlareSolverr not running, attempting to start...")
+        if not await check_flaresolverr(config):
+            task_store.add_log(task_id, "Starting FlareSolverr for AA access...")
             started, msg = await start_flaresolverr(config)
             if started:
-                flaresolverr_running = True
-                task_store.add_log(task_id, "FlareSolverr started successfully")
+                task_store.add_log(task_id, "FlareSolverr started")
             else:
-                task_store.add_log(task_id, f"FlareSolverr start failed: {msg}")
+                task_store.add_log(task_id, f"FlareSolverr: {msg}")
+                # 继续尝试（AA直接请求可能仍有效）
     except ImportError:
         task_store.add_log(task_id, "FlareSolverr module not available")
     except Exception as e:
-        task_store.add_log(task_id, f"FlareSolverr check error: {e}")
+        task_store.add_log(task_id, f"FlareSolverr check: {e}")
 
-    # === Method 1: Anna's Archive (search by SS code → MD5 → download) ===
-    if ss_code:
-        task_store.add_log(task_id, f"Trying Anna's Archive...")
-        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 30})
-        # Try searching by SS code first, then by ISBN if available
-        aa_filepath = None
-        for search_query in [ss_code, isbn] if isbn else [ss_code]:
-            if search_query and search_query == ss_code:
-                task_store.add_log(task_id, f"AA search by SS: {ss_code}")
-            elif search_query and search_query == isbn:
-                task_store.add_log(task_id, f"AA search by ISBN: {isbn}")
-            else:
-                continue
-            aa_filepath = await _download_from_aa(search_query, report["tmp_dir"], proxy, task_id)
-            if aa_filepath:
-                break
-        if aa_filepath:
-            task_store.add_log(task_id, f"Downloaded from Anna's Archive: {os.path.basename(aa_filepath)}")
-            report["download_path"] = aa_filepath
-            report["download_source"] = "annas_archive"
-            downloaded = True
-        else:
-            task_store.add_log(task_id, "Anna's Archive download failed, trying next method...")
+    # ── 路径A：Anna's Archive → stacks/MD5 → 直接下载 ──
+    task_store.add_log(task_id, "=== Path A: Anna's Archive ===")
+    await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 10})
 
-    # === Method 2: Z-Library (search by ISBN → download via eAPI) ===
-    if not downloaded and isbn:
-        task_store.add_log(task_id, f"Trying Z-Library (ISBN:{isbn})...")
-        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
-        try:
-            from engine.zlib_downloader import ZLibDownloader
-            dl = ZLibDownloader(config)
-            result = await dl.zlib_search(isbn, page=1, limit=5)
-            raw_items = result.get("books") or result.get("results") or result.get("data") or []
-            if isinstance(raw_items, dict):
-                raw_items = raw_items.get("books", raw_items.get("results", []))
-            # raw_items should now be a list
-            for item in (raw_items if isinstance(raw_items, list) else []):
-                book_id = str(item.get("id", ""))
-                book_hash = item.get("hash") or item.get("book_hash") or ""
-                task_store.add_log(task_id, f"ZL result: id={book_id}, hash={'yes' if book_hash else 'no'}")
-                if book_id and book_hash:
-                    ok = await dl.zlib_download_book(book_id, book_hash, report["tmp_dir"])
-                    if ok:
-                        saved_files = list(Path(report["tmp_dir"]).glob(f"{book_id}.*"))
-                        valid = False
-                        for f in saved_files:
-                            if f.stat().st_size > 1024:
-                                # Validate PDF magic bytes when extension is .pdf
-                                if f.suffix.lower() == ".pdf":
-                                    with open(f, "rb") as _fh:
-                                        if _fh.read(4) == b"%PDF":
-                                            valid = True
-                                            report["download_path"] = str(f)
-                                            break
-                                else:
-                                    valid = True
-                                    report["download_path"] = str(f)
-                                    break
-                        if valid:
-                            task_store.add_log(task_id, f"Downloaded from Z-Library: {book_id}")
-                            report["download_source"] = "zlibrary"
-                            downloaded = True
-                            break
-                        else:
-                            task_store.add_log(task_id, f"Z-Library file for {book_id} is empty or invalid")
-                    else:
-                        task_store.add_log(task_id, f"Z-Library download attempt failed for book {book_id}")
-        except Exception as e:
-            task_store.add_log(task_id, f"Z-Library download error: {e}")
+    aa_result = await _download_via_aa_and_stacks(
+        task_id, config, report, ss_code, isbn, title, proxy,
+    )
+    if aa_result:
+        downloaded = True
+        download_source = "annas_archive"
+        report["download_path"] = aa_result
 
+    # ── 路径B：Z-Library 三层检索 ──
     if not downloaded:
-        task_store.add_log(task_id, "All download methods failed")
+        task_store.add_log(task_id, "=== Path B: Z-Library ===")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
+
+        zlib_email = config.get("zlib_email", "")
+        zlib_password = config.get("zlib_password", "")
+        if zlib_email and zlib_password:
+            try:
+                from engine.zlib_downloader import ZLibDownloader
+                dl = ZLibDownloader(config)
+
+                # 登录
+                login_result = await dl.zlib_login()
+                if login_result.get("ok"):
+                    task_store.add_log(task_id, "ZL: logged in")
+                    balance = login_result.get("balance", "")
+                    if balance:
+                        task_store.add_log(task_id, f"ZL: {balance}")
+
+                    # 三层检索
+                    match = await dl.zlib_search_tiered(
+                        isbn=isbn, title=title, authors=authors, expected_size=0,
+                    )
+                    if match:
+                        task_store.add_log(task_id,
+                            f"ZL: matched book {match['id']} via {match['strategy']} "
+                            f"(tier {match['tier']}, level={match['match_level']})")
+                        zl_path = await dl.zlib_download_verified(
+                            match["id"], match["hash"], report["tmp_dir"],
+                            expected_size=match.get("size", 0),
+                        )
+                        if zl_path:
+                            task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
+                            downloaded = True
+                            download_source = "zlibrary"
+                            report["download_path"] = zl_path
+                        else:
+                            task_store.add_log(task_id, "ZL: download verification failed")
+                    else:
+                        task_store.add_log(task_id, "ZL: no matching book found in any tier")
+                else:
+                    task_store.add_log(task_id, f"ZL: login failed — {login_result.get('message', 'unknown')}")
+            except ImportError:
+                task_store.add_log(task_id, "ZL: module not available")
+            except Exception as e:
+                task_store.add_log(task_id, f"ZL: error: {str(e)[:150]}")
+        else:
+            task_store.add_log(task_id, "ZL: no credentials configured, skipping")
+
+    # ── 路径C：LibGen 兜底 ──
+    if not downloaded and config.get("libgen_enabled", True):
+        task_store.add_log(task_id, "=== Path C: LibGen (last resort) ===")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 80})
+
+        libgen_path = await _download_via_libgen(
+            task_id, report, config, title, isbn, authors, proxy,
+        )
+        if libgen_path:
+            downloaded = True
+            download_source = "libgen"
+            report["download_path"] = libgen_path
+
+    # ── 结果 ──
+    if downloaded:
+        report["download_source"] = download_source
+        task_store.add_log(task_id, f"Download complete via {download_source}: {os.path.basename(report['download_path'])}")
+    else:
+        task_store.add_log(task_id, "All download paths (AA/stacks → ZL → LibGen) exhausted — download failed")
         report["download_note"] = "download failed"
 
     await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 100})
@@ -429,7 +545,9 @@ async def _step_convert_pdf(task_id: str, task: Dict[str, Any], config: Dict[str
                 task_store.add_log(task_id, "PyMuPDF not available, trying img2pdf...")
                 import img2pdf
                 with open(pdf_path, "wb") as f:
-                    f.write(img2pdf.convert([str(p) for p in image_files]))
+                    data = img2pdf.convert([str(p) for p in image_files])
+                    if data:
+                        f.write(data)
                 task_store.add_log(task_id, f"PDF created via img2pdf: {pdf_path}")
 
             report["pdf_path"] = pdf_path

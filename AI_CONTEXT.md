@@ -4,11 +4,11 @@
 全自动电子书下载与处理工具。从本地 SQLite 数据库和在线书源（Anna's Archive、Z-Library）检索、下载、OCR 识别、PDF 压缩到最终输出，提供一站式管道处理。vibe coding 项目，由 AI 维护。
 
 ## 当前状态
-- 版本：v1.4.0
+- 版本：v1.5.0
 - 功能数：约 20 个
-- 后端源文件数：13 个 (Python)
+- 后端源文件数：15 个 (Python)
 - 前端源文件数：15+ 个 (TypeScript/TSX)
-- 最后修改：2026-05-04
+- 最后修改：2026-05-04 (Step 2 下载多级降级重构)
 
 ## 文件结构
 | 文件 | 职责 | 稳定性 |
@@ -23,8 +23,10 @@
 | backend/api/tasks.py | 任务 CRUD API | 稳定 |
 | backend/api/ws.py | WebSocket 连接管理 | 稳定 |
 | backend/engine/flaresolverr.py | FlareSolverr 进程管理 + Cloudflare 绕过 | 活跃开发 |
+| backend/engine/aa_downloader.py | Anna's Archive 搜索 + MD5 提取 | 活跃开发 |
+| backend/engine/stacks_client.py | stacks Docker 下载管理器 | 活跃开发 |
 | backend/engine/pipeline.py | 7 步处理管道 | 核心，慎改 |
-| backend/engine/zlib_downloader.py | Z-Library curl_cffi 集成 | 活跃开发 |
+| backend/engine/zlib_downloader.py | Z-Library curl_cffi 集成（三层检索）| 活跃开发 |
 | backend/nlc/nlc_isbn.py | NLC ISBN 元数据查询 | 稳定 |
 | frontend/src/App.tsx | React 路由入口 | 稳定 |
 | frontend/src/components/ConfigSettings.tsx | 设置页面 | 活跃开发 |
@@ -35,6 +37,7 @@
 2. 无本地结果 → _search_annas_archive() / _search_zlib() 在线回退
 3. 创建任务 → task_store.py 持久化
 4. 执行任务 → pipeline.py 7 步处理
+   - Step 3 多级下载降级：AA搜索→MD5→stacks→AA直连 → ZL三层检索 → LibGen
 5. 实时更新 → ws_manager.py WebSocket 广播
 
 ## 技术约定

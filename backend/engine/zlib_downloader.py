@@ -4,9 +4,13 @@
 # 依赖：无
 # 注意：使用curl_cffi绕过CloudFlare，支持代理和重试
 
+import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from curl_cffi import requests as curl_requests
 
@@ -264,3 +268,157 @@ class ZLibDownloader:
         except Exception:
             pass
         return False
+
+    # ==== 增强搜索和下载 ====
+
+    @staticmethod
+    def _verify_filesize(actual_bytes: int, expected_bytes: int, tolerance: float = 0.05) -> Tuple[bool, str]:
+        """验证文件大小是否在容差范围内。返回(是否匹配, 匹配级别)"""
+        if expected_bytes <= 0:
+            return True, "size_unknown"
+        if actual_bytes < 50000:  # 至少50KB
+            return False, "too_small"
+        ratio = abs(actual_bytes - expected_bytes) / expected_bytes if expected_bytes > 0 else 999
+        if ratio <= 0.01:
+            return True, "exact"
+        if ratio <= tolerance:
+            return True, "approximate"
+        return False, "mismatch"
+
+    async def zlib_search_tiered(
+        self,
+        isbn: str = "",
+        title: str = "",
+        authors: Optional[List[str]] = None,
+        expected_size: int = 0,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        三层检索策略：ISBN精确 → title+author复合 → title单独
+        返回最佳匹配项（含id, hash, size, match_level），或None
+        """
+        authors = authors or []
+        author_str = authors[0] if authors else ""
+
+        # 第1层：ISBN精确匹配（最高优先级）
+        if isbn and len(isbn) >= 10:
+            logger.info(f"ZL tiered search layer 1: ISBN={isbn}")
+            result = await self.zlib_search(isbn, page=1, limit=10)
+            books = _extract_books(result)
+            for book in books:
+                book_isbn = str(book.get("isbn", ""))
+                if isbn.replace("-", "") in book_isbn.replace("-", ""):
+                    match = self._check_book_match(book, expected_size)
+                    if match:
+                        match["tier"] = 1
+                        match["strategy"] = "isbn_exact"
+                        return match
+
+        # 第2层：title + author 复合搜索
+        if title and author_str:
+            query = f"{title} {author_str}"
+            logger.info(f"ZL tiered search layer 2: title+author='{query[:60]}'")
+            result = await self.zlib_search(query, page=1, limit=20)
+            books = _extract_books(result)
+            for book in books:
+                match = self._check_book_match(book, expected_size)
+                if match:
+                    match["tier"] = 2
+                    match["strategy"] = "title_author"
+                    return match
+
+        # 第3层：仅title搜索
+        if title:
+            logger.info(f"ZL tiered search layer 3: title='{title[:60]}'")
+            result = await self.zlib_search(title, page=1, limit=20)
+            books = _extract_books(result)
+            for book in books:
+                match = self._check_book_match(book, expected_size)
+                if match:
+                    match["tier"] = 3
+                    match["strategy"] = "title_only"
+                    return match
+
+        return None
+
+    def _check_book_match(
+        self,
+        book: Dict[str, Any],
+        expected_size: int = 0,
+    ) -> Optional[Dict[str, Any]]:
+        """检查单个搜索结果是否匹配，返回匹配信息或None"""
+        book_id = str(book.get("id", ""))
+        book_hash = book.get("hash") or book.get("book_hash") or ""
+        if not book_id or not book_hash:
+            return None
+
+        # 检查文件大小
+        book_size = int(book.get("filesize", book.get("filesize_bytes", 0)))
+        if expected_size > 0 and book_size > 0:
+            ok, level = self._verify_filesize(book_size, expected_size, 0.05)
+            if not ok:
+                logger.debug(f"ZL book {book_id}: size mismatch (got {book_size}, expected {expected_size})")
+                return None
+        else:
+            level = "size_unchecked"
+
+        return {
+            "id": book_id,
+            "hash": book_hash,
+            "size": book_size,
+            "match_level": level,
+            "title": book.get("title", ""),
+            "extension": book.get("extension", book.get("ext", "pdf")),
+        }
+
+    async def zlib_download_verified(
+        self,
+        book_id: str,
+        book_hash: str,
+        output_dir: str,
+        expected_size: int = 0,
+    ) -> Optional[str]:
+        """下载并验证文件（含PDF头检查 + 大小验证），返回文件路径"""
+        ok = await self.zlib_download_book(book_id, book_hash, output_dir)
+        if not ok:
+            return None
+
+        # 查找下载的文件
+        saved_files = list(Path(output_dir).glob(f"{book_id}.*"))
+        for f in saved_files:
+            if f.stat().st_size < 1024:
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+                continue
+
+            # PDF 头验证
+            if f.suffix.lower() == ".pdf":
+                try:
+                    with open(f, "rb") as fh:
+                        if fh.read(4) != b"%PDF":
+                            logger.warning(f"ZL downloaded non-PDF for {book_id}, removed")
+                            f.unlink()
+                            continue
+                except OSError:
+                    continue
+
+            # 文件大小验证
+            if expected_size > 0:
+                ok, level = self._verify_filesize(f.stat().st_size, expected_size, 0.05)
+                if not ok:
+                    logger.warning(f"ZL size mismatch for {book_id}: {f.stat().st_size} vs {expected_size}")
+                    f.unlink()
+                    continue
+
+            return str(f)
+
+        return None
+
+
+def _extract_books(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """从Z-Library搜索结果中提取书籍列表"""
+    books = result.get("books") or result.get("results") or result.get("data") or []
+    if isinstance(books, dict):
+        books = books.get("books", books.get("results", []))
+    return books if isinstance(books, list) else []
