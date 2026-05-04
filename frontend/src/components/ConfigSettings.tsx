@@ -150,12 +150,12 @@ const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
    cd backend && venv\Scripts\activate
 
 2. 安装 OCRmyPDF 核心：
-   pip install ocrmypdf --user
+   pip install ocrmypdf
 
 3. 安装引擎插件（按需选一个或多个）：
-   pip install ocrmypdf-easyocr --user     # EasyOCR 引擎（多语言）
-   pip install paddleocr --user            # PaddleOCR 引擎（中文推荐）
-   pip install ocrmypdf-paddleocr --user   # PaddleOCR+OCRmyPDF 桥接（可选）
+   pip install ocrmypdf-easyocr     # EasyOCR 引擎（多语言）
+   pip install paddleocr            # PaddleOCR 引擎（中文推荐）
+   pip install ocrmypdf-paddleocr   # PaddleOCR+OCRmyPDF 桥接（可选）
 
 4. 安装 Tesseract OCR 系统依赖（OCRmyPDF 需要）：
    winget install --id UB-Mannheim.TesseractOCR
@@ -332,23 +332,7 @@ export default function ConfigSettings() {
 
   useEffect(() => { fetchConfig() }, [fetchConfig])
 
-  // Auto-detect stacks on load
-  useEffect(() => {
-    if (!config || stacksStatus !== null) return
-    const checkStacks = async () => {
-      setStacksChecking(true)
-      try {
-        const url = form.stacks_base_url || 'http://localhost:7788'
-        const res = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
-        if (mountedRef.current) setStacksStatus(res.ok ? 'green' : 'red')
-      } catch {
-        if (mountedRef.current) setStacksStatus('red')
-      } finally {
-        if (mountedRef.current) setStacksChecking(false)
-      }
-    }
-    checkStacks()
-  }, [config])
+  // Restore Z-Lib login state from stored credentials
   useEffect(() => {
     if (!config || !form.zlib_email || !form.zlib_password) return
     if (zlibChecked) return // already manually checked
@@ -1056,14 +1040,6 @@ export default function ConfigSettings() {
                   {stacksChecking ? '检测中...' : '检测'}
                 </button>
               </div>
-              <input
-                type="password"
-                value={String(form.stacks_api_key || '')}
-                onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
-                placeholder="Admin API Key（Settings → Authentication）"
-                spellCheck={false}
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
               <details>
                 <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
                   <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1185,6 +1161,15 @@ export default function ConfigSettings() {
                     />
                     <span className="text-xs text-gray-400">FlareSolverr 端口（默认 8191）</span>
                   </div>
+                  {/* Docker 安装引导 */}
+                  <details className="mt-2">
+                    <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800">📦 查看 Docker 安装指引</summary>
+                    <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+                      <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
+                      <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{FLARESOLVERR_DOCKER_GUIDE}</pre>
+                      <p className="text-xs text-blue-600 mt-2">启动后返回设置页点击"重新检测"确认连接状态。</p>
+                    </div>
+                  </details>
                   {/* PDF 压缩 */}
                   <div className="border-t border-gray-200 pt-2 mt-2">
                     <label className="flex items-center gap-2 cursor-pointer">
