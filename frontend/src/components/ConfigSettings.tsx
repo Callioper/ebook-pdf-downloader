@@ -165,6 +165,32 @@ const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
    python -c "import easyocr; print('easyocr ok')"
    python -c "import paddleocr; print('paddleocr:', paddleocr.__version__)"`
 
+const STACKS_INSTALL_GUIDE = `## 安装 stacks（Anna's Archive 下载管理器）
+
+推荐在 OpenCode 中执行以下命令安装 stacks，项目地址 https://opencode.ai/。
+
+## 安装 stacks
+
+1. 打开终端（Terminal）
+
+2. 创建 stacks 目录并下载：
+   mkdir ~/stacks && cd ~/stacks
+   curl -sL "https://github.com/zelestcarlyone/stacks/releases/latest/download/stacks-windows-x64.zip" -o stacks.zip
+   tar -xf stacks.zip
+
+3. 启动 stacks（默认端口 7788）：
+   cd ~/stacks && stacks.exe
+
+4. 浏览器访问 http://localhost:7788 进入管理界面
+
+5. 默认密码：admin / stacks
+
+6. 获取 API Key：登录 → Settings → Authentication → Admin API Key
+
+7. 将 API Key 填入下方输入框
+
+8. 可选：搭配 FlareSolverr 使用（见下方 FlareSolverr 配置）`
+
 export default function ConfigSettings() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [form, setForm] = useState<AppConfig>({ ...DEFAULT_CONFIG })
@@ -936,6 +962,55 @@ export default function ConfigSettings() {
               )}
           </div>
 
+          {/* ============ stacks ============ */}
+          <div className="border-t border-gray-200 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-600">stacks 下载管理器（Anna's Archive）</span>
+              <StatusDot status="yellow" />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={form.stacks_base_url || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_base_url: e.target.value }))}
+                  placeholder="http://localhost:7788"
+                  spellCheck={false}
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const url = form.stacks_base_url || 'http://localhost:7788'
+                      const res = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
+                      if (res.ok) alert('stacks 连接正常')
+                      else alert('stacks 连接失败: HTTP ' + res.status)
+                    } catch (e: any) {
+                      alert('stacks 连接失败: ' + (e.message || e))
+                    }
+                  }}
+                  className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
+                >
+                  检测
+                </button>
+              </div>
+              <details>
+                <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
+                  <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  stacks 安装指引
+                </summary>
+                <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+                  <p className="text-xs text-blue-800 font-medium mb-2">推荐在 OpenCode 中执行以下命令安装 stacks：</p>
+                  <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{STACKS_INSTALL_GUIDE}</pre>
+                  <p className="text-xs text-blue-600 mt-2">安装并启动后，点击"检测"确认连接状态。</p>
+                </div>
+              </details>
+            </div>
+          </div>
+
           <div className="border-t border-gray-200 pt-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-gray-600">FlareSolverr</span>
@@ -1040,6 +1115,19 @@ export default function ConfigSettings() {
                       className="w-24 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     />
                     <span className="text-xs text-gray-400">FlareSolverr 端口（默认 8191）</span>
+                  </div>
+                  {/* PDF 压缩 */}
+                  <div className="border-t border-gray-200 pt-2 mt-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!form.pdf_compress}
+                        onChange={(e) => setForm((prev) => ({ ...prev, pdf_compress: e.target.checked }))}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-xs font-medium text-gray-600">PDF 压缩（OCR 后执行 qpdf 结构压缩）</span>
+                    </label>
+                    <p className="text-xs text-gray-400 mt-0.5 ml-5">使用 qpdf 纯结构压缩，零文字层损失。</p>
                   </div>
                 </div>
       )}
