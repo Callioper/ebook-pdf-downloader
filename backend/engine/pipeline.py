@@ -852,9 +852,22 @@ async def _step_convert_pdf(task_id: str, task: Dict[str, Any], config: Dict[str
             task_store.add_log(task_id, "No image files found in tmp dir, checking for existing PDF...")
             pdf_files = list(Path(tmp_dir).glob("*.pdf")) if tmp_dir else []
             if pdf_files:
-                pdf_path = str(pdf_files[0])
-                task_store.add_log(task_id, f"Using existing PDF: {pdf_path}")
-                report["pdf_path"] = pdf_path
+                from_path = str(pdf_files[0])
+                task_store.add_log(task_id, f"Found PDF: {from_path}")
+                # 复制到 download_dir（设置中的下载目录）
+                out_dir = config.get("download_dir", "")
+                if out_dir:
+                    os.makedirs(out_dir, exist_ok=True)
+                    ss_code = report.get("ss_code", "")
+                    safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
+                    ext = os.path.splitext(from_path)[1] or ".pdf"
+                    new_name = f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}"
+                    dest_path = os.path.join(out_dir, new_name)
+                    shutil.copy2(from_path, dest_path)
+                    report["pdf_path"] = dest_path
+                    task_store.add_log(task_id, f"PDF copied to download dir: {dest_path}")
+                else:
+                    report["pdf_path"] = from_path
             else:
                 task_store.add_log(task_id, "No images or PDF found to convert")
                 await _emit(task_id, "step_progress", {"step": "convert_pdf", "progress": 100})

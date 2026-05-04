@@ -1185,15 +1185,6 @@ export default function ConfigSettings() {
                     />
                     <span className="text-xs text-gray-400">FlareSolverr 端口（默认 8191）</span>
                   </div>
-                  {/* Docker 安装引导 */}
-                  <details className="mt-2">
-                    <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800">📦 查看 Docker 安装指引</summary>
-                    <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
-                      <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
-                      <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{FLARESOLVERR_DOCKER_GUIDE}</pre>
-                      <p className="text-xs text-blue-600 mt-2">启动后返回设置页点击"重新检测"确认连接状态。</p>
-                    </div>
-                  </details>
                   {/* PDF 压缩 */}
                   <div className="border-t border-gray-200 pt-2 mt-2">
                     <label className="flex items-center gap-2 cursor-pointer">
