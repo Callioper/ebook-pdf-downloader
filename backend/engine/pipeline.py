@@ -367,7 +367,7 @@ async def _download_via_aa_and_stacks(
     if title and not search_queries:
         search_queries.append(("title", title))
 
-    from engine.aa_downloader import search_aa, get_md5_details, get_stacks_api_key, _calc_title_relevance, verify_md5
+    from engine.aa_downloader import search_aa, get_md5_details, get_stacks_api_key, _calc_title_relevance, verify_md5, resolve_download_url
 
     all_md5_entries = []
     for qtype, qval in search_queries:
@@ -394,22 +394,23 @@ async def _download_via_aa_and_stacks(
     all_md5_entries = deduped
     task_store.add_log(task_id, f"AA: {len(all_md5_entries)} unique MD5 entries to try")
 
-    # Step B: 尝试 stacks 下载（优先）
+    # Step B: 尝试 stacks 下载（优先 — 仅当 Docker 服务运行）
+    # （stacks 是 Anna's Archive 下载管理器，与 FlareSolverr 不同）
     stacks_api_key = config.get("stacks_api_key", "") or get_stacks_api_key()
     stacks_url = config.get("stacks_base_url", "http://localhost:7788")
     stacks_timeout = config.get("stacks_timeout", 300)
     use_stacks = bool(stacks_api_key)
 
-    # 即使没有 API key，也尝试检测 stacks 是否运行（端口可达即认为可用）
+    # 即使没有 API key，也尝试检测 stacks 是否运行
     if not use_stacks:
         try:
             import requests as _req
             hc = _req.get(f"{stacks_url}/api/health", timeout=3)
-            if hc.status_code < 500:  # 任何非 5xx 响应都表明服务在运行
+            if hc.status_code < 500:
                 use_stacks = True
-                task_store.add_log(task_id, f"AA: stacks detected at {stacks_url} (no API key, may use limited endpoints)")
+                task_store.add_log(task_id, f"AA: stacks detected at {stacks_url} (no API key, limited endpoints)")
         except Exception:
-            task_store.add_log(task_id, f"AA: stacks not reachable at {stacks_url}")
+            task_store.add_log(task_id, f"AA: stacks not reachable at {stacks_url} — will fall back to FlareSolverr+CDN")
 
     if use_stacks:
         task_store.add_log(task_id, f"AA: stacks {'configured' if stacks_api_key else 'reachable'} ({stacks_url})")
@@ -467,7 +468,37 @@ async def _download_via_aa_and_stacks(
                 except Exception as e:
                     task_store.add_log(task_id, f"AA: stacks error: {str(e)[:100]}")
 
-            # 只试第一个 MD5（参考代码只选 best MD5）
+            # stacks 不可用或失败 → FlareSolverr 兜底下载
+            # 通过 FlareSolverr session 获取 /d/{md5} 的 CDN 重定向 URL
+            task_store.add_log(task_id, f"AA: trying FlareSolverr direct download (port {_get_flare_port(config)})...")
+            try:
+                from engine.flaresolverr import _flare_url, _get_flare_port
+                fs_url = await resolve_download_url(md5, proxy)
+                if fs_url and "annas-archive" not in fs_url.lower():
+                    task_store.add_log(task_id, f"AA: CDN URL from FlareSolverr: {fs_url[:80]}")
+                    import requests as _req
+                    hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                    fs_resp = _req.get(fs_url, headers=hdrs, timeout=120, verify=False, stream=True)
+                    if fs_resp.status_code == 200:
+                        cd = fs_resp.headers.get("Content-Disposition", "")
+                        fname = f"{md5}.pdf"
+                        if cd and "filename=" in cd:
+                            fname = cd.split("filename=")[-1].strip("\"' ")
+                        fpath = os.path.join(tmp_dir, fname)
+                        with open(fpath, "wb") as f:
+                            for chunk in fs_resp.iter_content(65536):
+                                if chunk:
+                                    f.write(chunk)
+                        if os.path.getsize(fpath) > 1024:
+                            with open(fpath, "rb") as fh:
+                                if fh.read(4) == b"%PDF" and verify_md5(fpath, md5):
+                                    task_store.add_log(task_id, f"AA: FlareSolverr download OK")
+                                    return fpath
+                            os.remove(fpath)
+            except Exception as e:
+                task_store.add_log(task_id, f"AA: FlareSolverr download failed: {str(e)[:100]}")
+
+            # 只试第一个 MD5
             break
 
         return None
