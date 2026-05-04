@@ -449,12 +449,29 @@ async def _download_via_aa_and_stacks(
                 try:
                     from engine.stacks_client import StacksClient
                     sc = StacksClient(base_url=stacks_url, api_key=str(stacks_api_key or ""))
+                    download_dir = config.get("download_dir", "")
                     result = await sc.add_task(md5)
                     if result.get("ok"):
-                        # Pass log callback for real-time progress
+                        # 处理"已在历史中"的情况
+                        if result.get("already_downloaded"):
+                            # 检查文件是否已存在
+                            existing = sc._find_downloaded_file(md5, download_dir)
+                            if existing and os.path.getsize(existing) > 1024:
+                                task_store.add_log(task_id, f"AA: file already in stacks history, found at {os.path.basename(existing)}")
+                                # 复制到下载目录
+                                if download_dir:
+                                    dest = os.path.join(download_dir, os.path.basename(existing))
+                                    if os.path.abspath(existing) != os.path.abspath(dest):
+                                        shutil.copy2(existing, dest)
+                                        task_store.add_log(task_id, f"AA: copied to download dir: {dest}")
+                                        return dest
+                                return existing
+                            # 文件不存在 → 清除历史重试
+                            task_store.add_log(task_id, "AA: file not found locally, clearing history & retrying...")
+                            await sc.history_retry(md5)
                         def _stacks_log(msg):
                             task_store.add_log(task_id, f"stacks: {msg}")
-                        filepath = await sc.wait_for_download(md5, timeout=stacks_timeout, log_callback=_stacks_log)
+                        filepath = await sc.wait_for_download(md5, timeout=stacks_timeout, log_callback=_stacks_log, download_dir=download_dir)
                         if filepath:
                             fixed = sc.validate_and_fix_file(filepath, tmp_dir)
                             if fixed:

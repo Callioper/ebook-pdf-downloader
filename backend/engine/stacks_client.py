@@ -53,21 +53,27 @@ class StacksClient:
             h["Authorization"] = f"Bearer {self.api_key}"
         return h
 
+    async def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """异步 HTTP 请求 — 通过 run_in_executor 避免阻塞事件循环"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: requests.request(method, url, **kwargs))
+
     async def add_task(self, md5: str) -> Dict[str, Any]:
         """提交MD5下载任务到stacks队列"""
         try:
             payload = {"md5": md5, "action": "download"}
-            r = requests.post(
-                self._queue_endpoint,
-                json=payload,
-                headers=self._headers_queue(),
-                timeout=15,
-            )
+            r = await self._request("POST", self._queue_endpoint, json=payload,
+                                     headers=self._headers_queue(), timeout=15)
+            data = r.json() if r.text else {}
             if r.status_code in (200, 201, 202):
-                data = r.json()
                 logger.info(f"stacks task submitted: md5={md5}, response={data}")
                 return {"ok": True, "data": data}
             else:
+                # "Already downloaded" — 文件已在历史中
+                msg = data.get("message", "") or r.text[:200]
+                if "already" in msg.lower() or "downloaded" in msg.lower():
+                    logger.info(f"stacks: {md5} already in history, checking local files")
+                    return {"ok": True, "already_downloaded": True, "data": data}
                 logger.warning(f"stacks add_task failed: {r.status_code} {r.text[:200]}")
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
         except requests.ConnectionError:
@@ -80,14 +86,34 @@ class StacksClient:
     async def get_status(self) -> Dict[str, Any]:
         """查询stacks服务状态和当前任务进度"""
         try:
-            r = requests.get(self._status_endpoint, headers=self._headers_status(), timeout=10)
+            r = await self._request("GET", self._status_endpoint, headers=self._headers_status(), timeout=10)
             if r.status_code == 200:
                 return {"ok": True, "data": r.json()}
             return {"ok": False, "error": f"HTTP {r.status_code}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    async def wait_for_download(self, md5: str, timeout: int = 300, log_callback=None) -> Optional[str]:
+    async def history_clear(self) -> bool:
+        """清除 stacks 下载历史"""
+        try:
+            r = await self._request("POST", f"{self.base_url}/api/history/clear",
+                                     headers=self._headers_queue(), timeout=10)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    async def history_retry(self, md5: str) -> bool:
+        """重试 stacks 历史中的失败任务"""
+        try:
+            r = await self._request("POST", f"{self.base_url}/api/history/retry",
+                                     json={"md5": md5},
+                                     headers=self._headers_queue(), timeout=10)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    async def wait_for_download(self, md5: str, timeout: int = 300, log_callback=None,
+                                 download_dir: str = "") -> Optional[str]:
         """轮询等待stacks完成下载，返回文件路径或None"""
         import asyncio
         start = time.time()
@@ -153,9 +179,13 @@ class StacksClient:
         _log(f"timed out ({timeout}s)")
         return self._find_downloaded_file(md5)
 
-    def _find_downloaded_file(self, md5: str) -> Optional[str]:
-        """在两个可能路径中查找与MD5匹配的下载文件"""
-        for base in self._search_paths:
+    def _find_downloaded_file(self, md5: str, download_dir: str = "") -> Optional[str]:
+        """在两个可能路径中查找与MD5匹配的下载文件（含 download_dir）"""
+        # 优先级 1: 下载目录中按 MD5 搜索
+        target_dirs = list(self._search_paths)
+        if download_dir:
+            target_dirs.insert(0, Path(download_dir))
+        for base in target_dirs:
             if not base.exists():
                 continue
             # 查找包含 MD5 的文件名
