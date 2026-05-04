@@ -181,16 +181,22 @@ async def open_folder(task_id: str):
 
 class ConfirmDownloadRequest(BaseModel):
     confirm: bool = True
+    book_id: str = ""  # ZL book ID for the selected candidate
+    book_hash: str = ""  # ZL book hash for the selected candidate
 
 
 @router.post("/{task_id}/confirm-download")
 async def confirm_download(task_id: str, body: ConfirmDownloadRequest):
-    """用户确认/拒绝消耗下载额度（Z-Library 等）"""
+    """用户确认/拒绝消耗下载额度（Z-Library 等），可选指定选择的条目"""
     task = task_store.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    # 存储用户决策，pipeline 会轮询这个值
-    task_store.update(task_id, {"_zl_confirm": body.confirm})
+    update = {"_zl_confirm": body.confirm}
+    if body.book_id and body.book_hash:
+        update["_zl_confirm_selection"] = {"id": body.book_id, "hash": body.book_hash}
+    task_store.update(task_id, update)
     logger = logging.getLogger(__name__)
+    if body.book_id:
+        logger.info(f"User selected book {body.book_id} for task {task_id}")
     logger.info(f"User {'confirmed' if body.confirm else 'declined'} download for task {task_id}")
     return {"ok": True, "confirm": body.confirm}

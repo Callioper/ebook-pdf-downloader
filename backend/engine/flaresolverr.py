@@ -380,11 +380,17 @@ async def download_file_via_flaresolverr(
     referer: str = "",
 ) -> bool:
     """
-    Download a binary file through FlareSolverr by:
-    1. Visiting the URL via a FlareSolverr session (gets Cloudflare clearance)
-    2. Extracting the cookies
-    3. Re-downloading directly with those cookies
+    Download a binary file through FlareSolverr.
+    针对 AA slow_download 页面优化：
+    1. 通过 FlareSolverr session 访问下载 URL（处理 Cloudflare + JS countdown）
+    2. FlareSolverr 执行 JS 后跟随重定向到 CDN
+    3. 从 CDN 直接下载（CDN 不在 Cloudflare 后面）
+
+    Returns: True if download succeeded
     """
+    import re as _re
+    from urllib.parse import urljoin
+
     session_name = f"dl_{int(time.time())}"
     flare_url = "http://localhost:8191/v1"
 
@@ -393,66 +399,99 @@ async def download_file_via_flaresolverr(
             "cmd": "sessions.create", "session": session_name,
         }, timeout=5)
     except Exception as e:
-        logger.warning(f"File download: session create failed: {e}")
+        logger.warning(f"FS download: session create failed: {e}")
         return False
 
     try:
+        # Step 1: Visit URL through FlareSolverr with long timeout for JS countdown
         payload = {
             "cmd": "request.get",
             "url": download_url,
             "session": session_name,
-            "maxTimeout": 120000,
+            "maxTimeout": 120000,  # 2 min for AA slow_download countdown
         }
         if referer:
             payload["headers"] = {"Referer": referer}
 
         r = requests.post(flare_url, json=payload, timeout=130)
-        if r.status_code == 200:
-            data = r.json()
-            solution = data.get("solution", {})
-            # Extract cookies
-            cookies = solution.get("cookies", [])
-            cookie_dict = {}
-            for c in cookies:
-                name = c.get("name", "")
-                value = c.get("value", "")
-                if name and value:
-                    cookie_dict[name] = value
+        if r.status_code != 200:
+            logger.warning(f"FS request failed: HTTP {r.status_code}")
+            return False
 
-            if cookie_dict:
-                logger.info(f"Using {len(cookie_dict)} cookies for direct download")
+        data = r.json()
+        if data.get("status") != "ok":
+            logger.warning(f"FS request not ok: {data.get('status')}")
+            return False
 
-            hdrs = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-            if referer:
-                hdrs["Referer"] = referer
+        solution = data.get("solution", {})
+        final_url = solution.get("url", download_url)
+        status_code = solution.get("status", 0)
+        response_body = solution.get("response", "")
 
-            resp = requests.get(
-                download_url,
-                headers=hdrs,
-                cookies=cookie_dict,
-                timeout=60,
-                allow_redirects=True,
-                verify=False,
-                stream=True,
-            )
+        # Extract cookies for potential re-download
+        cookies = solution.get("cookies", [])
+        cookie_dict = {}
+        for c in cookies:
+            name = c.get("name", "")
+            value = c.get("value", "")
+            if name and value:
+                cookie_dict[name] = value
 
-            if resp.status_code == 200 and len(resp.content) > 1024:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                with open(output_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if chunk:
-                            f.write(chunk)
-                logger.info(f"Downloaded {len(resp.content)} bytes to {output_path}")
-                return True
+        # Step 2: Determine final download URL
+        # After JS execution (countdown), AA redirects to CDN
+        # FS follows the redirect and `final_url` is the CDN URL
+        # OR the final_url is still the slow_download page (JS didn't redirect)
 
-            logger.warning(f"Direct download failed: HTTP {resp.status_code}, {len(resp.content)} bytes")
-        else:
-            logger.warning(f"FlareSolverr request failed: HTTP {r.status_code}")
+        dl_target = download_url
+
+        if final_url != download_url and "annas-archive" not in final_url.lower():
+            # FS followed redirect to CDN URL
+            dl_target = final_url
+            logger.info(f"FS: CDN URL from redirect: {dl_target[:80]}")
+        elif response_body:
+            # No redirect happened (JS countdown still running), try to extract CDN URL from HTML
+            cdn_m = _re.search(r'window\.location\s*[=:]\s*["\']([^"\']+)["\']', response_body)
+            if cdn_m:
+                cdn_rel = cdn_m.group(1)
+                dl_target = urljoin(download_url, cdn_rel) if cdn_rel.startswith("/") else cdn_rel
+                logger.info(f"FS: CDN URL from page JS: {dl_target[:80]}")
+            else:
+                # Try meta refresh
+                meta_m = _re.search(r'<meta[^>]*url=([^"\'>\s]+)', response_body, _re.IGNORECASE)
+                if meta_m:
+                    dl_target = urljoin(download_url, meta_m.group(1))
+                    logger.info(f"FS: CDN URL from meta refresh")
+
+        # Step 3: Download from (hopefully) CDN
+        hdrs = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        if referer:
+            hdrs["Referer"] = referer
+
+        resp = requests.get(
+            dl_target,
+            headers=hdrs,
+            cookies=cookie_dict,
+            timeout=60,
+            allow_redirects=True,
+            verify=False,
+            stream=True,
+        )
+
+        if resp.status_code == 200 and len(resp.content) > 1024:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+            logger.info(f"FS: Downloaded {len(resp.content)} bytes to {output_path}")
+            return True
+
+        logger.warning(f"FS: Download failed: HTTP {resp.status_code}, {len(resp.content)} bytes")
     except Exception as e:
-        logger.warning(f"File download via FlareSolverr failed: {e}")
+        logger.warning(f"FS download error: {e}")
     finally:
         try:
             requests.post(flare_url, json={

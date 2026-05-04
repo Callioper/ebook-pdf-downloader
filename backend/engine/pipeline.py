@@ -678,12 +678,13 @@ async def _wait_for_user_confirmation(
     report: Dict[str, Any],
     confirm_key: str = "zl_confirm",
     timeout: int = 300,
+    candidates: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
     """
     Emit confirmation request to frontend and wait for user response.
     Used for ZL download (consumes quota) and other destructive operations.
+    When candidates are provided, user can pick one from the list.
     """
-    # Build book info summary
     info = {
         "type": "confirm_download",
         "task_id": task_id,
@@ -695,13 +696,13 @@ async def _wait_for_user_confirmation(
         "download_source": report.get("download_source", ""),
         "file_size": report.get("download_path", ""),
     }
+    if candidates:
+        info["candidates"] = candidates
 
     task_store.add_log(task_id, f"⏳ Waiting for user confirmation (key={confirm_key})...")
-    task_store.update(task_id, {f"_{confirm_key}": None, "waiting_confirmation": True})
-    # 广播给所有 WebSocket 客户端（非仅任务订阅者）
+    task_store.update(task_id, {f"_{confirm_key}": None, f"_{confirm_key}_selection": None, "waiting_confirmation": True})
     await ws_manager.broadcast_all(info)
 
-    # Poll for user response
     for _ in range(timeout):
         await asyncio.sleep(1)
         task = task_store.get(task_id)
@@ -710,13 +711,11 @@ async def _wait_for_user_confirmation(
         decision = task.get(f"_{confirm_key}")
         if decision is True:
             task_store.update(task_id, {"waiting_confirmation": False})
-            task_store.add_log(task_id, f"✅ User confirmed {confirm_key}")
-            return True
+            return True  # selected book stored in _zl_confirm_selection
         if decision is False:
             task_store.update(task_id, {"waiting_confirmation": False})
             task_store.add_log(task_id, f"⏭️ User declined {confirm_key}")
             return False
-        # Check if task was cancelled while waiting
         if task.get("status") == "cancelled":
             return False
 
@@ -801,51 +800,57 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
         zlib_email = config.get("zlib_email", "")
         zlib_password = config.get("zlib_password", "")
         if zlib_email and zlib_password:
-            # 需要用户确认是否消耗 ZL 额度
-            task_store.add_log(task_id, "ZL: requesting user confirmation (will consume download quota)...")
-            confirmed = await _wait_for_user_confirmation(task_id, report, "zl_confirm", 300)
-            if not confirmed:
-                task_store.add_log(task_id, "ZL: user not confirmed, skipping Z-Library")
-            else:
-                try:
-                    from engine.zlib_downloader import ZLibDownloader
-                    dl = ZLibDownloader(config)
+            try:
+                from engine.zlib_downloader import ZLibDownloader
+                dl = ZLibDownloader(config)
 
-                    # 登录
-                    login_result = await dl.zlib_login()
-                    if login_result.get("ok"):
-                        task_store.add_log(task_id, "ZL: logged in")
-                        balance = login_result.get("balance", "")
-                        if balance:
-                            task_store.add_log(task_id, f"ZL: {balance}")
+                # 先登录获取配额信息
+                login_result = await dl.zlib_login()
+                if login_result.get("ok"):
+                    task_store.add_log(task_id, "ZL: logged in")
+                    balance = login_result.get("balance", "")
+                    if balance:
+                        task_store.add_log(task_id, f"ZL: {balance}")
 
-                        # 三层检索
-                        match = await dl.zlib_search_tiered(
-                            isbn=isbn, title=title, authors=authors, expected_size=0,
+                    # 搜索全部候选条目（不做标题过滤，返回所有结果让用户选）
+                    candidates = await dl.zlib_search_candidates(
+                        isbn=isbn, title=title, authors=authors,
+                    )
+                    if candidates:
+                        task_store.add_log(task_id, f"ZL: found {len(candidates)} candidates, requesting user selection...")
+                        confirmed = await _wait_for_user_confirmation(
+                            task_id, report, "zl_confirm", 300, candidates,
                         )
-                        if match:
-                            task_store.add_log(task_id,
-                                f"ZL: matched book {match['id']} via {match['strategy']} "
-                                f"(tier {match['tier']}, level={match['match_level']})")
-                            zl_path = await dl.zlib_download_verified(
-                                match["id"], match["hash"], report["tmp_dir"],
-                                expected_size=match.get("size", 0),
-                            )
-                            if zl_path:
-                                task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
-                                downloaded = True
-                                download_source = "zlibrary"
-                                report["download_path"] = zl_path
+                        if confirmed:
+                            # 读取用户选择的书籍
+                            task = task_store.get(task_id)
+                            selection = task.get("_zl_confirm_selection", {})
+                            sel_id = selection.get("id", "")
+                            sel_hash = selection.get("hash", "")
+                            if sel_id and sel_hash:
+                                task_store.add_log(task_id, f"ZL: user selected book {sel_id}")
+                                zl_path = await dl.zlib_download_verified(
+                                    sel_id, sel_hash, report["tmp_dir"],
+                                )
+                                if zl_path:
+                                    task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
+                                    downloaded = True
+                                    download_source = "zlibrary"
+                                    report["download_path"] = zl_path
+                                else:
+                                    task_store.add_log(task_id, "ZL: download verification failed")
                             else:
-                                task_store.add_log(task_id, "ZL: download verification failed")
+                                task_store.add_log(task_id, "ZL: no book selected by user")
                         else:
-                            task_store.add_log(task_id, "ZL: no matching book found in any tier")
+                            task_store.add_log(task_id, "ZL: user declined, skipping")
                     else:
-                        task_store.add_log(task_id, f"ZL: login failed — {login_result.get('message', 'unknown')}")
-                except ImportError:
-                    task_store.add_log(task_id, "ZL: module not available")
-                except Exception as e:
-                    task_store.add_log(task_id, f"ZL: error: {str(e)[:150]}")
+                        task_store.add_log(task_id, "ZL: no candidates found on Z-Library")
+                else:
+                    task_store.add_log(task_id, f"ZL: login failed — {login_result.get('message', 'unknown')}")
+            except ImportError:
+                task_store.add_log(task_id, "ZL: module not available")
+            except Exception as e:
+                task_store.add_log(task_id, f"ZL: error: {str(e)[:150]}")
         else:
             task_store.add_log(task_id, "ZL: no credentials configured, skipping")
 

@@ -382,32 +382,42 @@ async def resolve_download_url(
         if url:
             return url
 
-    # Strategy 2: /d/{md5} redirect (follow 302 → actual CDN/file link)
+    # Strategy 2: /d/{md5} redirect to CDN via FlareSolverr cookies
+    # AA's /d/{md5} endpoint returns a 302 redirect to CDN when accessed
+    # with valid Cloudflare cookies. The CDN is NOT behind Cloudflare.
     d_url = f"{base_url}/d/{md5}"
+    try:
+        from engine.flaresolverr import get_flaresolverr_cookies
+        cf_cookies = await get_flaresolverr_cookies(base_url, proxy)
+        if cf_cookies:
+            import requests as _req
+            hdrs = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            d_resp = _req.get(d_url, headers=hdrs, cookies=cf_cookies, timeout=15,
+                              allow_redirects=False, verify=False)
+            if d_resp.status_code in (301, 302, 303, 307, 308):
+                cdn_url = d_resp.headers.get("Location", "")
+                if cdn_url and "annas-archive" not in cdn_url.lower():
+                    logger.info(f"AA /d/{md5} → CDN: {cdn_url[:80]}")
+                    return cdn_url
+            elif d_resp.status_code == 200:
+                # No redirect, might be slow_download page
+                url = _find_url_in_html(d_resp.text)
+                if url:
+                    return url
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"AA /d/{md5} redirect failed: {e}")
+
+    # Strategy 3: /d/{md5} raw HTML parsing (fallback when cookies fail)
     d_html = await _get_page_with_flare(d_url, proxy, timeout=20)
     if d_html:
         url = _find_url_in_html(d_html)
         if url:
             return url
-
-    # Strategy 3: /d/{md5} with HTTP redirect following
-    try:
-        import requests as _req
-        hdrs = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
-        d_kwargs = {"timeout": 15, "headers": hdrs, "verify": False, "allow_redirects": True}
-        if proxy:
-            d_kwargs["proxies"] = {"http": proxy, "https": proxy}
-        d_resp = _req.get(d_url, **d_kwargs)
-        if d_resp.status_code == 200 and len(d_resp.history) > 0:
-            # Followed redirects — the final URL might be a download
-            final_url = d_resp.url
-            if final_url != d_url and "annas-archive" not in final_url.lower():
-                return final_url
-    except Exception:
-        pass
 
     # Strategy 4: Try slow download route (AA's alternative download flow)
     for slow_path in [f"/slow_download?md5={md5}", f"/get/{md5}", f"/dl/{md5}"]:

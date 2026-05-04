@@ -374,6 +374,88 @@ class ZLibDownloader:
 
         return None
 
+    async def zlib_search_candidates(
+        self,
+        isbn: str = "",
+        title: str = "",
+        authors: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        搜索 ZL 并返回所有候选条目（不做标题过滤），供用户选择。
+        按三层策略搜索：ISBN → title+author → title，合并去重。
+        """
+        authors = authors or []
+        author_str = authors[0] if authors else ""
+        seen = set()
+        candidates = []
+
+        # Tier 1: ISBN
+        if isbn and len(isbn) >= 10:
+            result = await self.zlib_search(isbn, page=1, limit=10)
+            for book in _extract_books(result):
+                book_id = str(book.get("id", ""))
+                book_hash = book.get("hash") or book.get("book_hash") or ""
+                if book_id and book_hash and book_id not in seen:
+                    seen.add(book_id)
+                    book_size = int(book.get("filesize", book.get("filesize_bytes", 0)))
+                    candidates.append({
+                        "id": book_id, "hash": book_hash,
+                        "title": book.get("title", ""),
+                        "authors": book.get("author", book.get("authors", "")),
+                        "publisher": book.get("publisher", ""),
+                        "year": book.get("year", ""),
+                        "extension": book.get("extension", book.get("ext", "pdf")),
+                        "size": book_size,
+                        "source": "zlibrary",
+                        "tier": 1, "strategy": "isbn",
+                    })
+
+        # Tier 2: title + author
+        if title and author_str:
+            query = f"{title} {author_str}"
+            result = await self.zlib_search(query, page=1, limit=20)
+            for book in _extract_books(result):
+                book_id = str(book.get("id", ""))
+                book_hash = book.get("hash") or book.get("book_hash") or ""
+                if book_id and book_hash and book_id not in seen:
+                    seen.add(book_id)
+                    book_size = int(book.get("filesize", book.get("filesize_bytes", 0)))
+                    candidates.append({
+                        "id": book_id, "hash": book_hash,
+                        "title": book.get("title", ""),
+                        "authors": book.get("author", book.get("authors", "")),
+                        "publisher": book.get("publisher", ""),
+                        "year": book.get("year", ""),
+                        "extension": book.get("extension", book.get("ext", "pdf")),
+                        "size": book_size,
+                        "source": "zlibrary",
+                        "tier": 2, "strategy": "title_author",
+                    })
+
+        # Tier 3: title only
+        if title:
+            result = await self.zlib_search(title, page=1, limit=20)
+            for book in _extract_books(result):
+                book_id = str(book.get("id", ""))
+                book_hash = book.get("hash") or book.get("book_hash") or ""
+                if book_id and book_hash and book_id not in seen:
+                    seen.add(book_id)
+                    book_size = int(book.get("filesize", book.get("filesize_bytes", 0)))
+                    candidates.append({
+                        "id": book_id, "hash": book_hash,
+                        "title": book.get("title", ""),
+                        "authors": book.get("author", book.get("authors", "")),
+                        "publisher": book.get("publisher", ""),
+                        "year": book.get("year", ""),
+                        "extension": book.get("extension", book.get("ext", "pdf")),
+                        "size": book_size,
+                        "source": "zlibrary",
+                        "tier": 3, "strategy": "title_only",
+                    })
+
+        logger.info(f"ZL search_candidates: {len(candidates)} results for '{title}'")
+        return candidates
+
     def _check_book_match(
         self,
         book: Dict[str, Any],
