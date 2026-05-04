@@ -832,6 +832,50 @@ async def _step_convert_pdf(task_id: str, task: Dict[str, Any], config: Dict[str
     return report
 
 
+def _is_scanned(pdf_path: str, sample_pages: int = 5) -> bool:
+    """判断PDF是否为扫描件（文字占比低），返回True=需要OCR"""
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+        blank = 0
+        for i in range(min(sample_pages, len(doc))):
+            text = doc[i].get_text()
+            non_ws = sum(1 for c in text if c.strip())
+            if len(text) == 0 or non_ws < len(text) * 0.6:
+                blank += 1
+        doc.close()
+        return blank >= sample_pages * 0.6
+    except ImportError:
+        return True
+    except Exception:
+        return True
+
+
+def _is_ocr_readable(pdf_path: str, sample_pages: int = 5, min_cjk_ratio: float = 0.15) -> bool:
+    """检测OCR后的PDF文字层是否为可读中文（非乱码），CJK比率>=15%"""
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+        total = doc.page_count
+        indices = [int(total * i / (sample_pages + 1)) for i in range(1, sample_pages + 1)]
+        readable = 0
+        for idx in indices:
+            text = doc[idx].get_text()
+            if not text.strip():
+                continue
+            total_chars = sum(1 for c in text if not c.isspace())
+            cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf' or '\uf900' <= c <= '\ufaff')
+            ratio = cjk / total_chars if total_chars > 0 else 0
+            if ratio >= min_cjk_ratio:
+                readable += 1
+        doc.close()
+        return readable >= sample_pages * 0.6
+    except ImportError:
+        return True  # 无法验证时假设通过
+    except Exception:
+        return True
+
+
 async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     task_store.add_log(task_id, "Step 5/7: Running OCR...")
     await _emit(task_id, "step_progress", {"step": "ocr", "progress": 0})
@@ -887,14 +931,97 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             except asyncio.TimeoutError:
                 proc.kill()
                 task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
-        else:
-            task_store.add_log(task_id, "PaddleOCR selected but not yet implemented in pipeline")
+        elif ocr_engine == "paddleocr":
+            task_store.add_log(task_id, "Running OCRmyPDF with PaddleOCR...")
+            
+            # 1. Check if PDF already has text layer
+            if not _is_scanned(pdf_path):
+                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
+                report["ocr_done"] = True
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            cmd = [
+                "ocrmypdf",
+                "--plugin", "ocrmypdf_paddleocr",
+                "-l", ocr_lang or "chi_sim+eng",
+                "-j", "1",  # PaddleOCR thread safety
+                "--output-type", "pdf",
+                "--mode", "force",
+                pdf_path,
+                output_pdf,
+            ]
+
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
+                if proc.returncode == 0:
+                    task_store.add_log(task_id, "OCR completed, validating quality...")
+                    if _is_ocr_readable(output_pdf):
+                        os.replace(output_pdf, pdf_path)
+                        task_store.add_log(task_id, "OCR quality check passed")
+                        report["ocr_done"] = True
+                    else:
+                        task_store.add_log(task_id, "OCR quality check failed (possible garbled text), keeping original PDF")
+                        try:
+                            os.remove(output_pdf)
+                        except Exception:
+                            pass
+                else:
+                    err = stderr.decode()[:500] if stderr else "unknown error"
+                    task_store.add_log(task_id, f"PaddleOCR failed: {err}")
+            except asyncio.TimeoutError:
+                proc.kill()
+                task_store.add_log(task_id, f"PaddleOCR timed out after {ocr_timeout}s")
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
         task_store.add_log(task_id, "ocrmypdf not found in PATH, skipping OCR")
     except Exception as e:
         task_store.add_log(task_id, f"OCR error: {e}")
+
+    # PDF compression (qpdf, optional)
+    if report.get("ocr_done") and config.get("pdf_compress", False):
+        if report.get("pdf_path") and os.path.exists(report["pdf_path"]):
+            task_store.add_log(task_id, "Compressing PDF with qpdf...")
+            try:
+                qpdf_cmd = [
+                    "qpdf",
+                    "--recompress-flate",
+                    "--object-streams=generate",
+                    report["pdf_path"],
+                    report["pdf_path"] + ".compressed",
+                ]
+                qp = await asyncio.create_subprocess_exec(
+                    *qpdf_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, qe = await asyncio.wait_for(qp.communicate(), timeout=300)
+                if qp.returncode == 0:
+                    before = os.path.getsize(report["pdf_path"])
+                    after = os.path.getsize(report["pdf_path"] + ".compressed")
+                    os.replace(report["pdf_path"] + ".compressed", report["pdf_path"])
+                    task_store.add_log(task_id, f"qpdf compression: {before/1024/1024:.1f}MB → {after/1024/1024:.1f}MB ({after*100//before}%)")
+                else:
+                    err = qe.decode()[:200] if qe else "unknown"
+                    task_store.add_log(task_id, f"qpdf compression skipped: {err}")
+                    try:
+                        os.remove(report["pdf_path"] + ".compressed")
+                    except Exception:
+                        pass
+            except FileNotFoundError:
+                task_store.add_log(task_id, "qpdf not installed, skipping compression")
+            except asyncio.TimeoutError:
+                task_store.add_log(task_id, "qpdf compression timed out")
+            except Exception as e:
+                task_store.add_log(task_id, f"qpdf compression error: {str(e)[:100]}")
 
     return report
 

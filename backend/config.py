@@ -51,6 +51,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "stacks_timeout": 300,
     "libgen_enabled": True,
     "download_timeout": 600,
+    "pdf_compress": False,
 }
 
 
