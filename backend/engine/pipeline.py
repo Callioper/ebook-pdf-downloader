@@ -524,7 +524,7 @@ async def _download_via_aa_and_stacks(
                         return None
 
                     # ── 核心：同步下载 + 心跳检测 ──
-                    def _stacks_sync_download(md5: str, dl_dir: str) -> Optional[str]:
+                    def _stacks_sync_download(md5: str, dl_dir: str, ss_code: str = "") -> Optional[str]:
                         url = stacks_url.rstrip("/")
                         key = str(stacks_api_key or "")
                         seen_fps = set()
@@ -563,6 +563,25 @@ async def _download_via_aa_and_stacks(
                             extra_search_paths.append(dl_dir)
 
                         task_store.add_log(task_id, f"AA: extra search paths: {extra_search_paths}")
+
+                        # ★Step 1.5: 提交前先检查磁盘上是否已有文件（按 SSID）
+                        if ss_code:
+                            task_store.add_log(task_id, f"AA: checking disk for existing file by SSID={ss_code}...")
+                            # 构造可能的文件名
+                            for ext in (".zip", ".pdf", ".epub", ".mobi", ".rar", ".tar"):
+                                found = _find_stacks_file(f"{ss_code}{ext}", "", extra_search_paths)
+                                if found:
+                                    dest = _copy_dest(found, dl_dir)
+                                    task_store.add_log(task_id, f"AA: existing file found by SSID → {dest}")
+                                    return dest
+                                # 也检查 SSID_xxx 模式
+                                for base_str in extra_search_paths:
+                                    base = Path(base_str)
+                                    for p in base.glob(f"{ss_code}_*{ext}"):
+                                        if p.stat().st_size > 1024:
+                                            dest = _copy_dest(str(p), dl_dir)
+                                            task_store.add_log(task_id, f"AA: existing file found (named) → {dest}")
+                                            return dest
 
                         # Step 1: 检查 recent_history 中是否已有下载完成的文件
                         try:
@@ -700,8 +719,9 @@ async def _download_via_aa_and_stacks(
                         return None
 
                     download_dir = config.get("download_dir", "")
+                    ss_code_local = report.get("ss_code", "")
                     stack_result = await asyncio.get_event_loop().run_in_executor(
-                        None, _stacks_sync_download, md5, download_dir)
+                        None, _stacks_sync_download, md5, download_dir, ss_code_local)
                     if stack_result:
                         ss_code = report.get("ss_code", "")
                         safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
