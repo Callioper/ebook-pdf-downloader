@@ -451,12 +451,27 @@ async def _download_via_aa_and_stacks(
                     sc = StacksClient(base_url=stacks_url, api_key=str(stacks_api_key or ""))
                     result = await sc.add_task(md5)
                     if result.get("ok"):
-                        filepath = await sc.wait_for_download(md5, timeout=stacks_timeout)
+                        # Pass log callback for real-time progress
+                        def _stacks_log(msg):
+                            task_store.add_log(task_id, f"stacks: {msg}")
+                        filepath = await sc.wait_for_download(md5, timeout=stacks_timeout, log_callback=_stacks_log)
                         if filepath:
                             fixed = sc.validate_and_fix_file(filepath, tmp_dir)
                             if fixed:
                                 task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
                                 if verify_md5(fixed, md5):
+                                    # 复制到 download_dir（设置中的下载目录）
+                                    download_dir = config.get("download_dir", "")
+                                    if download_dir:
+                                        os.makedirs(download_dir, exist_ok=True)
+                                        ss_code = report.get("ss_code", "")
+                                        title = report.get("title", "book")
+                                        safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
+                                        ext = os.path.splitext(fixed)[1] or ".pdf"
+                                        dest = os.path.join(download_dir, f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}")
+                                        shutil.copy2(fixed, dest)
+                                        task_store.add_log(task_id, f"AA: copied to download dir: {dest}")
+                                        return dest
                                     return fixed
                                 else:
                                     task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download")

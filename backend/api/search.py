@@ -381,32 +381,6 @@ async def upload_cookies(file: UploadFile = File(...)):
     return {"ok": True, "saved_to": cookie_file}
 
 
-@router.post("/stacks-login")
-async def stacks_login(body: dict):
-    """Login to stacks via Web UI and return session cookie"""
-    url = body.get("url", "http://localhost:7788")
-    username = body.get("username", "admin")
-    password = body.get("password", "stacks")
-    try:
-        import requests as _req
-        # Stacks uses Flask-Login: POST /login with form data
-        s = _req.Session()
-        login_resp = s.post(
-            f"{url}/login",
-            data={"username": username, "password": password},
-            timeout=5,
-            allow_redirects=False,
-        )
-        # Success = 302 redirect to / (or 200 with session cookie set)
-        if login_resp.status_code in (302, 200) and s.cookies:
-            cookies = {c.name: c.value for c in s.cookies}
-            return {"ok": True, "cookies": cookies}
-        else:
-            return {"ok": False, "message": f"Login failed (HTTP {login_resp.status_code})"}
-    except Exception as e:
-        return {"ok": False, "message": str(e)}
-
-
 _browse_lock = threading.Lock()
 
 

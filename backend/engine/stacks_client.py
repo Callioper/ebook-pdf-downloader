@@ -87,48 +87,70 @@ class StacksClient:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    async def wait_for_download(self, md5: str, timeout: int = 300) -> Optional[str]:
+    async def wait_for_download(self, md5: str, timeout: int = 300, log_callback=None) -> Optional[str]:
         """轮询等待stacks完成下载，返回文件路径或None"""
+        import asyncio
         start = time.time()
         last_count = -1
+        last_log = 0
+
+        def _log(msg):
+            logger.info(f"stacks: {msg}")
+            if log_callback:
+                try:
+                    log_callback(msg)
+                except Exception:
+                    pass
 
         while time.time() - start < timeout:
             # 先查找本地文件（可能已下载完成）
             filepath = self._find_downloaded_file(md5)
             if filepath:
-                logger.info(f"stacks download found: {filepath}")
+                _log(f"download found: {filepath}")
                 return filepath
 
             # 查询状态
             status = await self.get_status()
             if status.get("ok"):
                 data = status["data"]
-                # 检查是否有 active/completed 任务
                 jobs = data.get("jobs", data.get("queue", []))
                 active = data.get("active", data.get("current", 0))
                 completed = data.get("completed", data.get("done", 0))
+                queue_size = data.get("queue_size", 0)
+                workers = data.get("workers", [])
 
                 # 检查是否该MD5已经处理
                 for job in jobs:
                     if isinstance(job, dict) and job.get("md5") == md5:
-                        if job.get("status") in ("completed", "done", "finished"):
-                            # 下载完成，尝试找文件
+                        job_status = job.get("status", "")
+                        if job_status in ("completed", "done", "finished"):
                             filepath = self._find_downloaded_file(md5)
                             if filepath:
+                                _log(f"download completed")
                                 return filepath
-                        elif job.get("status") == "failed":
-                            logger.warning(f"stacks job failed for md5={md5}")
+                        elif job_status == "failed":
+                            err = job.get("error", "unknown error")
+                            _log(f"job failed: {err}")
                             return None
+                        else:
+                            _log(f"status: {job_status}")
+
+                # 进度日志（每5秒输出一次）
+                now = time.time()
+                workers_active = sum(1 for w in workers if w.get("current_download_id")) if workers else 0
+                remaining = int(timeout - (now - start))
+                if now - last_log > 5:
+                    _log(f"waiting... queue={queue_size or '?'}, active_workers={workers_active}, remaining={remaining}s")
+                    last_log = now
 
                 total = active + completed
                 if total != last_count:
                     logger.debug(f"stacks: active={active}, completed={completed}")
                     last_count = total
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
-        # 超时，最后查一次文件
-        logger.warning(f"stacks download timed out for md5={md5}")
+        _log(f"timed out ({timeout}s)")
         return self._find_downloaded_file(md5)
 
     def _find_downloaded_file(self, md5: str) -> Optional[str]:

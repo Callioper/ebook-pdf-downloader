@@ -1092,46 +1092,6 @@ export default function ConfigSettings() {
                   {stacksChecking ? '检测中...' : '检测'}
                 </button>
               </div>
-              {/* 登录凭据 */}
-              <div className="flex gap-2 mt-1">
-                <input
-                  type="text"
-                  value={String(form.stacks_username || '')}
-                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_username: e.target.value }))}
-                  placeholder="用户名（默认 admin）"
-                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <input
-                  type="password"
-                  value={String(form.stacks_password || '')}
-                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_password: e.target.value }))}
-                  placeholder="密码"
-                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setStacksChecking(true)
-                    try {
-                      const res = await fetch('/api/v1/stacks-login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          url: form.stacks_base_url || 'http://localhost:7788',
-                          username: form.stacks_username || 'admin',
-                          password: form.stacks_password || 'stacks',
-                        }),
-                      })
-                      const data = await res.json()
-                      setStacksStatus(data.ok ? 'green' : 'red')
-                    } catch { setStacksStatus('red') }
-                    finally { setStacksChecking(false) }
-                  }}
-                  className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
-                >
-                  登录
-                </button>
-              </div>
               <input
                 type="password"
                 value={String(form.stacks_api_key || '')}
