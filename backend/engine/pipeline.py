@@ -158,12 +158,12 @@ async def _download_via_aa_and_stacks(
     if title and not search_queries:
         search_queries.append(("title", title))
 
-    from engine.aa_downloader import search_aa, get_md5_details, resolve_download_url, get_stacks_api_key, _calc_title_relevance
+    from engine.aa_downloader import search_aa, get_md5_details, resolve_download_url, get_stacks_api_key, _calc_title_relevance, verify_md5
 
     all_md5_entries = []
     for qtype, qval in search_queries:
         task_store.add_log(task_id, f"AA: searching by {qtype}={qval}")
-        entries = await search_aa(qval, proxy, preferred_title=title, preferred_isbn=isbn)
+        entries = await search_aa(qval, proxy)
         if entries:
             task_store.add_log(task_id, f"AA: found {len(entries)} MD5 entries via {qtype}")
             all_md5_entries.extend(entries)
@@ -234,7 +234,10 @@ async def _download_via_aa_and_stacks(
                         fixed = sc.validate_and_fix_file(filepath, tmp_dir)
                         if fixed:
                             task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
-                            return fixed
+                            if verify_md5(fixed, md5):
+                                return fixed
+                            else:
+                                task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download, keeping file for debug")
                     else:
                         task_store.add_log(task_id, "AA: stacks download timeout/failed")
                 else:
@@ -314,7 +317,12 @@ async def _download_via_aa_and_stacks(
                                     task_store.add_log(task_id, f"AA: downloaded file is not valid PDF")
                                     os.remove(filepath)
                                     return None
-                        return filepath
+                        # MD5 校验（如 Stacks 做法）
+                        if verify_md5(filepath, md5):
+                            return filepath
+                        else:
+                            task_store.add_log(task_id, f"AA: MD5 mismatch for downloaded file, kept for debug")
+                            return None
                     os.remove(filepath)
                 except _req.exceptions.HTTPError as e:
                     if "403" in str(e) or "Forbidden" in str(e):
@@ -333,7 +341,10 @@ async def _download_via_aa_and_stacks(
             if not result:
                 result = await _try_download(dl_url, use_flare=True)
             if result:
-                return result
+                if verify_md5(str(result), md5):
+                    return result
+                else:
+                    task_store.add_log(task_id, f"AA: MD5 mismatch for FlareSolverr download, kept for debug")
 
         # 短暂休息避免触发速率限制
         await asyncio.sleep(2)

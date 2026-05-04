@@ -79,13 +79,11 @@ async def search_aa(
     query: str,
     proxy: str = "",
     base_url: str = AA_BASE_URLS[0],
-    max_results: int = 20,
-    preferred_title: str = "",
-    preferred_isbn: str = "",
+    max_results: int = 30,
 ) -> List[Dict[str, Any]]:
     """
-    搜索 Anna's Archive，解析搜索结果卡片提取MD5+标题+大小。
-    按标题相关性 + 文件大小排序返回。
+    搜索 Anna's Archive，只提取 MD5 列表（标题匹配交给 get_md5_details）。
+    模仿 Stacks 的思路：搜索结果页只找 MD5，详情页才是获取标题的地方。
     """
     results = []
     encoded = query.replace(" ", "+")
@@ -103,77 +101,16 @@ async def search_aa(
         logger.warning(f"AA search failed for query: {query}")
         return results
 
-    # 将页面按 md5 链接切分为独立的搜索结果区块
-    # 每个结果卡片包含: href="/md5/<32hex>" + 标题文本 + 文件大小
+    # 只提取 MD5 链接（去重，保留出现顺序）
+    seen = set()
     for m in re.finditer(r'href="/md5/([a-f0-9]{32})"', html):
         md5 = m.group(1)
-        pos = m.start()
-        # 向前/向后各取 1500 字符作为单个结果卡的上下文窗口
-        start = max(0, pos - 500)
-        end = min(len(html), pos + 1500)
-        block = html[start:end]
+        if md5 not in seen:
+            seen.add(md5)
+            results.append({"md5": md5})
 
-        # 从区块中提取标题（优先 h3，其次 strong，再次链接内文本）
-        title = ""
-        title_m = re.search(r'<h\d[^>]*>([^<]+)</h\d>', block)
-        if not title_m:
-            title_m = re.search(r'<strong[^>]*>([^<]+)</strong>', block)
-        if not title_m:
-            # 取 `<a ... href="/md5/">` 标签内最深层的文本
-            inner_m = re.search(r'href="/md5/' + md5 + r'"[^>]*>\s*([^<{][^<]{3,80}?)\s*<', block)
-            if inner_m:
-                title = inner_m.group(1).strip()
-        else:
-            title = title_m.group(1).strip()
-
-        # 从区块中提取文件大小
-        size_label = "unknown"
-        size_bytes = 0
-        size_m = re.search(r'(?:<span[^>]*>)?([\d.]+[\s]*(?:GB|MB|KB))', block, re.IGNORECASE)
-        if size_m:
-            size_label = size_m.group(1).strip()
-            size_bytes = _parse_file_size(size_label)
-
-        # 计算标题相关度
-        relevance = 0
-        if preferred_title and title:
-            relevance = _calc_title_relevance(title, preferred_title)
-        elif preferred_isbn:
-            # 区块中包含 ISBN 时加分
-            if preferred_isbn[:10] in block:
-                relevance += 5
-
-        results.append({
-            "md5": md5,
-            "title": title,
-            "size_bytes": size_bytes,
-            "size_label": size_label,
-            "relevance": relevance,
-        })
-
-    # 去重
-    seen = set()
-    deduped = []
-    for r in results:
-        if r["md5"] not in seen:
-            seen.add(r["md5"])
-            deduped.append(r)
-
-    # 排序：高相关度优先 → 大文件优先
-    deduped.sort(key=lambda x: (x.get("relevance", 0), x.get("size_bytes", 0)), reverse=True)
-
-    if preferred_title:
-        relevant = [r for r in deduped if r.get("relevance", 0) >= 1]
-        logger.info(f"AA search '{query}': {len(deduped)} entries ({len(relevant)} title-relevant)")
-        # 把相關度>0的排在前面，剩下的按大小排
-        deduped.sort(key=lambda x: (1 if x.get("relevance", 0) >= 1 else 0, x.get("size_bytes", 0)), reverse=True)
-    else:
-        logger.info(f"AA search '{query}': {len(deduped)} entries")
-
-    return deduped[:max_results]
-
-
-def _calc_title_relevance(title: str, preferred: str) -> int:
+    logger.info(f"AA search '{query}': found {len(results)} MD5 entries")
+    return results[:max_results]
     """计算标题匹配度（0-100），基于字符重叠和关键词命中"""
     import unicodedata
     t = unicodedata.normalize("NFKC", title.lower()).strip()
@@ -224,7 +161,10 @@ async def get_md5_details(
     proxy: str = "",
     base_url: str = AA_BASE_URLS[0],
 ) -> Dict[str, Any]:
-    """抓取 MD5 详情页，提取 zlib_id、filesize_bytes、isbn 等"""
+    """
+    抓取 MD5 详情页，提取 title、ISBN、extension、zlib_id、filesize_bytes 等。
+    使用 BeautifulSoup 做稳健解析（模仿 Stacks 的 extract_from_title()）。
+    """
     result = {
         "md5": md5,
         "zlib_id": "",
@@ -233,6 +173,7 @@ async def get_md5_details(
         "title": "",
         "extension": "",
     }
+
     md5_url = f"{base_url}/md5/{md5}"
     html = await _get_page_with_flare(md5_url, proxy, timeout=30)
     if not html:
@@ -244,35 +185,145 @@ async def get_md5_details(
     if not html:
         return result
 
-    # 提取 zlib_id
-    zlib_m = re.search(r'z-lib(?:rary)?.{0,20}/(\d+)', html)
-    if not zlib_m:
-        zlib_m = re.search(r'zlib_id["\s:]+(\d+)', html)
-    if zlib_m:
-        result["zlib_id"] = zlib_m.group(1)
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'lxml')
 
-    # 提取文件大小（字节）
-    size_m = re.search(r'filesize_bytes["\s:]+(\d+)', html)
-    if size_m:
-        result["filesize_bytes"] = int(size_m.group(1))
-    else:
-        # 从 "File size:" 标签提取
-        size_label_m = re.search(r'File\s*size[:\s]*<[^>]*>([^<]+)<', html, re.IGNORECASE)
-        if size_label_m:
-            result["filesize_bytes"] = _parse_file_size(size_label_m.group(1))
+        # ---- Title: 模仿 Stacks 提取页面标题 ----
+        # Stacks 查找: div[class*="font-semibold"][class*="text-2xl"][class*="leading-[1.2]"]
+        title_div = soup.find('div', class_=lambda x: x and 'font-semibold' in x and 'text-2xl' in x and 'leading-[1.2]' in x)
+        if title_div:
+            title = title_div.get_text(strip=True).replace('\u200b', '').strip()
+            result["title"] = title
 
-    # 提取 ISBN
-    isbn_m = re.search(r'ISBN[:\s]*(\d[\d\-X]{9,})', html, re.IGNORECASE)
-    if isbn_m:
-        result["isbn"] = isbn_m.group(1).strip()
+        # ---- ISBN: 查找 "ISBN" 标签后的文本 ----
+        isbn_elem = soup.find(string=re.compile(r'ISBN\s*:', re.IGNORECASE))
+        if isbn_elem:
+            parent_td = isbn_elem.find_parent('td')
+            if parent_td:
+                next_td = parent_td.find_next_sibling('td')
+                if next_td:
+                    isbn_text = next_td.get_text(strip=True)
+                    isbn_m = re.search(r'(\d[\d\-X]{9,})', isbn_text)
+                    if isbn_m:
+                        result["isbn"] = isbn_m.group(1).strip()
 
-    # 提取扩展名
-    ext_m = re.search(r'(?:filetype|extension|Format)[:\s]*<[^>]*>([a-z0-9]{2,6})<', html, re.IGNORECASE)
-    if ext_m:
-        result["extension"] = ext_m.group(1).lower()
+        # ---- Extension: 从 metadata div 中提取 ----
+        # Stacks 查找: div[class*="text-gray-800"][class*="font-semibold"][class*="text-sm"][class*="mt-4"]
+        meta_div = soup.find('div', class_=lambda x: x and 'text-gray-800' in x and 'font-semibold' in x and 'text-sm' in x and 'mt-4' in x)
+        if meta_div:
+            meta_text = meta_div.get_text(separator=' ', strip=True)
+            for part in meta_text.split('·'):
+                part = part.strip().upper()
+                for ext in ('.PDF', '.EPUB', '.MOBI', '.DJVU', '.CBZ', '.CBR', '.ZIP'):
+                    if part == ext.replace('.', '') or part == ext:
+                        result["extension"] = ext.lower()
+                        break
 
-    logger.debug(f"MD5 {md5}: zlib_id={result['zlib_id']}, size={result['filesize_bytes']}B")
+        # ---- Filepath 兜底（从 js-md5-codes-tabs-tab 中提取文件名） ----
+        if not result["title"] or not result["extension"]:
+            for a in soup.find_all('a', class_='js-md5-codes-tabs-tab'):
+                spans = a.find_all('span')
+                if len(spans) >= 2:
+                    label_text = spans[0].get_text(strip=True)
+                    if 'Filepath' in label_text:
+                        filepath_text = spans[1].get_text(strip=True)
+                        # 从路径中提取文件名
+                        if '\\' in filepath_text:
+                            filename = filepath_text.split('\\')[-1]
+                        elif '/' in filepath_text:
+                            filename = filepath_text.split('/')[-1]
+                        else:
+                            filename = filepath_text
+                        if not result["title"] and filename:
+                            result["title"] = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                        if not result["extension"] and '.' in filepath_text:
+                            ext_guess = filepath_text.rsplit('.', 1)[-1].lower()
+                            if ext_guess in ('pdf', 'epub', 'mobi', 'djvu', 'cbz', 'cbr', 'zip'):
+                                result["extension"] = ext_guess
+
+        # ---- zlib_id ----
+        zlib_m = re.search(r'z-lib(?:rary)?.{0,20}/(\d+)', html)
+        if not zlib_m:
+            zlib_m = re.search(r'zlib_id["\s:]+(\d+)', html)
+        if zlib_m:
+            result["zlib_id"] = zlib_m.group(1)
+
+        # ---- filesize_bytes ----
+        size_m = re.search(r'filesize_bytes["\s:]+(\d+)', html)
+        if size_m:
+            result["filesize_bytes"] = int(size_m.group(1))
+        else:
+            size_label_m = re.search(r'File\s*size[:\s]*<[^>]*>([^<]+)<', html, re.IGNORECASE)
+            if size_label_m:
+                result["filesize_bytes"] = _parse_file_size(size_label_m.group(1))
+
+        logger.debug(f"MD5 {md5}: title='{result['title'][:30]}', isbn={result['isbn']}, "
+                     f"ext={result['extension']}, zlib={result['zlib_id']}")
+    except ImportError:
+        # BeautifulSoup 不可用时的 regex 兜底
+        logger.warning("BeautifulSoup not available, falling back to regex extraction")
+        _extract_md5_regex_fallback(result, html)
+    except Exception as e:
+        logger.warning(f"BeautifulSoup extraction failed for MD5 {md5}: {e}")
+        _extract_md5_regex_fallback(result, html)
+
     return result
+
+
+def _extract_md5_regex_fallback(result: Dict[str, Any], html: str):
+    """当 BeautifulSoup 不可用时的 regex 兜底提取"""
+    if not result["title"]:
+        title_m = re.search(r'<h\d[^>]*>([^<]{3,100})</h\d>', html)
+        if title_m:
+            result["title"] = title_m.group(1).strip()
+    if not result["isbn"]:
+        isbn_m = re.search(r'ISBN[:\s]*(\d[\d\-X]{9,})', html, re.IGNORECASE)
+        if isbn_m:
+            result["isbn"] = isbn_m.group(1).strip()
+    if not result["extension"]:
+        ext_m = re.search(r'(?:filetype|extension|Format)[:\s]*<[^>]*>([a-z0-9]{2,6})<', html, re.IGNORECASE)
+        if ext_m:
+            result["extension"] = ext_m.group(1).lower()
+
+
+def verify_md5(filepath: str, expected_md5: str) -> bool:
+    """
+    验证下载文件的 MD5 是否匹配。模仿 Stacks 的 calculate_md5()。
+    如果不匹配，重命名文件为 *_MISMATCH.* 用于调试。
+    """
+    import hashlib
+    import os
+
+    if not os.path.exists(filepath):
+        return False
+    if not expected_md5 or len(expected_md5) != 32:
+        return True  # 没有预期 MD5 时跳过验证
+
+    try:
+        hash_md5 = hashlib.md5()
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                hash_md5.update(chunk)
+        file_md5 = hash_md5.hexdigest()
+
+        if file_md5.lower() == expected_md5.lower():
+            return True
+
+        logger.warning(f"MD5 mismatch for {os.path.basename(filepath)}: "
+                       f"expected {expected_md5}, got {file_md5}")
+        # 保留文件用于调试（类似 Stacks 的 _MISMATCH 后缀）
+        base, ext = os.path.splitext(filepath)
+        mismatch_path = f"{base}.MISMATCH{ext}"
+        try:
+            os.rename(filepath, mismatch_path)
+        except Exception:
+            pass
+        return False
+
+    except Exception as e:
+        logger.warning(f"MD5 verification failed for {filepath}: {e}")
+        return False
 
 
 async def resolve_download_url(
