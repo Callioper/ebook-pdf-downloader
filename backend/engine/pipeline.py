@@ -726,6 +726,20 @@ async def _download_via_aa_and_stacks(
                         ss_code = report.get("ss_code", "")
                         safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
                         ext = os.path.splitext(stack_result)[1] or ".pdf"
+                        # 通过 magic bytes 检测真实文件类型（stacks 可能把 PDF 命名为 .zip）
+                        if ext.lower() in (".zip", ".rar", ".tar", ".7z"):
+                            try:
+                                with open(stack_result, "rb") as _fh:
+                                    magic = _fh.read(8)
+                                if magic[:4] == b"%PDF":
+                                    ext = ".pdf"
+                                    task_store.add_log(task_id, f"AA: detected PDF content (magic bytes), correcting ext from .zip → .pdf")
+                                elif magic[:4] == b"\x89PNG":
+                                    ext = ".png"
+                                elif magic[:2] in (b"\xff\xd8",):
+                                    ext = ".jpg"
+                            except Exception:
+                                pass
                         dest = os.path.join(download_dir, f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}")
                         if os.path.abspath(stack_result) != os.path.abspath(dest):
                             shutil.copy2(stack_result, dest)
@@ -1118,6 +1132,37 @@ async def _step_convert_pdf(task_id: str, task: Dict[str, Any], config: Dict[str
             report["pdf_path"] = pdf_path
             report["page_count"] = len(image_files)
         else:
+            # 优先使用 download_path（下载步骤已保存的路径）
+            dl_path = report.get("download_path", "")
+            if dl_path and os.path.exists(dl_path) and os.path.getsize(dl_path) > 1024:
+                # 验证文件是否为有效 PDF
+                is_pdf = False
+                try:
+                    with open(dl_path, "rb") as _fh:
+                        if _fh.read(4) == b"%PDF":
+                            is_pdf = True
+                except Exception:
+                    pass
+                if is_pdf:
+                    task_store.add_log(task_id, f"Using downloaded file as PDF: {dl_path}")
+                    out_dir = config.get("download_dir", "")
+                    if out_dir and os.path.abspath(dl_path).startswith(os.path.abspath(out_dir)):
+                        # 文件已在 download_dir 中
+                        report["pdf_path"] = dl_path
+                    else:
+                        # 复制到 download_dir
+                        ss_code = report.get("ss_code", "")
+                        safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
+                        fname = os.path.basename(dl_path)
+                        ext = os.path.splitext(fname)[1] or ".pdf"
+                        new_name = f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}"
+                        dest_path = os.path.join(out_dir, new_name)
+                        shutil.copy2(dl_path, dest_path)
+                        report["pdf_path"] = dest_path
+                        task_store.add_log(task_id, f"PDF copied to download dir: {dest_path}")
+                    await _emit(task_id, "step_progress", {"step": "convert_pdf", "progress": 100})
+                    return report
+
             task_store.add_log(task_id, "No image files found in tmp dir, checking for existing PDF...")
             pdf_files = list(Path(tmp_dir).glob("*.pdf")) if tmp_dir else []
             if pdf_files:
