@@ -201,7 +201,8 @@ class ZLibDownloader:
                     time.sleep(1)
         return {"total": 0, "results": []}
 
-    async def zlib_download_book(self, book_id: str, book_hash: str, output_dir: str) -> bool:
+    async def zlib_download_book(self, book_id: str, book_hash: str, output_dir: str,
+                                   filename: str = "") -> bool:
         if not self._logged_in:
             result = await self.zlib_login()
             if not result.get("ok"):
@@ -209,6 +210,8 @@ class ZLibDownloader:
 
         session = self._get_session()
         os.makedirs(output_dir, exist_ok=True)
+        # Sanitize filename
+        safe_name = re.sub(r'[<>:"/\\|?*]', '_', filename)[:100] if filename else ""
         for attempt in range(MAX_RETRIES):
             for imp in IMPERSONATES:
                 try:
@@ -228,7 +231,9 @@ class ZLibDownloader:
                             dl_r = session.get(download_url, impersonate=imp, timeout=60)
                             if dl_r.status_code == 200:
                                 ext = data.get("file", {}).get("extension", "pdf")
-                                filepath = os.path.join(output_dir, f"{book_id}.{ext}")
+                                # Use provided filename, fall back to book_id
+                                fname = f"{safe_name}.{ext}" if safe_name else f"{book_id}.{ext}"
+                                filepath = os.path.join(output_dir, fname)
                                 with open(filepath, "wb") as f:
                                     f.write(dl_r.content)
                                 file_size = os.path.getsize(filepath)
@@ -516,14 +521,25 @@ class ZLibDownloader:
         book_hash: str,
         output_dir: str,
         expected_size: int = 0,
+        filename: str = "",
     ) -> Optional[str]:
         """下载并验证文件（含PDF头检查 + 大小验证），返回文件路径"""
-        ok = await self.zlib_download_book(book_id, book_hash, output_dir)
+        ok = await self.zlib_download_book(book_id, book_hash, output_dir, filename=filename)
         if not ok:
             return None
 
-        # 查找下载的文件
-        saved_files = list(Path(output_dir).glob(f"{book_id}.*"))
+        # 查找下载的文件（先用定制的 filename，找不到再用 book_id）
+        safe_name = re.sub(r'[<>:"/\\|?*]', '_', filename)[:100] if filename else ""
+        if safe_name:
+            for ext in ('.pdf', '.epub', '.mobi', '.djvu', '.zip'):
+                f = Path(output_dir) / f"{safe_name}{ext}"
+                if f.exists():
+                    saved_files = [f]
+                    break
+            else:
+                saved_files = list(Path(output_dir).glob(f"{book_id}.*"))
+        else:
+            saved_files = list(Path(output_dir).glob(f"{book_id}.*"))
         for f in saved_files:
             if f.stat().st_size < 1024:
                 try:

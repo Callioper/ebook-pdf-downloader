@@ -456,8 +456,9 @@ async def _download_via_aa_and_stacks(
                 except Exception as e:
                     task_store.add_log(task_id, f"AA: stacks error: {str(e)[:100]}")
             else:
-                task_store.add_log(task_id, "AA: stacks not configured, skipping")
-                # 不尝试直连 — 参考代码不用直连 AA
+                task_store.add_log(task_id, "AA: stacks not available (no API key of Docker service), "
+                                           "skipping AA download. Fall back to Z-Library...")
+                # 参考代码设计：AA 下载只通过 stacks，不可用时直接降级
 
             # 只试第一个 MD5（参考代码只选 best MD5）
             break
@@ -697,8 +698,13 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                             sel_hash = selection.get("hash", "")
                             if sel_id and sel_hash:
                                 task_store.add_log(task_id, f"ZL: user selected book {sel_id}")
+                                # 用书名做文件名（参考代码做法）
+                                sel_title = selection.get("title", "")
+                                if not sel_title:
+                                    sel_title = report.get("title", "")
                                 zl_path = await dl.zlib_download_verified(
                                     sel_id, sel_hash, report["tmp_dir"],
+                                    filename=sel_title,
                                 )
                                 if zl_path:
                                     task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
