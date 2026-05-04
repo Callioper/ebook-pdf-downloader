@@ -448,10 +448,37 @@ async def _download_via_aa_and_stacks(
                 try:
                     import requests as _req
 
+                    def _find_stacks_file(fname: str, dl_dir: str = "") -> Optional[str]:
+                        for base in [Path.home()/"stacks"/"stacks"/"download",
+                                     Path.home()/"stacks"/"download"] + ([Path(dl_dir)] if dl_dir else []):
+                            cand = base / fname
+                            if cand.exists() and cand.stat().st_size > 1024:
+                                return str(cand)
+                        return None
+
+                    def _docker_cp_stacks(container_path: str) -> Optional[str]:
+                        import subprocess
+                        try:
+                            r = subprocess.run(["docker", "ps", "--filter", "name=stacks", "--format", "{{.Names}}"],
+                                               capture_output=True, text=True, timeout=5)
+                            cname = r.stdout.strip()
+                            if not cname:
+                                return None
+                            fname = os.path.basename(container_path)
+                            local = Path.home() / "stacks" / fname
+                            cp = subprocess.run(["docker", "cp", f"{cname}:{container_path}", str(local)],
+                                                capture_output=True, timeout=15)
+                            if cp.returncode == 0 and local.exists() and local.stat().st_size > 1024:
+                                return str(local)
+                        except Exception:
+                            pass
+                        return None
+
                     def _stacks_sync_download(md5: str, dl_dir: str) -> Optional[str]:
-                        """同步方式完成 stacks 下载（参考代码模式，无需 async 包装）"""
+                        """同步方式完成 stacks 下载（参考代码模式）"""
                         url = stacks_url.rstrip("/")
                         key = str(stacks_api_key or "")
+                        seen_fps = set()  # 跟踪已尝试过的 filepath，防止无限循环
 
                         # 第1步: 检查 recent_history
                         try:
@@ -464,24 +491,36 @@ async def _download_via_aa_and_stacks(
                                     if isinstance(item, dict) and item.get("md5") == md5:
                                         fp = item.get("filepath", "")
                                         if fp:
-                                            # 解析容器路径到主机路径
-                                            for sp in [Path.home()/"stacks"/"stacks"/"download",
-                                                       Path.home()/"stacks"/"download"]:
-                                                cand = sp / os.path.basename(fp)
-                                                if cand.exists() and cand.stat().st_size > 1024:
-                                                    if dl_dir:
-                                                        dest = os.path.join(dl_dir, cand.name)
-                                                        shutil.copy2(str(cand), dest)
-                                                        return dest
-                                                    return str(cand)
-                                            if dl_dir:
-                                                cand = Path(dl_dir) / os.path.basename(fp)
-                                                if cand.exists() and cand.stat().st_size > 1024:
-                                                    return str(cand)
+                                            seen_fps.add(fp)
+                                            fname = os.path.basename(fp)
+                                            # 查找主机文件
+                                            found = _find_stacks_file(fname, dl_dir)
+                                            if found:
+                                                if dl_dir:
+                                                    dest = os.path.join(dl_dir, fname)
+                                                    shutil.copy2(found, dest)
+                                                    return dest
+                                                return found
+                                            # docker cp 兜底
+                                            found = _docker_cp_stacks(fp)
+                                            if found:
+                                                if dl_dir:
+                                                    dest = os.path.join(dl_dir, fname)
+                                                    shutil.copy2(found, dest)
+                                                    return dest
+                                                return found
+                                            # 文件找不到 → 清除历史重新下载
+                                            task_store.add_log(task_id, "AA: history file lost, clearing & retrying...")
+                                            try:
+                                                _req.post(f"{url}/api/history/clear",
+                                                          headers={"X-API-Key": key} if key else {}, timeout=5)
+                                            except Exception:
+                                                pass
+                                            break
                         except Exception:
                             pass
 
-                        # 第2步: add_task（始终发送，不检查返回值 — 参考代码做法）
+                        # 第2步: add_task
                         task_store.add_log(task_id, "AA: submitting MD5 to stacks...")
                         try:
                             _req.post(f"{url}/api/queue/add",
@@ -489,9 +528,9 @@ async def _download_via_aa_and_stacks(
                                       headers={"X-API-Key": key, "Content-Type": "application/json"} if key else {},
                                       timeout=10)
                         except Exception:
-                            pass  # 即使 401 也继续，参考代码不中断
+                            pass
 
-                        # 第3步: 轮询等待（参考代码模式）
+                        # 第3步: 轮询等待
                         task_store.add_log(task_id, "AA: waiting for stacks download...")
                         deadline = time.time() + stacks_timeout
                         interval = 2.0
@@ -506,28 +545,45 @@ async def _download_via_aa_and_stacks(
                                     for item in sd.get("queue", []):
                                         if isinstance(item, dict) and item.get("completed_at") and item.get("filepath"):
                                             fp = item["filepath"]
-                                            for sp in [Path.home()/"stacks"/"stacks"/"download",
-                                                       Path.home()/"stacks"/"download"]:
-                                                cand = sp / os.path.basename(fp)
-                                                if cand.exists() and cand.stat().st_size > 1024:
-                                                    return str(cand)
+                                            if fp in seen_fps:
+                                                continue
+                                            seen_fps.add(fp)
+                                            fname = os.path.basename(fp)
+                                            found = _find_stacks_file(fname, dl_dir)
+                                            if found:
+                                                return found
+                                            found = _docker_cp_stacks(fp)
+                                            if found:
+                                                return found
                                             return None
-                                    # 检查 recent_history
+                                    # 检查 recent_history（跳过已尝试过的）
                                     for item in sd.get("recent_history", []):
                                         if isinstance(item, dict) and item.get("completed_at") and item.get("filepath"):
                                             fp = item["filepath"]
-                                            for sp in [Path.home()/"stacks"/"stacks"/"download",
-                                                       Path.home()/"stacks"/"download"]:
-                                                cand = sp / os.path.basename(fp)
-                                                if cand.exists() and cand.stat().st_size > 1024:
-                                                    if dl_dir:
-                                                        dest = os.path.join(dl_dir, cand.name)
-                                                        shutil.copy2(str(cand), dest)
-                                                        task_store.add_log(task_id, f"AA: stacks download OK → {cand.name}")
-                                                        return dest
-                                                    return str(cand)
+                                            if fp in seen_fps:
+                                                continue
+                                            seen_fps.add(fp)
+                                            fname = os.path.basename(fp)
+                                            found = _find_stacks_file(fname, dl_dir)
+                                            if found:
+                                                if dl_dir:
+                                                    dest = os.path.join(dl_dir, fname)
+                                                    shutil.copy2(found, dest)
+                                                    task_store.add_log(task_id, f"AA: stacks OK → {fname}")
+                                                    return dest
+                                                return found
+                                            found = _docker_cp_stacks(fp)
+                                            if found:
+                                                if dl_dir:
+                                                    dest = os.path.join(dl_dir, fname)
+                                                    shutil.copy2(found, dest)
+                                                    return dest
+                                                return found
                             except Exception:
                                 pass
+                            remaining = int(deadline - time.time())
+                            if remaining % 10 == 0:
+                                task_store.add_log(task_id, f"AA: stacks waiting ({remaining}s left)...")
                             time.sleep(interval)
                             interval = min(interval * 1.5, 10)
                         return None
