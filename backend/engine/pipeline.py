@@ -504,9 +504,8 @@ async def _download_via_aa_and_stacks(
                         task_store.add_log(task_id, "AA:   _find_stacks_file: NOT FOUND in any path")
                         return None
 
-                    # ── docker cp 兜底 ──
+# ── docker cp 兜底 ──
                     def _docker_cp_stacks(container_path: str) -> Optional[str]:
-                        import subprocess
                         try:
                             r = subprocess.run(["docker", "ps", "--filter", "name=stacks", "--format", "{{.Names}}"],
                                                capture_output=True, text=True, timeout=5)
@@ -1260,6 +1259,32 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
     task_store.add_log(task_id, f"OCR engine: {ocr_engine}, languages: {ocr_lang}, jobs: {ocr_jobs}")
 
+    # ── In frozen/PyInstaller exe, find system Python for ocrmypdf ──
+    _py_for_ocr = sys.executable
+    if getattr(sys, 'frozen', False):
+        import shutil as _shutil
+        _found_py = None
+        for _candidate in ["python", "python3", "py"]:
+            _f = _shutil.which(_candidate)
+            if _f:
+                _found_py = _f
+                break
+        if not _found_py:
+            for _candidate in [
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python314", "python.exe"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python313", "python.exe"),
+                r"C:\Python314\python.exe",
+                r"C:\Python313\python.exe",
+            ]:
+                if os.path.exists(_candidate):
+                    _found_py = _candidate
+                    break
+        if _found_py and _found_py != sys.executable:
+            _py_for_ocr = _found_py
+            task_store.add_log(task_id, f"OCR: using system Python at {_py_for_ocr}")
+        else:
+            task_store.add_log(task_id, "OCR: no system Python found for ocrmypdf — please install: python -m pip install ocrmypdf")
+
     try:
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
 
@@ -1267,7 +1292,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             task_store.add_log(task_id, "Running OCRmyPDF with Tesseract...")
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
-                "ocrmypdf",
+                _py_for_ocr, "-m", "ocrmypdf",
                 "-l", ocr_lang,
                 "-j", str(ocr_jobs),
                 "--output-type", "pdf",
@@ -1304,7 +1329,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
-                "ocrmypdf",
+                _py_for_ocr, "-m", "ocrmypdf",
                 "--plugin", "ocrmypdf_paddleocr",
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", "1",  # PaddleOCR thread safety
