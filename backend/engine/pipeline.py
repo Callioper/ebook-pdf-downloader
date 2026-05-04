@@ -1193,8 +1193,9 @@ async def _step_convert_pdf(task_id: str, task: Dict[str, Any], config: Dict[str
     return report
 
 
-def _is_scanned(pdf_path: str, sample_pages: int = 5) -> bool:
+def _is_scanned(pdf_path: str, sample_pages: int = 5, python_cmd: str = "") -> bool:
     """判断PDF是否为扫描件（文字占比低），返回True=需要OCR"""
+    # Try direct import first (works in dev/venv)
     try:
         import fitz
         doc = fitz.open(pdf_path)
@@ -1207,12 +1208,37 @@ def _is_scanned(pdf_path: str, sample_pages: int = 5) -> bool:
         doc.close()
         return blank >= sample_pages * 0.6
     except ImportError:
-        return True
+        pass  # fitz not available, try fallback below
     except Exception:
-        return True
+        pass  # fitz error, try fallback below
+
+    # Fallback: use system Python subprocess (works in frozen exe)
+    if python_cmd:
+        try:
+            import subprocess as _sp
+            import shlex as _sh
+            code = (
+                "import fitz;"
+                f"d=fitz.open({_sh.quote(pdf_path)});"
+                f"blank=0;n=min({sample_pages},len(d));"
+                "for i in range(n):"
+                " t=d[i].get_text();"
+                " nws=sum(1 for c in t if c.strip());"
+                " blank+=1 if len(t)==0 or nws<len(t)*0.6 else 0;"
+                "d.close();"
+                f"print('1' if blank>=n*0.6 else '0')"
+            )
+            r = _sp.run([python_cmd, "-c", code], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0 and r.stdout.strip() in ("0", "1"):
+                return r.stdout.strip() == "1"
+        except Exception:
+            pass
+
+    # Ultimate fallback: assume scanned (needs OCR)
+    return True
 
 
-def _is_ocr_readable(pdf_path: str, sample_pages: int = 5, min_cjk_ratio: float = 0.15) -> bool:
+def _is_ocr_readable(pdf_path: str, sample_pages: int = 5, min_cjk_ratio: float = 0.15, python_cmd: str = "") -> bool:
     """检测OCR后的PDF文字层是否为可读中文（非乱码），CJK比率>=15%"""
     try:
         import fitz
@@ -1232,9 +1258,38 @@ def _is_ocr_readable(pdf_path: str, sample_pages: int = 5, min_cjk_ratio: float 
         doc.close()
         return readable >= sample_pages * 0.6
     except ImportError:
-        return True  # 无法验证时假设通过
+        pass
     except Exception:
-        return True
+        pass
+
+    # Fallback: use system Python subprocess
+    if python_cmd:
+        try:
+            import subprocess as _sp
+            import shlex as _sh
+            code = (
+                "import fitz;"
+                f"d=fitz.open({_sh.quote(pdf_path)});"
+                f"total=d.page_count;n=min({sample_pages},total);"
+                f"indices=[int(total*i/(n+1)) for i in range(1,n+1)];"
+                "readable=0;"
+                "for idx in indices:"
+                " t=d[idx].get_text();"
+                " if not t.strip(): continue;"
+                " tc=sum(1 for c in t if not c.isspace());"
+                " cjk=sum(1 for c in t if '\u4e00'<=c<='\u9fff' or '\u3400'<=c<='\u4dbf' or '\uf900'<=c<='\ufaff');"
+                " r=cjk/tc if tc>0 else 0;"
+                " readable+=1 if r>=0.15 else 0;"
+                "d.close();"
+                "print('1' if readable>=n*0.6 else '0')"
+            )
+            r = _sp.run([python_cmd, "-c", code], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0 and r.stdout.strip() in ("0", "1"):
+                return r.stdout.strip() == "1"
+        except Exception:
+            pass
+
+    return True  # 无法验证时假设通过
 
 
 async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
@@ -1293,7 +1348,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             task_store.add_log(task_id, "Running OCRmyPDF with Tesseract...")
 
             # Check if PDF already has text layer (skip if born-digital)
-            if not _is_scanned(pdf_path):
+            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
                 task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
                 report["ocr_done"] = True
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
@@ -1330,7 +1385,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         elif ocr_engine == "easyocr":
             task_store.add_log(task_id, "Running OCRmyPDF with EasyOCR...")
 
-            if not _is_scanned(pdf_path):
+            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
                 task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
                 report["ocr_done"] = True
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
@@ -1371,7 +1426,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             task_store.add_log(task_id, "Running OCRmyPDF with PaddleOCR...")
             
             # 1. Check if PDF already has text layer
-            if not _is_scanned(pdf_path):
+            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
                 task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
                 report["ocr_done"] = True
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
@@ -1400,7 +1455,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
                 if proc.returncode == 0:
                     task_store.add_log(task_id, "OCR completed, validating quality...")
-                    if _is_ocr_readable(output_pdf):
+                    if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
                         os.replace(output_pdf, pdf_path)
                         task_store.add_log(task_id, "OCR quality check passed")
                         report["ocr_done"] = True
