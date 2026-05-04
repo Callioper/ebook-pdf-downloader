@@ -454,18 +454,29 @@ async def _download_via_aa_and_stacks(
                     if result.get("ok"):
                         # 处理"已在历史中"的情况
                         if result.get("already_downloaded"):
-                            # 检查文件是否已存在
-                            existing = sc._find_downloaded_file(md5, download_dir)
-                            if existing and os.path.getsize(existing) > 1024:
-                                task_store.add_log(task_id, f"AA: file already in stacks history, found at {os.path.basename(existing)}")
-                                # 复制到下载目录
+                            # 查 stacks 状态获取 filepath（文件名可能是 SSID 而非 MD5）
+                            task_store.add_log(task_id, "AA: task already in stacks history, checking file...")
+                            status_resp = await sc.get_status()
+                            hist_path = None
+                            if status_resp.get("ok"):
+                                for item in status_resp["data"].get("recent_history", []):
+                                    if isinstance(item, dict) and item.get("md5") == md5:
+                                        cp = item.get("filepath", "")
+                                        if cp:
+                                            hist_path = sc._resolve_host_path(cp, md5, download_dir)
+                                            break
+                            if hist_path and os.path.getsize(hist_path) > 1024:
+                                task_store.add_log(task_id, f"AA: found in stacks history: {os.path.basename(hist_path)}")
                                 if download_dir:
-                                    dest = os.path.join(download_dir, os.path.basename(existing))
-                                    if os.path.abspath(existing) != os.path.abspath(dest):
-                                        shutil.copy2(existing, dest)
-                                        task_store.add_log(task_id, f"AA: copied to download dir: {dest}")
-                                        return dest
-                                return existing
+                                    os.makedirs(download_dir, exist_ok=True)
+                                    ss_code = report.get("ss_code", "")
+                                    safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
+                                    ext = os.path.splitext(hist_path)[1] or ".pdf"
+                                    dest = os.path.join(download_dir, f"{ss_code}_{safe_title}{ext}" if ss_code else f"{safe_title}{ext}")
+                                    shutil.copy2(hist_path, dest)
+                                    task_store.add_log(task_id, f"AA: copied from history: {dest}")
+                                    return dest
+                                return hist_path
                             # 文件不存在 → 清除历史重试
                             task_store.add_log(task_id, "AA: file not found locally, clearing history & retrying...")
                             await sc.history_retry(md5)

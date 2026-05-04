@@ -129,27 +129,41 @@ class StacksClient:
                     pass
 
         while time.time() - start < timeout:
-            # 先查找本地文件（可能已下载完成）
-            filepath = self._find_downloaded_file(md5)
-            if filepath:
-                _log(f"download found: {filepath}")
-                return filepath
-
-            # 查询状态
+            # 查询状态（优先，因为 status 接口返回 job 的 filepath）
             status = await self.get_status()
             if status.get("ok"):
                 data = status["data"]
                 jobs = data.get("jobs", data.get("queue", []))
+                recent_history = data.get("recent_history", [])
                 active = data.get("active", data.get("current", 0))
                 completed = data.get("completed", data.get("done", 0))
                 queue_size = data.get("queue_size", 0)
                 workers = data.get("workers", [])
 
-                # 检查是否该MD5已经处理
+                # 检查 recent_history（stacks 已完成任务在此）
+                for item in recent_history:
+                    if isinstance(item, dict) and item.get("md5") == md5:
+                        hist_path = item.get("filepath", "")
+                        if hist_path:
+                            # 解析容器内路径 → 主机路径
+                            host_path = self._resolve_host_path(hist_path, md5, download_dir)
+                            if host_path and os.path.exists(host_path) and os.path.getsize(host_path) > 1024:
+                                _log(f"found in history: {host_path}")
+                                return host_path
+
+                # 检查当前任务
                 for job in jobs:
                     if isinstance(job, dict) and job.get("md5") == md5:
                         job_status = job.get("status", "")
+                        # 尝试从 job 中获取 filepath
+                        job_path = job.get("filepath", "")
+                        if job_path:
+                            host_path = self._resolve_host_path(job_path, md5, download_dir)
+                            if host_path and os.path.exists(host_path) and os.path.getsize(host_path) > 1024:
+                                _log(f"download completed: {host_path}")
+                                return host_path
                         if job_status in ("completed", "done", "finished"):
+                            # 没有 filepath 时，用文件名搜索
                             filepath = self._find_downloaded_file(md5)
                             if filepath:
                                 _log(f"download completed")
@@ -174,10 +188,42 @@ class StacksClient:
                     logger.debug(f"stacks: active={active}, completed={completed}")
                     last_count = total
 
+            # 本地文件搜索兜底
+            filepath = self._find_downloaded_file(md5)
+            if filepath:
+                _log(f"download found: {filepath}")
+                return filepath
+
             await asyncio.sleep(2)
 
         _log(f"timed out ({timeout}s)")
         return self._find_downloaded_file(md5)
+
+    def _resolve_host_path(self, container_path: str, md5: str, download_dir: str = "") -> Optional[str]:
+        """将 stacks 容器内的路径解析为主机路径"""
+        # 情况 1: 已经是主机路径
+        if os.path.exists(container_path) and os.path.getsize(container_path) > 1024:
+            return container_path
+        # 情况 2: 检查两个可能的 Docker volume 映射路径
+        base_name = os.path.basename(container_path)
+        for search_base in self._search_paths:
+            candidate = search_base / base_name
+            if candidate.exists() and candidate.stat().st_size > 1024:
+                return str(candidate)
+        # 情况 3: 检查下载目录
+        if download_dir:
+            candidate = Path(download_dir) / base_name
+            if candidate.exists() and candidate.stat().st_size > 1024:
+                return str(candidate)
+        # 情况 4: 递归搜索（慢，兜底）
+        for search_base in self._search_paths:
+            try:
+                for f in search_base.rglob(base_name):
+                    if f.is_file() and f.stat().st_size > 1024:
+                        return str(f)
+            except Exception:
+                pass
+        return None
 
     def _find_downloaded_file(self, md5: str, download_dir: str = "") -> Optional[str]:
         """在两个可能路径中查找与MD5匹配的下载文件（含 download_dir）"""
