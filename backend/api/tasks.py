@@ -4,6 +4,7 @@
 # 依赖：task_store, ws_manager, config, engine.pipeline
 # 注意：支持后台任务执行和WebSocket通知
 
+import logging
 import os
 import subprocess
 from typing import Any, Dict, List, Optional
@@ -176,3 +177,20 @@ async def open_folder(task_id: str):
         except Exception as e:
             return {"ok": False, "message": str(e)}
     return {"ok": False, "message": "Folder not found"}
+
+
+class ConfirmDownloadRequest(BaseModel):
+    confirm: bool = True
+
+
+@router.post("/{task_id}/confirm-download")
+async def confirm_download(task_id: str, body: ConfirmDownloadRequest):
+    """用户确认/拒绝消耗下载额度（Z-Library 等）"""
+    task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # 存储用户决策，pipeline 会轮询这个值
+    task_store.update(task_id, {"_zl_confirm": body.confirm})
+    logger = logging.getLogger(__name__)
+    logger.info(f"User {'confirmed' if body.confirm else 'declined'} download for task {task_id}")
+    return {"ok": True, "confirm": body.confirm}

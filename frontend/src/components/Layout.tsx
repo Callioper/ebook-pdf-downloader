@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { API_BASE } from '../constants'
+import ConfirmDownloadModal from './ConfirmDownloadModal'
 import type { TaskItem } from '../types'
 
 interface UpdateInfo {
@@ -273,6 +274,7 @@ export default function Layout() {
       <main className="flex-1">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <Outlet />
+          <ConfirmDownloadModal />
         </div>
       </main>
 

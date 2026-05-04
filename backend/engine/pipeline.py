@@ -158,7 +158,7 @@ async def _download_via_aa_and_stacks(
     if title and not search_queries:
         search_queries.append(("title", title))
 
-    from engine.aa_downloader import search_aa, get_md5_details, resolve_download_url, get_stacks_api_key
+    from engine.aa_downloader import search_aa, get_md5_details, resolve_download_url, get_stacks_api_key, _calc_title_relevance
 
     all_md5_entries = []
     for qtype, qval in search_queries:
@@ -199,9 +199,27 @@ async def _download_via_aa_and_stacks(
         md5 = entry["md5"]
         task_store.add_log(task_id, f"AA [{i+1}/{min(len(all_md5_entries), 10)}]: trying MD5={md5} ({entry.get('size_label', '?')})")
 
-        # 获取 MD5 详情（zlib_id 等）
+        # 获取 MD5 详情（zlib_id, title, isbn 等）
         details = await get_md5_details(md5, proxy)
         filesize_bytes = details.get("filesize_bytes", entry.get("size_bytes", 0))
+        md5_title = details.get("title", "")
+
+        # 匹配 MD5 详情中的标题/ISBN 与 Step1 元数据
+        if title or isbn:
+            skip = False
+            if md5_title and title:
+                rel_score = _calc_title_relevance(md5_title, title)
+                if rel_score < 10:
+                    task_store.add_log(task_id, f"AA: MD5 {md5} title mismatch ('{md5_title[:30]}' vs '{title[:30]}', score={rel_score}), skipping")
+                    skip = True
+            if not skip and isbn and details.get("isbn"):
+                if isbn.replace("-", "") != details["isbn"].replace("-", ""):
+                    task_store.add_log(task_id, f"AA: MD5 {md5} ISBN mismatch ({details['isbn']} vs {isbn}), skipping")
+                    skip = True
+            if skip:
+                continue
+            if md5_title:
+                task_store.add_log(task_id, f"AA: MD5 {md5} title matched ('{md5_title[:30]}')")
 
         # 路径A: stacks 下载
         if use_stacks:
@@ -230,49 +248,92 @@ async def _download_via_aa_and_stacks(
             except Exception as e:
                 task_store.add_log(task_id, f"AA: stacks error: {e}")
 
-        # 路径B: AA 直接下载（_get_page_with_flare 兜底）
+        # 路径B: AA 直接下载（先尝试直连，403 时通过 FlareSolverr cookies 重试）
         task_store.add_log(task_id, f"AA: trying direct download...")
         dl_url = await resolve_download_url(md5, proxy)
         if dl_url:
             task_store.add_log(task_id, f"AA: direct download URL found")
-            try:
+
+            async def _try_download(url: str, use_flare: bool = False) -> Optional[str]:
+                """尝试下载文件，use_flare=True时通过FlareSolverr获取cookies"""
                 import requests as _req
                 import urllib.parse as _up
-                hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-                dl_kwargs = {"timeout": 120, "headers": hdrs, "verify": False, "stream": True}
-                if proxy:
-                    dl_kwargs["proxies"] = {"http": proxy, "https": proxy}
-                resp = _req.get(dl_url, **dl_kwargs)
-                resp.raise_for_status()
 
-                cd = resp.headers.get("Content-Disposition", "")
-                fname = f"{md5}.pdf"
-                if cd and "filename=" in cd:
-                    fname = cd.split("filename=")[-1].strip("\"' ")
-                else:
-                    url_path = _up.urlparse(dl_url).path
-                    if url_path:
-                        fname = os.path.basename(url_path) or fname
+                hdrs = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                }
+                cookies = {}
+                ref = f"https://annas-archive.gd/md5/{md5}"
 
-                filepath = os.path.join(tmp_dir, fname)
-                with open(filepath, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if chunk:
-                            f.write(chunk)
-                size = os.path.getsize(filepath)
-                if size > 1024:
-                    # 验证 %PDF
-                    if fname.lower().endswith(".pdf"):
-                        with open(filepath, "rb") as fh:
-                            if fh.read(4) != b"%PDF":
-                                task_store.add_log(task_id, f"AA: downloaded file is not valid PDF")
-                                os.remove(filepath)
-                                continue
-                    task_store.add_log(task_id, f"AA: direct download OK ({size/1024:.0f} KB)")
-                    return filepath
-                os.remove(filepath)
-            except Exception as e:
-                task_store.add_log(task_id, f"AA: direct download failed: {str(e)[:100]}")
+                if use_flare:
+                    task_store.add_log(task_id, "AA: getting FlareSolverr cookies for download...")
+                    try:
+                        from engine.flaresolverr import download_file_via_flaresolverr
+                        fpath = os.path.join(tmp_dir, f"{md5}_fs.pdf")
+                        ok = await download_file_via_flaresolverr(url, fpath, proxy, ref)
+                        if ok and os.path.getsize(fpath) > 1024:
+                            # 验证 %PDF
+                            with open(fpath, "rb") as fh:
+                                if fh.read(4) == b"%PDF":
+                                    task_store.add_log(task_id, f"AA: FlareSolverr download OK ({os.path.getsize(fpath)/1024:.0f} KB)")
+                                    return fpath
+                            os.remove(fpath)
+                    except ImportError:
+                        pass
+                    except Exception as e:
+                        task_store.add_log(task_id, f"AA: FlareSolverr download error: {str(e)[:100]}")
+                    return None
+
+                try:
+                    dl_kwargs = {"timeout": 120, "headers": hdrs, "verify": False, "stream": True, "cookies": cookies}
+                    if proxy:
+                        dl_kwargs["proxies"] = {"http": proxy, "https": proxy}
+                    resp = _req.get(url, **dl_kwargs)
+                    resp.raise_for_status()
+
+                    cd = resp.headers.get("Content-Disposition", "")
+                    fname = f"{md5}.pdf"
+                    if cd and "filename=" in cd:
+                        fname = cd.split("filename=")[-1].strip("\"' ")
+                    else:
+                        url_path = _up.urlparse(url).path
+                        if url_path:
+                            fname = os.path.basename(url_path) or fname
+
+                    filepath = os.path.join(tmp_dir, fname)
+                    with open(filepath, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if chunk:
+                                f.write(chunk)
+                    size = os.path.getsize(filepath)
+                    if size > 1024:
+                        if fname.lower().endswith(".pdf"):
+                            with open(filepath, "rb") as fh:
+                                if fh.read(4) != b"%PDF":
+                                    task_store.add_log(task_id, f"AA: downloaded file is not valid PDF")
+                                    os.remove(filepath)
+                                    return None
+                        return filepath
+                    os.remove(filepath)
+                except _req.exceptions.HTTPError as e:
+                    if "403" in str(e) or "Forbidden" in str(e):
+                        task_store.add_log(task_id, "AA: direct download blocked (403), trying through FlareSolverr...")
+                        return None  # Will trigger FlareSolverr retry
+                    elif "404" in str(e):
+                        return None  # Not found, skip
+                    raise
+                except Exception as e:
+                    task_store.add_log(task_id, f"AA: direct download failed: {str(e)[:100]}")
+                return None
+
+            # Attempt 1: direct download
+            result = await _try_download(dl_url, use_flare=False)
+            # Attempt 2: retry with FlareSolverr cookies if direct failed
+            if not result:
+                result = await _try_download(dl_url, use_flare=True)
+            if result:
+                return result
 
         # 短暂休息避免触发速率限制
         await asyncio.sleep(2)
@@ -356,6 +417,58 @@ async def _download_via_libgen(
     return None
 
 
+async def _wait_for_user_confirmation(
+    task_id: str,
+    report: Dict[str, Any],
+    confirm_key: str = "zl_confirm",
+    timeout: int = 300,
+) -> bool:
+    """
+    Emit confirmation request to frontend and wait for user response.
+    Used for ZL download (consumes quota) and other destructive operations.
+    """
+    # Build book info summary
+    info = {
+        "type": "confirm_download",
+        "task_id": task_id,
+        "key": confirm_key,
+        "title": report.get("title", ""),
+        "isbn": report.get("isbn", ""),
+        "authors": report.get("authors", []),
+        "publisher": report.get("publisher", ""),
+        "download_source": report.get("download_source", ""),
+        "file_size": report.get("download_path", ""),
+    }
+
+    task_store.add_log(task_id, f"⏳ Waiting for user confirmation (key={confirm_key})...")
+    task_store.update(task_id, {f"_{confirm_key}": None, "waiting_confirmation": True})
+    # 广播给所有 WebSocket 客户端（非仅任务订阅者）
+    await ws_manager.broadcast_all(info)
+
+    # Poll for user response
+    for _ in range(timeout):
+        await asyncio.sleep(1)
+        task = task_store.get(task_id)
+        if not task:
+            return False
+        decision = task.get(f"_{confirm_key}")
+        if decision is True:
+            task_store.update(task_id, {"waiting_confirmation": False})
+            task_store.add_log(task_id, f"✅ User confirmed {confirm_key}")
+            return True
+        if decision is False:
+            task_store.update(task_id, {"waiting_confirmation": False})
+            task_store.add_log(task_id, f"⏭️ User declined {confirm_key}")
+            return False
+        # Check if task was cancelled while waiting
+        if task.get("status") == "cancelled":
+            return False
+
+    task_store.add_log(task_id, f"⏰ Confirmation timeout ({timeout}s), skipping")
+    task_store.update(task_id, {"waiting_confirmation": False})
+    return False
+
+
 async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 3/7: Download book PDF — 多级降级策略
@@ -432,45 +545,51 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
         zlib_email = config.get("zlib_email", "")
         zlib_password = config.get("zlib_password", "")
         if zlib_email and zlib_password:
-            try:
-                from engine.zlib_downloader import ZLibDownloader
-                dl = ZLibDownloader(config)
+            # 需要用户确认是否消耗 ZL 额度
+            task_store.add_log(task_id, "ZL: requesting user confirmation (will consume download quota)...")
+            confirmed = await _wait_for_user_confirmation(task_id, report, "zl_confirm", 300)
+            if not confirmed:
+                task_store.add_log(task_id, "ZL: user not confirmed, skipping Z-Library")
+            else:
+                try:
+                    from engine.zlib_downloader import ZLibDownloader
+                    dl = ZLibDownloader(config)
 
-                # 登录
-                login_result = await dl.zlib_login()
-                if login_result.get("ok"):
-                    task_store.add_log(task_id, "ZL: logged in")
-                    balance = login_result.get("balance", "")
-                    if balance:
-                        task_store.add_log(task_id, f"ZL: {balance}")
+                    # 登录
+                    login_result = await dl.zlib_login()
+                    if login_result.get("ok"):
+                        task_store.add_log(task_id, "ZL: logged in")
+                        balance = login_result.get("balance", "")
+                        if balance:
+                            task_store.add_log(task_id, f"ZL: {balance}")
 
-                    # 三层检索
-                    match = await dl.zlib_search_tiered(
-                        isbn=isbn, title=title, authors=authors, expected_size=0,
-                    )
-                    if match:
-                        task_store.add_log(task_id,
-                            f"ZL: matched book {match['id']} via {match['strategy']} "
-                            f"(tier {match['tier']}, level={match['match_level']})")
-                        zl_path = await dl.zlib_download_verified(
-                            match["id"], match["hash"], report["tmp_dir"],
-                            expected_size=match.get("size", 0),
+                        # 三层检索
+                        match = await dl.zlib_search_tiered(
+                            isbn=isbn, title=title, authors=authors, expected_size=0,
                         )
-                        if zl_path:
-                            task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
-                            downloaded = True
-                            download_source = "zlibrary"
-                            report["download_path"] = zl_path
+                        if match:
+                            task_store.add_log(task_id,
+                                f"ZL: matched book {match['id']} via {match['strategy']} "
+                                f"(tier {match['tier']}, level={match['match_level']})")
+                            zl_path = await dl.zlib_download_verified(
+                                match["id"], match["hash"], report["tmp_dir"],
+                                expected_size=match.get("size", 0),
+                            )
+                            if zl_path:
+                                task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
+                                downloaded = True
+                                download_source = "zlibrary"
+                                report["download_path"] = zl_path
+                            else:
+                                task_store.add_log(task_id, "ZL: download verification failed")
                         else:
-                            task_store.add_log(task_id, "ZL: download verification failed")
+                            task_store.add_log(task_id, "ZL: no matching book found in any tier")
                     else:
-                        task_store.add_log(task_id, "ZL: no matching book found in any tier")
-                else:
-                    task_store.add_log(task_id, f"ZL: login failed — {login_result.get('message', 'unknown')}")
-            except ImportError:
-                task_store.add_log(task_id, "ZL: module not available")
-            except Exception as e:
-                task_store.add_log(task_id, f"ZL: error: {str(e)[:150]}")
+                        task_store.add_log(task_id, f"ZL: login failed — {login_result.get('message', 'unknown')}")
+                except ImportError:
+                    task_store.add_log(task_id, "ZL: module not available")
+                except Exception as e:
+                    task_store.add_log(task_id, f"ZL: error: {str(e)[:150]}")
         else:
             task_store.add_log(task_id, "ZL: no credentials configured, skipping")
 

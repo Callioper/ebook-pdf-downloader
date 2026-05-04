@@ -318,3 +318,147 @@ async def get_page_content(url: str, proxy: str = "") -> Optional[str]:
         logger.warning(f"Direct get_page_content failed: {e}")
 
     return None
+
+
+async def get_flaresolverr_cookies(url: str, proxy: str = "") -> Optional[Dict[str, str]]:
+    """
+    Use FlareSolverr to visit a page and extract Cloudflare clearance cookies.
+    Returns a dict of cookie name → value that can be used with requests.
+    """
+    session_name = f"aa_{int(time.time())}"
+    flare_url = "http://localhost:8191/v1"
+
+    try:
+        # Create session
+        requests.post(flare_url, json={
+            "cmd": "sessions.create", "session": session_name,
+        }, timeout=5)
+    except Exception as e:
+        logger.warning(f"FlareSolverr session create failed: {e}")
+        return None
+
+    try:
+        payload = {
+            "cmd": "request.get",
+            "url": url,
+            "session": session_name,
+            "maxTimeout": 60000,
+        }
+        r = requests.post(flare_url, json=payload, timeout=70)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("status") == "ok":
+                cookies = data.get("solution", {}).get("cookies", [])
+                if cookies:
+                    cookie_dict = {}
+                    for c in cookies:
+                        name = c.get("name", "")
+                        value = c.get("value", "")
+                        if name and value:
+                            cookie_dict[name] = value
+                    if cookie_dict:
+                        logger.info(f"Extracted {len(cookie_dict)} cookies via FlareSolverr session")
+                        return cookie_dict
+        logger.warning(f"FlareSolverr session failed: {data.get('status', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"FlareSolverr get_cookies failed: {e}")
+    finally:
+        try:
+            requests.post(flare_url, json={
+                "cmd": "sessions.destroy", "session": session_name,
+            }, timeout=3)
+        except Exception:
+            pass
+
+    return None
+
+
+async def download_file_via_flaresolverr(
+    download_url: str,
+    output_path: str,
+    proxy: str = "",
+    referer: str = "",
+) -> bool:
+    """
+    Download a binary file through FlareSolverr by:
+    1. Visiting the URL via a FlareSolverr session (gets Cloudflare clearance)
+    2. Extracting the cookies
+    3. Re-downloading directly with those cookies
+    """
+    session_name = f"dl_{int(time.time())}"
+    flare_url = "http://localhost:8191/v1"
+
+    try:
+        requests.post(flare_url, json={
+            "cmd": "sessions.create", "session": session_name,
+        }, timeout=5)
+    except Exception as e:
+        logger.warning(f"File download: session create failed: {e}")
+        return False
+
+    try:
+        payload = {
+            "cmd": "request.get",
+            "url": download_url,
+            "session": session_name,
+            "maxTimeout": 120000,
+        }
+        if referer:
+            payload["headers"] = {"Referer": referer}
+
+        r = requests.post(flare_url, json=payload, timeout=130)
+        if r.status_code == 200:
+            data = r.json()
+            solution = data.get("solution", {})
+            # Extract cookies
+            cookies = solution.get("cookies", [])
+            cookie_dict = {}
+            for c in cookies:
+                name = c.get("name", "")
+                value = c.get("value", "")
+                if name and value:
+                    cookie_dict[name] = value
+
+            if cookie_dict:
+                logger.info(f"Using {len(cookie_dict)} cookies for direct download")
+
+            hdrs = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            if referer:
+                hdrs["Referer"] = referer
+
+            resp = requests.get(
+                download_url,
+                headers=hdrs,
+                cookies=cookie_dict,
+                timeout=60,
+                allow_redirects=True,
+                verify=False,
+                stream=True,
+            )
+
+            if resp.status_code == 200 and len(resp.content) > 1024:
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                with open(output_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                logger.info(f"Downloaded {len(resp.content)} bytes to {output_path}")
+                return True
+
+            logger.warning(f"Direct download failed: HTTP {resp.status_code}, {len(resp.content)} bytes")
+        else:
+            logger.warning(f"FlareSolverr request failed: HTTP {r.status_code}")
+    except Exception as e:
+        logger.warning(f"File download via FlareSolverr failed: {e}")
+    finally:
+        try:
+            requests.post(flare_url, json={
+                "cmd": "sessions.destroy", "session": session_name,
+            }, timeout=3)
+        except Exception:
+            pass
+
+    return False
