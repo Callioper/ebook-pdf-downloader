@@ -190,7 +190,7 @@ async def get_md5_details(
 
     try:
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, 'lxml')
+        soup = BeautifulSoup(html, 'html.parser')
 
         # ---- Title: 模仿 Stacks 提取页面标题 ----
         # Stacks 查找: div[class*="font-semibold"][class*="text-2xl"][class*="leading-[1.2]"]

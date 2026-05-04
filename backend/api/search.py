@@ -659,11 +659,11 @@ async def check_ocr(engine: str = Query(default="")):
         if engine == "ocrmypdf":
             result = subprocess.run(
                 ["python", "-m", "ocrmypdf", "--version"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 # Fallback: try plain ocrmypdf
-                result = subprocess.run(["ocrmypdf", "--version"], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(["ocrmypdf", "--version"], capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 return {"ok": True, "engine": "ocrmypdf", "version": result.stdout.strip().split("\n")[0]}
         elif engine == "tesseract":

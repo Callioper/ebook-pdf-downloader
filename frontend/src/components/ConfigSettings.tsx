@@ -146,29 +146,80 @@ const OCR_ENGINES = [
 
 const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
 
-1. 激活虚拟环境：
-   cd backend && venv\Scripts\activate
+**注意**：Python 3.14 与 \`paddlepaddle\` 不兼容。建议使用 Python 3.11 创建虚拟环境。
 
-2. 安装 OCRmyPDF 核心：
-   pip install ocrmypdf
+---
 
-3. 安装引擎插件（按需选一个或多个）：
-   pip install ocrmypdf-easyocr     # EasyOCR 引擎（多语言）
-   pip install paddleocr            # PaddleOCR 引擎（中文推荐）
-   pip install ocrmypdf-paddleocr   # PaddleOCR+OCRmyPDF 桥接（可选）
+### 1. 创建/重建虚拟环境（Python 3.11）
 
-4. 安装 Tesseract OCR 系统依赖（OCRmyPDF 需要）：
-   winget install --id UB-Mannheim.TesseractOCR
+\`\`\`powershell
+# 如果原 venv 不支持 Python 3.11，先删除
+Remove-Item -Recurse -Force backend\\venv
 
-5. 将 Tesseract 添加到 PATH（如 winget 安装后未自动添加）：
-   [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Program Files\Tesseract-OCR", "User")
-   # 添加后需重启终端或 IDE 使 PATH 生效
+# 使用 Python 3.11 创建新 venv
+C:\\Python311\\python.exe -m venv backend\\venv
+\`\`\`
 
-6. 验证安装：
-   python -c "import ocrmypdf; print('ocrmypdf:', ocrmypdf.__version__)"
-   python -c "import easyocr; print('easyocr ok')"
-   python -c "import paddleocr; print('paddleocr:', paddleocr.__version__)"
-   tesseract --version`
+### 2. 激活虚拟环境（PowerShell）
+
+\`\`\`powershell
+# 方法一：PowerShell 执行策略问题
+powershell -ExecutionPolicy Bypass -Command "backend\\venv\\Scripts\\Activate.ps1"
+
+# 方法二：直接用 python 运行（无需激活）
+C:\\Python311\\python.exe -m pip install ...
+\`\`\`
+
+### 3. 安装 OCRmyPDF 核心
+
+\`\`\`powershell
+python -m pip install ocrmypdf
+\`\`\`
+
+### 4. 安装引擎插件
+
+\`\`\`powershell
+# 安装所有 OCR 引擎（推荐，一步到位）
+python -m pip install ocrmypdf-easyocr ocrmypdf-paddleocr paddleocr
+
+# 或分开安装
+python -m pip install ocrmypdf-easyocr paddleocr
+python -m pip install ocrmypdf-paddleocr  # 需要先装好 paddleocr
+\`\`\`
+
+### 5. 安装 Tesseract OCR 系统依赖
+
+\`\`\`powershell
+winget install --id UB-Mannheim.TesseractOCR --accept-package-agreements --accept-source-agreements
+\`\`\`
+
+### 6. 将 Tesseract 添加到 PATH
+
+\`\`\`powershell
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\\Program Files\\Tesseract-OCR", "User")
+\`\`\`
+
+> ⚠️ 添加后需**重启终端或 IDE**使 PATH 生效，或使用完整路径验证：
+> \`\`\`powershell
+> & "C:\\Program Files\\Tesseract-OCR\\tesseract.exe" --version
+> \`\`\`
+
+### 7. 验证安装
+
+\`\`\`powershell
+python -c "import ocrmypdf; print('ocrmypdf:', ocrmypdf.__version__)"
+python -c "import easyocr; print('easyocr ok')"
+python -c "from paddle import paddle; print('paddle:', paddle.__version__)"
+"C:\\Program Files\\Tesseract-OCR\\tesseract.exe" --version
+\`\`\`
+
+### 常见问题
+
+| 问题 | 解决 |
+|------|------|
+| \`ModuleNotFoundError: No module named 'paddlepaddle'\` | \`import paddle\` 而非 \`import paddlepaddle\` |
+| \`ocrmypdf-paddleocr\` 依赖冲突 | 先装 \`paddleocr\`，再装 \`ocrmypdf-paddleocr\` |
+| Tesseract 找不到 | 重启终端，或使用完整路径 \`C:\\Program Files\\Tesseract-OCR\\tesseract.exe\` |`
 
 const STACKS_INSTALL_GUIDE = `## 安装 stacks + FlareSolverr（Docker Compose）
 
