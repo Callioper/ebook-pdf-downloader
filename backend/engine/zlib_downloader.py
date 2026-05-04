@@ -315,11 +315,12 @@ class ZLibDownloader:
         authors = authors or []
         author_str = authors[0] if authors else ""
 
-        # 第1层：ISBN精确匹配（最高优先级）
+        # Tier 1: ISBN
         if isbn and len(isbn) >= 10:
-            logger.info(f"ZL tiered search layer 1: ISBN={isbn}")
+            logger.info(f"ZL candidates tier 1: searching by ISBN='{isbn}'")
             result = await self.zlib_search(isbn, page=1, limit=10)
             books = _extract_books(result)
+            logger.info(f"ZL candidates tier 1: {len(books)} raw results")
             for book in books:
                 book_isbn = str(book.get("isbn", ""))
                 if isbn.replace("-", "") in book_isbn.replace("-", ""):
@@ -413,6 +414,7 @@ class ZLibDownloader:
         # Tier 2: title + author
         if title and author_str:
             query = f"{title} {author_str}"
+            logger.info(f"ZL candidates tier 2: searching by title+author='{query[:60]}'")
             result = await self.zlib_search(query, page=1, limit=20)
             for book in _extract_books(result):
                 book_id = str(book.get("id", ""))
@@ -434,6 +436,7 @@ class ZLibDownloader:
 
         # Tier 3: title only
         if title:
+            logger.info(f"ZL candidates tier 3: searching by title='{title[:60]}'")
             result = await self.zlib_search(title, page=1, limit=20)
             for book in _extract_books(result):
                 book_id = str(book.get("id", ""))

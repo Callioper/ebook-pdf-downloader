@@ -382,37 +382,64 @@ async def resolve_download_url(
         if url:
             return url
 
-    # Strategy 2: /d/{md5} redirect to CDN via FlareSolverr cookies
-    # AA's /d/{md5} endpoint returns a 302 redirect to CDN when accessed
-    # with valid Cloudflare cookies. The CDN is NOT behind Cloudflare.
+    # Strategy 2: /d/{md5} → CDN redirect via FlareSolverr session
+    # AA's /d/{md5} returns a 302 redirect to CDN when accessed through a
+    # browser with Cloudflare clearance. FlareSolverr handles the Cloudflare
+    # challenge and follows the redirect. The FINAL URL (solution.url) is the
+    # CDN URL, which is NOT behind Cloudflare.
     d_url = f"{base_url}/d/{md5}"
     try:
-        from engine.flaresolverr import get_flaresolverr_cookies
-        cf_cookies = await get_flaresolverr_cookies(base_url, proxy)
-        if cf_cookies:
-            import requests as _req
-            hdrs = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-            d_resp = _req.get(d_url, headers=hdrs, cookies=cf_cookies, timeout=15,
-                              allow_redirects=False, verify=False)
-            if d_resp.status_code in (301, 302, 303, 307, 308):
-                cdn_url = d_resp.headers.get("Location", "")
-                if cdn_url and "annas-archive" not in cdn_url.lower():
-                    logger.info(f"AA /d/{md5} → CDN: {cdn_url[:80]}")
-                    return cdn_url
-            elif d_resp.status_code == 200:
-                # No redirect, might be slow_download page
-                url = _find_url_in_html(d_resp.text)
-                if url:
-                    return url
+        import requests as _req
+        flare_url = "http://localhost:8191/v1"
+        session_name = f"aa_d_{int(time.time())}"
+
+        # Create FlareSolverr session
+        _req.post(flare_url, json={
+            "cmd": "sessions.create", "session": session_name,
+        }, timeout=5)
+
+        # Request /d/{md5} through FlareSolverr session
+        # FlareSolverr handles Cloudflare + follows HTTP redirects
+        fs_resp = _req.post(flare_url, json={
+            "cmd": "request.get",
+            "url": d_url,
+            "session": session_name,
+            "maxTimeout": 60000,
+        }, timeout=70)
+
+        if fs_resp.status_code == 200:
+            data = fs_resp.json()
+            if data.get("status") == "ok":
+                solution = data.get("solution", {})
+                final_url = solution.get("url", "")
+                # solution.url is the CDN URL after redirect (not AA domain)
+                if final_url and final_url != d_url and "annas-archive" not in final_url.lower():
+                    logger.info(f"AA /d/{md5} → CDN via FS: {final_url[:80]}")
+                    return final_url
+                # If no redirect, try extracting CDN from response HTML
+                resp_body = solution.get("response", "")
+                if resp_body:
+                    cdn_m = re.search(r'window\.location\s*[=:]\s*["\']([^"\']+)["\']', resp_body)
+                    if cdn_m:
+                        cdn_rel = cdn_m.group(1)
+                        cdn_url = urljoin(d_url, cdn_rel) if cdn_rel.startswith("/") else cdn_rel
+                        if "annas-archive" not in cdn_url.lower():
+                            logger.info(f"AA /d/{md5} → CDN from JS: {cdn_url[:80]}")
+                            return cdn_url
+
+        # Clean up session
+        try:
+            _req.post(flare_url, json={
+                "cmd": "sessions.destroy", "session": session_name,
+            }, timeout=3)
+        except Exception:
+            pass
     except ImportError:
         pass
     except Exception as e:
-        logger.debug(f"AA /d/{md5} redirect failed: {e}")
+        logger.debug(f"AA /d/{md5} FS redirect failed: {e}")
 
-    # Strategy 3: /d/{md5} raw HTML parsing (fallback when cookies fail)
+    # Strategy 3: /d/{md5} raw HTML parsing (fallback when FlareSolverr not available)
     d_html = await _get_page_with_flare(d_url, proxy, timeout=20)
     if d_html:
         url = _find_url_in_html(d_html)

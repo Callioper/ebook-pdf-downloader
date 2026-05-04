@@ -160,13 +160,24 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
             await _fetch_nlc_metadata(task_id, report, config)
 
     # ═══════════════ Phase 3: 书葵网书签 ═══════════════
-
+    # （书签获取在 Step 6 通过 NLC/SS码 处理，不使用 ISBN）
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 80})
 
-    if report.get("isbn"):
-        await _fetch_bookmark(task_id, report, config)
+    # 记录完成状态并回写到 task_store（确保前端任务详情正确显示）
+    update_fields = {
+        "title": report.get("title", ""),
+        "isbn": report.get("isbn", ""),
+    }
+    if report.get("authors"):
+        update_fields["authors"] = report.get("authors", [])
+    if report.get("publisher"):
+        update_fields["publisher"] = report.get("publisher", "")
+    if report.get("ss_code"):
+        update_fields["ss_code"] = report.get("ss_code", "")
+    if report.get("book_id"):
+        update_fields["book_id"] = report.get("book_id", "")
+    task_store.update(task_id, update_fields)
 
-    # 记录完成状态
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 100})
     task_store.add_log(task_id, "Step 2/7: metadata & bookmark fetch complete")
     return report
@@ -316,48 +327,6 @@ async def _fetch_nlc_metadata(task_id: str, report: Dict[str, Any], config: Dict
         task_store.add_log(task_id, "NLC: module not available")
     except Exception as e:
         task_store.add_log(task_id, f"NLC: error: {str(e)[:100]}")
-
-
-async def _fetch_bookmark(task_id: str, report: Dict[str, Any], config: Dict[str, Any]):
-    """从书葵网 (shukui.net) 获取目录书签"""
-    isbn = report.get("isbn", "")
-    if not isbn:
-        return
-
-    task_store.add_log(task_id, f"Bookmark: fetching from shukui.net for ISBN={isbn}")
-    try:
-        from backend.nlc.bookmarkget import get_bookmark
-
-        nlc_path = config.get("ebook_data_geter_path", "")
-        bookmark_raw = await get_bookmark(isbn, nlc_path)
-        if bookmark_raw:
-            report["bookmark"] = bookmark_raw
-            # 书葵网书签是扁平的，用中文命名规则推断层级
-            lines = [l.strip() for l in bookmark_raw.split("\n") if l.strip()]
-            # 推断层级:
-            #   第X部分/第X篇 → level 1
-            #   第X章 → level 2
-            #   第X节 → level 3
-            #   纯数字编号 → level 4
-            top_count = 0
-            chapter_count = 0
-            section_count = 0
-            import re
-            for line in lines:
-                if re.match(r'^第[一二三四五六七八九十百千]+[部分篇]|^Part\s+\d+', line, re.IGNORECASE):
-                    top_count += 1
-                elif re.match(r'^第[一二三四五六七八九十百千]+章', line):
-                    chapter_count += 1
-                elif re.match(r'^第[一二三四五六七八九十百千]+节', line):
-                    section_count += 1
-            task_store.add_log(task_id,
-                f"Bookmark: {len(lines)} entries (top={top_count}, chapter={chapter_count}, section={section_count})")
-        else:
-            task_store.add_log(task_id, "Bookmark: not found on shukui.net")
-    except ImportError:
-        task_store.add_log(task_id, "Bookmark: module not available")
-    except Exception as e:
-        task_store.add_log(task_id, f"Bookmark: error: {str(e)[:100]}")
 
 
 async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> Optional[str]:
