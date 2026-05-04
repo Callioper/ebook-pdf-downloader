@@ -1314,7 +1314,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     task_store.add_log(task_id, "OCR completed successfully")
                     report["ocr_done"] = True
                 else:
-                    task_store.add_log(task_id, f"OCR failed: {stderr.decode()}")
+                    task_store.add_log(task_id, f"OCR failed: {stderr.decode(errors='replace')}")
             except asyncio.TimeoutError:
                 proc.kill()
                 task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
@@ -1361,7 +1361,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         except Exception:
                             pass
                 else:
-                    err = stderr.decode()[:500] if stderr else "unknown error"
+                    err = stderr.decode(errors='replace')[:500] if stderr else "unknown error"
                     task_store.add_log(task_id, f"PaddleOCR failed: {err}")
             except asyncio.TimeoutError:
                 proc.kill()
