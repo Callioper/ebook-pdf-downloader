@@ -367,7 +367,7 @@ async def _download_via_aa_and_stacks(
     if title and not search_queries:
         search_queries.append(("title", title))
 
-    from engine.aa_downloader import search_aa, get_md5_details, resolve_download_url, get_stacks_api_key, _calc_title_relevance, verify_md5
+    from engine.aa_downloader import search_aa, get_md5_details, get_stacks_api_key, _calc_title_relevance, verify_md5
 
     all_md5_entries = []
     for qtype, qval in search_queries:
@@ -403,162 +403,66 @@ async def _download_via_aa_and_stacks(
     if use_stacks:
         task_store.add_log(task_id, f"AA: stacks enabled ({stacks_url})")
 
-    # Step C: 遍历 MD5 尝试下载
-    for i, entry in enumerate(all_md5_entries[:10]):
-        md5 = entry["md5"]
-        task_store.add_log(task_id, f"AA [{i+1}/{min(len(all_md5_entries), 10)}]: trying MD5={md5} ({entry.get('size_label', '?')})")
+        # Step C: 遍历 MD5 尝试下载
+        for i, entry in enumerate(all_md5_entries[:10]):
+            md5 = entry["md5"]
+            task_store.add_log(task_id, f"AA [{i+1}/{min(len(all_md5_entries), 10)}]: trying MD5={md5}")
 
-        # 获取 MD5 详情（zlib_id, title, isbn 等）
-        details = await get_md5_details(md5, proxy)
-        filesize_bytes = details.get("filesize_bytes", entry.get("size_bytes", 0))
-        md5_title = details.get("title", "")
+            # 获取 MD5 详情（zlib_id, title, isbn 等）
+            details = await get_md5_details(md5, proxy)
+            filesize_bytes = details.get("filesize_bytes", entry.get("size_bytes", 0))
+            md5_title = details.get("title", "")
 
-        # 匹配 MD5 详情中的标题/ISBN 与 Step1 元数据
-        if title or isbn:
-            skip = False
-            if md5_title and title:
-                rel_score = _calc_title_relevance(md5_title, title)
-                if rel_score < 10:
-                    task_store.add_log(task_id, f"AA: MD5 {md5} title mismatch ('{md5_title[:30]}' vs '{title[:30]}', score={rel_score}), skipping")
-                    skip = True
-            if not skip and isbn and details.get("isbn"):
-                if isbn.replace("-", "") != details["isbn"].replace("-", ""):
-                    task_store.add_log(task_id, f"AA: MD5 {md5} ISBN mismatch ({details['isbn']} vs {isbn}), skipping")
-                    skip = True
-            if skip:
-                continue
-            if md5_title:
-                task_store.add_log(task_id, f"AA: MD5 {md5} title matched ('{md5_title[:30]}')")
+            # 匹配 MD5 详情中的标题/ISBN 与 Step1 元数据
+            if title or isbn:
+                skip = False
+                if md5_title and title:
+                    rel_score = _calc_title_relevance(md5_title, title)
+                    if rel_score < 10:
+                        task_store.add_log(task_id, f"AA: MD5 {md5} title mismatch ('{md5_title[:30]}' vs '{title[:30]}', score={rel_score}), skipping")
+                        skip = True
+                if not skip and isbn and details.get("isbn"):
+                    if isbn.replace("-", "") != details["isbn"].replace("-", ""):
+                        task_store.add_log(task_id, f"AA: MD5 {md5} ISBN mismatch ({details['isbn']} vs {isbn}), skipping")
+                        skip = True
+                if skip:
+                    continue
+                if md5_title:
+                    task_store.add_log(task_id, f"AA: MD5 {md5} title matched ('{md5_title[:30]}')")
 
-        # 路径A: stacks 下载
-        if use_stacks:
-            task_store.add_log(task_id, f"AA: submitting to stacks...")
-            try:
-                from engine.stacks_client import StacksClient
-                sc = StacksClient(base_url=stacks_url, api_key=str(stacks_api_key or ""))
-                result = await sc.add_task(md5)
-                if result.get("ok"):
-                    filepath = await sc.wait_for_download(md5, timeout=stacks_timeout)
-                    if filepath:
-                        fixed = sc.validate_and_fix_file(filepath, tmp_dir)
-                        if fixed:
-                            task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
-                            if verify_md5(fixed, md5):
-                                return fixed
-                            else:
-                                task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download, keeping file for debug")
-                    else:
-                        task_store.add_log(task_id, "AA: stacks download timeout/failed")
-                else:
-                    err = result.get("error", "")
-                    if "unreachable" in err.lower() or "connection" in err.lower():
-                        task_store.add_log(task_id, "AA: stacks service unreachable, disabling")
-                        use_stacks = False
-            except ImportError:
-                task_store.add_log(task_id, "AA: stacks_client module not available")
-                use_stacks = False
-            except Exception as e:
-                task_store.add_log(task_id, f"AA: stacks error: {e}")
-
-        # 路径B: AA 直接下载（先尝试直连，403 时通过 FlareSolverr cookies 重试）
-        task_store.add_log(task_id, f"AA: trying direct download...")
-        dl_url = await resolve_download_url(md5, proxy)
-        if dl_url:
-            task_store.add_log(task_id, f"AA: direct download URL found")
-
-            async def _try_download(url: str, use_flare: bool = False) -> Optional[str]:
-                """尝试下载文件，use_flare=True时通过FlareSolverr获取cookies"""
-                import requests as _req
-                import urllib.parse as _up
-
-                hdrs = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                }
-                cookies = {}
-                ref = f"https://annas-archive.gd/md5/{md5}"
-
-                if use_flare:
-                    task_store.add_log(task_id, "AA: getting FlareSolverr cookies for download...")
-                    try:
-                        from engine.flaresolverr import download_file_via_flaresolverr
-                        fpath = os.path.join(tmp_dir, f"{md5}_fs.pdf")
-                        ok = await download_file_via_flaresolverr(url, fpath, proxy, ref)
-                        if ok and os.path.getsize(fpath) > 1024:
-                            # 验证 %PDF
-                            with open(fpath, "rb") as fh:
-                                if fh.read(4) == b"%PDF":
-                                    task_store.add_log(task_id, f"AA: FlareSolverr download OK ({os.path.getsize(fpath)/1024:.0f} KB)")
-                                    return fpath
-                            os.remove(fpath)
-                    except ImportError:
-                        pass
-                    except Exception as e:
-                        task_store.add_log(task_id, f"AA: FlareSolverr download error: {str(e)[:100]}")
-                    return None
-
+            # 唯一下载路径: stacks（参考代码做法—不用直连/FlareSolverr）
+            # stacks 不可用或失败时直接返回 None，走 ZL 降级
+            if use_stacks:
+                task_store.add_log(task_id, f"AA: submitting MD5 to stacks...")
                 try:
-                    dl_kwargs = {"timeout": 120, "headers": hdrs, "verify": False, "stream": True, "cookies": cookies}
-                    if proxy:
-                        dl_kwargs["proxies"] = {"http": proxy, "https": proxy}
-                    resp = _req.get(url, **dl_kwargs)
-                    resp.raise_for_status()
-
-                    cd = resp.headers.get("Content-Disposition", "")
-                    fname = f"{md5}.pdf"
-                    if cd and "filename=" in cd:
-                        fname = cd.split("filename=")[-1].strip("\"' ")
+                    from engine.stacks_client import StacksClient
+                    sc = StacksClient(base_url=stacks_url, api_key=str(stacks_api_key or ""))
+                    result = await sc.add_task(md5)
+                    if result.get("ok"):
+                        filepath = await sc.wait_for_download(md5, timeout=stacks_timeout)
+                        if filepath:
+                            fixed = sc.validate_and_fix_file(filepath, tmp_dir)
+                            if fixed:
+                                task_store.add_log(task_id, f"AA: stacks download OK → {os.path.basename(fixed)}")
+                                if verify_md5(fixed, md5):
+                                    return fixed
+                                else:
+                                    task_store.add_log(task_id, f"AA: MD5 mismatch for stacks download")
                     else:
-                        url_path = _up.urlparse(url).path
-                        if url_path:
-                            fname = os.path.basename(url_path) or fname
-
-                    filepath = os.path.join(tmp_dir, fname)
-                    with open(filepath, "wb") as f:
-                        for chunk in resp.iter_content(chunk_size=65536):
-                            if chunk:
-                                f.write(chunk)
-                    size = os.path.getsize(filepath)
-                    if size > 1024:
-                        if fname.lower().endswith(".pdf"):
-                            with open(filepath, "rb") as fh:
-                                if fh.read(4) != b"%PDF":
-                                    task_store.add_log(task_id, f"AA: downloaded file is not valid PDF")
-                                    os.remove(filepath)
-                                    return None
-                        # MD5 校验（如 Stacks 做法）
-                        if verify_md5(filepath, md5):
-                            return filepath
-                        else:
-                            task_store.add_log(task_id, f"AA: MD5 mismatch for downloaded file, kept for debug")
-                            return None
-                    os.remove(filepath)
-                except _req.exceptions.HTTPError as e:
-                    if "403" in str(e) or "Forbidden" in str(e):
-                        task_store.add_log(task_id, "AA: direct download blocked (403), trying through FlareSolverr...")
-                        return None  # Will trigger FlareSolverr retry
-                    elif "404" in str(e):
-                        return None  # Not found, skip
-                    raise
+                        err = result.get("error", "")
+                        task_store.add_log(task_id, f"AA: stacks add_task failed: {err}")
+                except ImportError:
+                    task_store.add_log(task_id, "AA: stacks_client module not available")
                 except Exception as e:
-                    task_store.add_log(task_id, f"AA: direct download failed: {str(e)[:100]}")
-                return None
+                    task_store.add_log(task_id, f"AA: stacks error: {str(e)[:100]}")
+            else:
+                task_store.add_log(task_id, "AA: stacks not configured, skipping")
+                # 不尝试直连 — 参考代码不用直连 AA
 
-            # Attempt 1: direct download
-            result = await _try_download(dl_url, use_flare=False)
-            # Attempt 2: retry with FlareSolverr cookies if direct failed
-            if not result:
-                result = await _try_download(dl_url, use_flare=True)
-            if result:
-                if verify_md5(str(result), md5):
-                    return result
-                else:
-                    task_store.add_log(task_id, f"AA: MD5 mismatch for FlareSolverr download, kept for debug")
+            # 只试第一个 MD5（参考代码只选 best MD5）
+            break
 
-        # 短暂休息避免触发速率限制
-        await asyncio.sleep(2)
-
-    return None
+        return None
 
 
 async def _download_via_libgen(

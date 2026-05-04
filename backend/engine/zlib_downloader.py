@@ -164,7 +164,7 @@ class ZLibDownloader:
             pass
         return None
 
-    async def zlib_search(self, query: str, page: int = 1, limit: int = 10) -> Dict[str, Any]:
+    async def zlib_search(self, query: str, page: int = 1, limit: int = 20) -> Dict[str, Any]:
         if not self._logged_in:
             result = await self.zlib_login()
             if not result.get("ok"):
@@ -175,27 +175,29 @@ class ZLibDownloader:
         for attempt in range(MAX_RETRIES):
             for imp in IMPERSONATES:
                 try:
+                    # 用 form-encoded data（参考代码做法，JSON 可能不被 ZL eAPI 支持）
+                    from urllib.parse import quote
+                    form_data = f"message={quote(query)}&limit={limit}"
                     r = session.post(
                         EAPI_SEARCH_URL,
-                        json={
-                            "message": query,
-                            "yearFrom": 1900,
-                            "yearTo": 2026,
-                            "lang": "",
-                            "ext": "",
-                            "order": "",
-                        },
+                        data=form_data,
                         headers={
-                            "Content-Type": "application/json",
+                            "Content-Type": "application/x-www-form-urlencoded",
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                         },
                         impersonate=imp,
-                        timeout=20,
+                        timeout=30,
                     )
                     if r.status_code == 200:
-                        return r.json()
+                        result = r.json()
+                        books = _extract_books(result)
+                        logger.info(f"ZL search '{query[:40]}': HTTP 200, {len(books)} books")
+                        return result
+                    else:
+                        logger.warning(f"ZL search '{query[:40]}': HTTP {r.status_code}")
                 except Exception as e:
                     last_error = str(e)
+                    logger.warning(f"ZL search error: {e}")
                     time.sleep(1)
         return {"total": 0, "results": []}
 
