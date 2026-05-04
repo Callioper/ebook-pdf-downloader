@@ -144,10 +144,12 @@ const OCR_ENGINES = [
   { key: 'ocrmypdf', name: 'OCRmyPDF', desc: 'PDF OCR 优化工具' },
 ]
 
-const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
+const OCR_INSTALL_GUIDE = `推荐在 OpenCode 中执行以下命令安装 OCR 引擎，opencode地址：https://opencode.ai/，把以下提示词发送给 opencode：
+
+## 安装 OCR 引擎
 
 1. 激活虚拟环境：
-   cd backend && venv\\Scripts\\activate
+   cd backend && venv\Scripts\activate
 
 2. 安装 OCRmyPDF 核心：
    pip install ocrmypdf --user
@@ -165,31 +167,76 @@ const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
    python -c "import easyocr; print('easyocr ok')"
    python -c "import paddleocr; print('paddleocr:', paddleocr.__version__)"`
 
-const STACKS_INSTALL_GUIDE = `## 安装 stacks（Anna's Archive 下载管理器）
+const STACKS_INSTALL_GUIDE = `推荐在 OpenCode 中执行以下命令安装 stacks + FlareSolverr，opencode地址：https://opencode.ai/，把以下提示词发送给 opencode：
 
-推荐在 OpenCode 中执行以下命令安装 stacks，项目地址 https://opencode.ai/。
+## 使用 Docker Compose 安装 stacks + FlareSolverr
 
-## 安装 stacks
-
-1. 打开终端（Terminal）
-
-2. 创建 stacks 目录并下载：
+1. 创建 docker-compose.yml：
    mkdir ~/stacks && cd ~/stacks
-   curl -sL "https://github.com/zelestcarlyone/stacks/releases/latest/download/stacks-windows-x64.zip" -o stacks.zip
-   tar -xf stacks.zip
+   notepad docker-compose.yml
 
-3. 启动 stacks（默认端口 7788）：
-   cd ~/stacks && stacks.exe
+2. 粘贴以下内容并保存：
 
-4. 浏览器访问 http://localhost:7788 进入管理界面
+   services:
+     stacks:
+       image: zelest/stacks:latest
+       container_name: stacks
+       ports:
+         - "7788:7788"
+       volumes:
+         - ./config:/opt/stacks/config
+         - ./download:/opt/stacks/download
+         - ./logs:/opt/stacks/logs
+       restart: unless-stopped
+       environment:
+         - USERNAME=admin
+         - PASSWORD=stacks
+         - TZ=Asia/Shanghai
 
-5. 默认密码：admin / stacks
+     flaresolverr:
+       image: ghcr.io/flaresolverr/flaresolverr:latest
+       container_name: flaresolverr
+       ports:
+         - "8191:8191"
+       environment:
+         - LOG_LEVEL=info
+       restart: unless-stopped
 
-6. 获取 API Key：登录 → Settings → Authentication → Admin API Key
+3. 启动服务：
+   docker compose up -d
 
-7. 将 API Key 填入下方输入框
+4. 浏览器访问 http://localhost:7788
+   默认管理密码：admin / stacks
 
-8. 可选：搭配 FlareSolverr 使用（见下方 FlareSolverr 配置）`
+5. 获取 API Key：
+   Settings → Authentication → Admin API Key → 复制
+
+6. 将 API Key 填入下方输入框`
+
+const FLARESOLVERR_DOCKER_GUIDE = `推荐在 OpenCode 中执行以下命令安装 FlareSolverr（Docker 版），opencode地址：https://opencode.ai/，把以下提示词发送给 opencode：
+
+## 使用 Docker Compose 安装 FlareSolverr
+
+1. 创建 docker-compose.yml：
+   notepad docker-compose.yml
+
+2. 粘贴以下内容并保存：
+
+   services:
+     flaresolverr:
+       image: ghcr.io/flaresolverr/flaresolverr:latest
+       container_name: flaresolverr
+       ports:
+         - "8191:8191"
+       environment:
+         - LOG_LEVEL=info
+       restart: unless-stopped
+
+3. 启动：
+   docker compose up -d
+
+4. 验证：
+   curl http://localhost:8191/v1`
 
 export default function ConfigSettings() {
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -1003,7 +1050,7 @@ export default function ConfigSettings() {
                   stacks 安装指引
                 </summary>
                 <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
-                  <p className="text-xs text-blue-800 font-medium mb-2">推荐在 OpenCode 中执行以下命令安装 stacks：</p>
+                  <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
                   <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{STACKS_INSTALL_GUIDE}</pre>
                   <p className="text-xs text-blue-600 mt-2">安装并启动后，点击"检测"确认连接状态。</p>
                 </div>
@@ -1116,6 +1163,15 @@ export default function ConfigSettings() {
                     />
                     <span className="text-xs text-gray-400">FlareSolverr 端口（默认 8191）</span>
                   </div>
+                  {/* Docker 安装引导 */}
+                  <details className="mt-2">
+                    <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800">📦 查看 Docker 安装指引</summary>
+                    <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+                      <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
+                      <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{FLARESOLVERR_DOCKER_GUIDE}</pre>
+                      <p className="text-xs text-blue-600 mt-2">启动后返回设置页点击"重新检测"确认连接状态。</p>
+                    </div>
+                  </details>
                   {/* PDF 压缩 */}
                   <div className="border-t border-gray-200 pt-2 mt-2">
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -1350,7 +1406,7 @@ export default function ConfigSettings() {
               OCR 命令行安装指引
             </summary>
             <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
-              <p className="text-xs text-blue-800 font-medium mb-2">推荐在 OpenCode 中执行以下命令安装 OCR 引擎，项目地址 https://opencode.ai/：</p>
+              <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
               <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{OCR_INSTALL_GUIDE}</pre>
               <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
             </div>
