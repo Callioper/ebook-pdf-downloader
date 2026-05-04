@@ -6,7 +6,9 @@
 
 import logging
 import os
+import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -220,27 +222,41 @@ class ZLibDownloader:
                         data = r.json()
                         download_url = data.get("file", {}).get("downloadLink", "") or data.get("downloadLink", "")
                         if download_url:
+                            logger.info(f"ZL download URL obtained for {book_id}")
                             dl_r = session.get(download_url, impersonate=imp, timeout=60)
                             if dl_r.status_code == 200:
                                 ext = data.get("file", {}).get("extension", "pdf")
                                 filepath = os.path.join(output_dir, f"{book_id}.{ext}")
                                 with open(filepath, "wb") as f:
                                     f.write(dl_r.content)
-                                # Validate: actual PDF must have at least 1KB and be binary (not JSON error page)
-                                if os.path.getsize(filepath) > 1024:
-                                    # Quick check: PDF files start with %PDF
+                                file_size = os.path.getsize(filepath)
+                                logger.info(f"ZL downloaded {filepath} ({file_size}B)")
+                                if file_size > 1024:
                                     with open(filepath, "rb") as f:
                                         header = f.read(4)
                                     if ext == "pdf" and header != b"%PDF":
-                                        logger.warning(f"ZL download for {book_id} returned non-PDF content")
+                                        logger.warning(f"ZL {book_id}: non-PDF content (size={file_size}), removed")
                                         try:
                                             os.remove(filepath)
                                         except Exception:
                                             pass
                                     else:
+                                        logger.info(f"ZL {book_id}: valid file saved ({file_size}B)")
                                         return True
-                    return False
-                except Exception:
+                                else:
+                                    logger.warning(f"ZL {book_id}: file too small ({file_size}B), removed")
+                                    try:
+                                        os.remove(filepath)
+                                    except Exception:
+                                        pass
+                            else:
+                                logger.warning(f"ZL {book_id}: file download failed HTTP {dl_r.status_code}")
+                        else:
+                            logger.warning(f"ZL {book_id}: no downloadLink in response: {str(data)[:200]}")
+                    else:
+                        logger.warning(f"ZL {book_id}: API HTTP {r.status_code} (attempt {attempt+1}, imp={imp})")
+                except Exception as e:
+                    logger.warning(f"ZL {book_id}: exception (attempt {attempt+1}, imp={imp}): {e}")
                     time.sleep(1)
         return False
 
@@ -307,7 +323,7 @@ class ZLibDownloader:
             for book in books:
                 book_isbn = str(book.get("isbn", ""))
                 if isbn.replace("-", "") in book_isbn.replace("-", ""):
-                    match = self._check_book_match(book, expected_size)
+                    match = self._check_book_match(book, expected_size, title, authors)
                     if match:
                         match["tier"] = 1
                         match["strategy"] = "isbn_exact"
@@ -320,23 +336,41 @@ class ZLibDownloader:
             result = await self.zlib_search(query, page=1, limit=20)
             books = _extract_books(result)
             for book in books:
-                match = self._check_book_match(book, expected_size)
+                match = self._check_book_match(book, expected_size, title, authors)
                 if match:
                     match["tier"] = 2
                     match["strategy"] = "title_author"
-                    return match
+                    # 高相关度的才直接返回，否则继续尝试
+                    if match.get("title_score", 0) >= 40:
+                        return match
+
+            # 如果第2层没有高匹配结果，继续第3层
+            best = None
+            for book in books:
+                match = self._check_book_match(book, expected_size, title, authors)
+                if match and match.get("title_score", 0) > 15:
+                    if not best or match.get("title_score", 0) > best.get("title_score", 0):
+                        best = match
+            if best:
+                best["tier"] = 2
+                best["strategy"] = "title_author_best"
+                return best
 
         # 第3层：仅title搜索
         if title:
             logger.info(f"ZL tiered search layer 3: title='{title[:60]}'")
             result = await self.zlib_search(title, page=1, limit=20)
             books = _extract_books(result)
+            best = None
             for book in books:
-                match = self._check_book_match(book, expected_size)
+                match = self._check_book_match(book, expected_size, title, authors)
                 if match:
-                    match["tier"] = 3
-                    match["strategy"] = "title_only"
-                    return match
+                    if not best or match.get("title_score", 0) > best.get("title_score", 0):
+                        best = match
+            if best:
+                best["tier"] = 3
+                best["strategy"] = "title_only"
+                return best
 
         return None
 
@@ -344,12 +378,30 @@ class ZLibDownloader:
         self,
         book: Dict[str, Any],
         expected_size: int = 0,
+        search_title: str = "",
+        search_authors: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """检查单个搜索结果是否匹配，返回匹配信息或None"""
+        """
+        检查单个搜索结果是否匹配。
+        验证项目（按优先级）：
+        1. 必须有 id 和 hash
+        2. 标题必须匹配（模糊匹配）
+        3. 文件大小在容差内（如果有 expected_size）
+        """
         book_id = str(book.get("id", ""))
         book_hash = book.get("hash") or book.get("book_hash") or ""
         if not book_id or not book_hash:
             return None
+
+        book_title = book.get("title", "")
+        title_score = 0
+
+        if search_title and book_title:
+            title_score = _calc_title_match(book_title, search_title, search_authors or [])
+            # 低分标题直接拒绝
+            if title_score < 10:
+                logger.debug(f"ZL book {book_id}: title mismatch '{book_title}' vs '{search_title}' (score={title_score})")
+                return None
 
         # 检查文件大小
         book_size = int(book.get("filesize", book.get("filesize_bytes", 0)))
@@ -366,7 +418,8 @@ class ZLibDownloader:
             "hash": book_hash,
             "size": book_size,
             "match_level": level,
-            "title": book.get("title", ""),
+            "title": book_title,
+            "title_score": title_score,
             "extension": book.get("extension", book.get("ext", "pdf")),
         }
 
@@ -422,3 +475,55 @@ def _extract_books(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(books, dict):
         books = books.get("books", books.get("results", []))
     return books if isinstance(books, list) else []
+
+
+def _calc_title_match(book_title: str, search_title: str, search_authors: Optional[List[str]] = None) -> int:
+    """
+    计算书籍标题与搜索标题的匹配度 (0-100)。
+    基于CJK字符重叠率、关键词命中和作者辅助验证。
+    """
+    search_authors = search_authors or []
+    bt = unicodedata.normalize("NFKC", book_title.lower()).strip()
+    st = unicodedata.normalize("NFKC", search_title.lower()).strip()
+    if not bt or not st:
+        return 0
+
+    # 1. 精确包含 → 100分
+    if st in bt or bt in st:
+        return 100
+    # 2. 一个包含另一个的大部（长度短的80%以上被包含）
+    min_len = min(len(st), len(bt))
+    if min_len >= 2:
+        if st in bt or bt in st:
+            return 90
+
+    # 3. CJK 字符重叠率
+    bt_chars = set(c for c in bt if '\u4e00' <= c <= '\u9fff')
+    st_chars = set(c for c in st if '\u4e00' <= c <= '\u9fff')
+    char_score = 0
+    if st_chars and bt_chars:
+        overlap = len(bt_chars & st_chars)
+        max_chars = max(len(st_chars), len(bt_chars))
+        char_score = int((overlap / max_chars) * 100)
+
+    # 4. 分词后词级别重叠
+    bt_words = set(re.split(r'[\s,，、。．：；！？\-\u4e00-\u9fff]+', bt))
+    st_words = set(re.split(r'[\s,，、。．：；！？\-\u4e00-\u9fff]+', st))
+    bt_words.discard("")
+    st_words.discard("")
+    word_score = 0
+    if st_words and bt_words:
+        overlap_words = bt_words & st_words
+        word_score = int((len(overlap_words) / max(len(st_words), 1)) * 100)
+
+    score = max(char_score, word_score)
+
+    # 5. 如果有关键词完全匹配（不含停用词），额外加分
+    stop = set("的了不在有是和我对与就也还".strip())
+    sig_words = [w for w in st_words if w not in stop and len(w) >= 2]
+    if sig_words:
+        all_found = all(any(sig in bw for bw in bt_words) for sig in sig_words)
+        if all_found:
+            score = max(score, 60)
+
+    return min(score, 100)

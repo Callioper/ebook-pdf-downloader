@@ -163,7 +163,7 @@ async def _download_via_aa_and_stacks(
     all_md5_entries = []
     for qtype, qval in search_queries:
         task_store.add_log(task_id, f"AA: searching by {qtype}={qval}")
-        entries = await search_aa(qval, proxy)
+        entries = await search_aa(qval, proxy, preferred_title=title, preferred_isbn=isbn)
         if entries:
             task_store.add_log(task_id, f"AA: found {len(entries)} MD5 entries via {qtype}")
             all_md5_entries.extend(entries)
