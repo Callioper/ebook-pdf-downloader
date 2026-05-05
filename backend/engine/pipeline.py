@@ -40,6 +40,35 @@ async def _emit(task_id: str, event_type: str, data: Dict[str, Any]):
     })
 
 
+async def _emit_progress(task_id: str, step: str, progress: int, detail: str = "", eta: str = ""):
+    """Emit step_progress and persist to task_store atomically."""
+    await _emit(task_id, "step_progress", {
+        "step": step,
+        "progress": progress,
+        "detail": detail,
+        "eta": eta,
+    })
+    task_store.update(task_id, {
+        "step_detail": detail,
+        "step_eta": eta,
+    })
+
+
+def _format_eta(remaining_seconds: float) -> str:
+    """Format remaining seconds into a human-readable ETA string."""
+    if remaining_seconds <= 0:
+        return ""
+    if remaining_seconds < 60:
+        return f"约{int(remaining_seconds)}秒"
+    minutes = int(remaining_seconds // 60)
+    seconds = int(remaining_seconds % 60)
+    if minutes < 60:
+        return f"约{minutes}分{seconds}秒"
+    hours = minutes // 60
+    minutes = minutes % 60
+    return f"约{hours}时{minutes}分"
+
+
 async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     task_store.add_log(task_id, "Step 1/7: Fetching metadata from database...")
     await _emit(task_id, "step_progress", {"step": "fetch_metadata", "progress": 50})
@@ -1410,14 +1439,61 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+
+            # Read stderr line by line for real-time progress
+            _ocr_start = time.time()
+            _page_cur = 0
+            _page_tot = 0
+            _last_emit = 0
+
+            async def _ocr_reader(proc) -> int:
+                nonlocal _page_cur, _page_tot, _last_emit
+                async for _line in proc.stderr:
+                    _text = _line.decode(errors='replace').strip()
+                    if not _text:
+                        continue
+
+                    # Log progress-relevant lines
+                    if any(k in _text.lower() for k in ('tesseract', 'page', 'error', 'warning', '[1;', 'pagen', 'processing')):
+                        task_store.add_log(task_id, f"  {_text[:200]}")
+
+                    # Parse "[45/216]" format (ocrmypdf output)
+                    _m = re.search(r'\[(\d+)/(\d+)\]', _text)
+                    if _m:
+                        _page_cur = int(_m.group(1))
+                        _page_tot = int(_m.group(2))
+
+                    # Parse "Page 45 of 216" format (tesseract output)
+                    _m2 = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', _text)
+                    if _m2:
+                        _page_cur = int(_m2.group(1))
+                        _page_tot = int(_m2.group(2))
+
+                    # Emit progress update every 3 pages or 10 seconds
+                    _now = time.time()
+                    if _page_tot > 0 and _page_cur > 0:
+                        _pct = int(_page_cur / _page_tot * 100)
+                        _elapsed = _now - _ocr_start
+                        _eta_str = ""
+                        if _page_cur > 1 and _elapsed > 5:
+                            _sec_pp = _elapsed / _page_cur
+                            _rem = (_page_tot - _page_cur) * _sec_pp
+                            _eta_str = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
+                        if _pct != _last_emit or _now - _ocr_start - _last_emit > 10:
+                            _last_emit = _pct if _pct > 0 else _now
+                            await _emit(task_id, "step_progress", {"step": "ocr", "progress": _pct, "detail": f"{_page_cur}/{_page_tot} 页", "eta": _eta_str})
+                            task_store.update(task_id, {"ocr_progress": _pct, "ocr_detail": f"{_page_cur}/{_page_tot} 页"})
+                return await proc.wait()
+
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
-                if proc.returncode == 0:
+                _exit = await asyncio.wait_for(_ocr_reader(proc), timeout=ocr_timeout)
+                if _exit == 0:
                     os.replace(output_pdf, pdf_path)
                     task_store.add_log(task_id, "OCR completed successfully")
                     report["ocr_done"] = True
                 else:
-                    task_store.add_log(task_id, f"OCR failed: {stderr.decode(errors='replace')}")
+                    task_store.add_log(task_id, f"OCR failed with exit code {_exit}")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100, "detail": "完成"})
             except asyncio.TimeoutError:
                 proc.kill()
                 task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
