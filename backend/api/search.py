@@ -81,6 +81,7 @@ class ZLibFetchTokensRequest(BaseModel):
 
 class InstallOCRRequest(BaseModel):
     engine: str = "tesseract"
+    language_pack: str = ""
 
 
 class InstallFlareRequest(BaseModel):
@@ -674,7 +675,15 @@ async def check_ocr(engine: str = Query(default="")):
                     if ver.startswith(prefix):
                         ver = ver[len(prefix):]
                         break
-                return {"ok": True, "engine": "tesseract", "version": ver}
+                has_chi_sim = False
+                languages = ""
+                try:
+                    langs_r = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10)
+                    languages = (langs_r.stdout or langs_r.stderr or "").strip()
+                    has_chi_sim = "chi_sim" in languages
+                except Exception:
+                    pass
+                return {"ok": True, "engine": "tesseract", "version": ver, "languages": languages, "has_chi_sim": has_chi_sim}
             # Check common install paths (Tesseract may exist but not in PATH)
             found_path = None
             for tess_path in [
@@ -742,7 +751,18 @@ async def check_ocr(engine: str = Query(default="")):
             except ImportError:
                 pass
         elif engine == "paddleocr":
-            # Use system Python to check (pip install goes to system Python)
+            _base_dir = os.path.dirname(os.path.dirname(__file__))
+            _venv_candidates = [
+                r"D:\opencode\book-downloader\venv-paddle311\Scripts\python.exe",
+                os.path.join(_base_dir, "venv-paddle311", "Scripts", "python.exe"),
+            ]
+            for _venv_py in _venv_candidates:
+                if os.path.exists(_venv_py):
+                    r = subprocess.run([_venv_py, "-c", "import paddleocr; print(paddleocr.__version__)"],
+                                       capture_output=True, text=True, timeout=15)
+                    if r.returncode == 0:
+                        return {"ok": True, "engine": "paddleocr", "version": r.stdout.strip().split("\n")[0], "venv": _venv_py}
+                    return {"ok": False, "engine": "paddleocr", "message": "venv 存在但 paddleocr 未安装", "venv": _venv_py}
             py = _pip_install_cmd()[0]
             r = subprocess.run([py, "-c", "import paddleocr; print(paddleocr.__version__)"],
                                capture_output=True, text=True, timeout=10)
@@ -904,14 +924,45 @@ async def install_ocr(body: InstallOCRRequest):
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "paddleocr":
-            CREATE_NO_WINDOW = 0x08000000
-            # Install paddleocr directly (NOT ocrmypdf-paddleocr which has paddlepaddle 3.x dependency issues)
-            cmd = _pip_install_cmd() + ["paddleocr"]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300,
-                creationflags=CREATE_NO_WINDOW,
-            )
-            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
+            # Create Python 3.11 venv for PaddleOCR (incompatible with 3.14)
+            _base_dir = os.path.dirname(os.path.dirname(__file__))
+            _venv_dir = os.path.join(_base_dir, "venv-paddle311")
+            _venv_py = os.path.join(_venv_dir, "Scripts", "python.exe")
+
+            # Check if venv already exists and paddleocr works
+            if os.path.exists(_venv_py):
+                r_check = subprocess.run([_venv_py, "-c", "import paddleocr"],
+                                         capture_output=True, timeout=15)
+                if r_check.returncode == 0:
+                    return {"ok": True, "message": "PaddleOCR venv 已就绪"}
+
+            # Find Python 3.11
+            _py311 = ""
+            for _cand in [
+                r"C:\Python311\python.exe",
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python311", "python.exe"),
+            ]:
+                if os.path.exists(_cand):
+                    _py311 = _cand
+                    break
+            if not _py311:
+                return {"ok": False, "message": "未找到 Python 3.11，请先安装 Python 3.11"}
+
+            # Create venv
+            subprocess.run([_py311, "-m", "venv", _venv_dir], capture_output=True, timeout=30)
+
+            # Install packages
+            r1 = subprocess.run([_venv_py, "-m", "pip", "install", "--upgrade", "pip"],
+                                capture_output=True, text=True, timeout=60)
+            r2 = subprocess.run([_venv_py, "-m", "pip", "install", "ocrmypdf", "paddleocr==3.3.0", "paddlex==3.3.0"],
+                                capture_output=True, text=True, timeout=300)
+            if r2.returncode != 0:
+                return {"ok": False, "message": f"PaddleOCR 依赖安装失败: {r2.stderr[-200:]}"}
+            r3 = subprocess.run([_venv_py, "-m", "pip", "install", "ocrmypdf-paddleocr"],
+                                capture_output=True, text=True, timeout=120)
+            if r3.returncode == 0:
+                return {"ok": True, "message": "PaddleOCR venv 安装完成"}
+            return {"ok": False, "message": f"ocrmypdf-paddleocr 插件安装失败: {r3.stderr[-200:]}"}
         elif engine == "easyocr":
             CREATE_NO_WINDOW = 0x08000000
             cmd = _pip_install_cmd() + ["ocrmypdf-easyocr"]
@@ -932,6 +983,36 @@ async def install_ocr(body: InstallOCRRequest):
             return {"ok": False, "message": f"Unknown engine: {engine}"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+@router.post("/install-tesseract-lang")
+async def install_tesseract_lang(lang: str = Query(default="chi_sim")):
+    """Download and install Tesseract language pack (e.g. chi_sim)."""
+    tess_dir = r"C:\Program Files\Tesseract-OCR\tessdata"
+    dest = os.path.join(tess_dir, f"{lang}.traineddata")
+    if os.path.exists(dest) and os.path.getsize(dest) > 1_000_000:
+        return {"ok": True, "message": f"{lang}.traineddata 已存在"}
+
+    urls = [
+        f"https://github.com/tesseract-ocr/tessdata/raw/main/{lang}.traineddata",
+        f"https://mirror.ghproxy.com/https://github.com/tesseract-ocr/tessdata/raw/main/{lang}.traineddata",
+    ]
+    import requests as _req
+    for url in urls:
+        try:
+            proxies = {}
+            proxy_cfg = get_config().get("http_proxy", "")
+            if proxy_cfg:
+                proxies = {"http": proxy_cfg, "https": proxy_cfg}
+            r = _req.get(url, proxies=proxies, timeout=120, verify=False)
+            if r.status_code == 200 and len(r.content) > 1_000_000:
+                os.makedirs(tess_dir, exist_ok=True)
+                with open(dest, "wb") as f:
+                    f.write(r.content)
+                return {"ok": True, "message": f"{lang}.traineddata 安装完成 ({len(r.content)//1024//1024}MB)"}
+        except Exception:
+            continue
+    return {"ok": False, "message": f"{lang}.traineddata 下载失败，请检查网络或代理"}
 
 
 @router.post("/install-flare")

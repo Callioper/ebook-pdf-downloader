@@ -137,10 +137,10 @@ const DEFAULT_CONFIG: AppConfig = {
 }
 
 const OCR_ENGINES = [
-  { key: 'tesseract', name: 'Tesseract OCR', desc: '经典开源引擎' },
-  { key: 'paddleocr', name: 'PaddleOCR', desc: '百度开源中文引擎' },
-  { key: 'easyocr', name: 'EasyOCR', desc: '多语言深度学习' },
-  { key: 'appleocr', name: 'AppleOCR', desc: 'macOS 原生 OCR' },
+  { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
+  { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
+  { key: 'easyocr', name: 'EasyOCR', desc: 'PyTorch 引擎，CPU 较慢' },
+  { key: 'appleocr', name: 'AppleOCR', desc: '仅 macOS 支持' },
   { key: 'ocrmypdf', name: 'OCRmyPDF', desc: 'PDF OCR 优化工具' },
 ]
 
@@ -1414,6 +1414,43 @@ export default function ConfigSettings() {
             </div>
           </div>
 
+          {/* Tesseract 语言包状态 */}
+          <div className="border-t border-gray-200 pt-3">
+            <span className="text-xs font-medium text-gray-600 mb-2 block">Tesseract 语言包</span>
+            <div className="flex items-center gap-2">
+              <StatusDot status={
+                form.ocr_engine === 'tesseract' && (ocrEngines['tesseract'] as any)?.has_chi_sim
+                  ? 'green'
+                  : form.ocr_engine === 'tesseract'
+                    ? 'red'
+                    : null
+              } />
+              <span className="text-xs text-gray-500">
+                {(ocrEngines['tesseract'] as any)?.has_chi_sim
+                  ? 'chi_sim 已安装'
+                  : (ocrEngines['tesseract'] as any)?.languages
+                    ? 'chi_sim 未安装'
+                    : '请先检测 Tesseract'}
+              </span>
+              {!((ocrEngines['tesseract'] as any)?.has_chi_sim) && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await fetch('/api/v1/install-tesseract-lang?lang=chi_sim')
+                      handleDetectOcrEngine('tesseract')
+                    } catch (e) {
+                      console.warn('[ConfigSettings] install tess lang:', e)
+                    }
+                  }}
+                  className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600"
+                >
+                  安装中文语言包
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* 引擎切换区 */}
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
@@ -1437,6 +1474,15 @@ export default function ConfigSettings() {
                       <p className={`text-xs mb-1.5 ${info.installed ? 'text-green-600' : 'text-red-500'}`}>
                         {info.msg}
                       </p>
+                    )}
+                    {eng.key === 'paddleocr' && !info?.installed && (
+                      <p className="text-xs text-gray-400 mb-1.5">需要 Python 3.11 虚拟环境，点击安装自动搭建</p>
+                    )}
+                    {eng.key === 'paddleocr' && info?.installed && (info as any)?.venv && (
+                      <p className="text-xs text-green-600 mb-1.5">运行环境: {(info as any).venv}</p>
+                    )}
+                    {eng.key === 'easyocr' && info?.installed && (
+                      <p className="text-xs text-amber-600 mb-1.5">警告: 安装后会自动拦截 Tesseract 引擎，切换引擎时自动处理</p>
                     )}
                     <div className="flex items-center gap-1.5">
                       <button

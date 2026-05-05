@@ -1,0 +1,3874 @@
+# Copyright (c) 2019 Baidu.com, Inc. All Rights Reserved
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+
+"""
+This module provides a client class for APP BLB.
+"""
+
+import copy
+import json
+import logging
+import uuid
+import sys
+
+from baidubce import bce_base_client
+from baidubce.auth import bce_v1_signer
+from baidubce.http import bce_http_client
+from baidubce.http import handler
+from baidubce.http import http_methods
+from baidubce import utils
+from baidubce.utils import required
+from baidubce import compat
+
+if sys.version < '3':
+    reload(sys)
+    sys.setdefaultencoding('utf-8')
+
+_logger = logging.getLogger(__name__)
+
+
+class AppBlbClient(bce_base_client.BceBaseClient):
+    """
+    APP BLB base sdk client
+    """
+    version = b'/v1'
+
+    def __init__(self, config=None):
+        bce_base_client.BceBaseClient.__init__(self, config)
+
+    def _merge_config(self, config=None):
+        """
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+        :return:
+        """
+        if config is None:
+            return self.config
+        else:
+            new_config = copy.copy(self.config)
+            new_config.merge_non_none_values(config)
+            return new_config
+
+    def _send_request(self, http_method, path,
+                      body=None, headers=None, params=None,
+                      config=None, body_parser=None):
+        config = self._merge_config(config)
+        if body_parser is None:
+            body_parser = handler.parse_json
+        if headers is None:
+            headers = {b'Accept': b'*/*',
+                       b'Content-Type': b'application/json;charset=utf-8'}
+        return bce_http_client.send_request(
+            config, bce_v1_signer.sign, [handler.parse_error, body_parser],
+            http_method, path, body, headers, params)
+
+    @required(vpc_id=(bytes, str),
+              subnet_id=(bytes, str))
+    def create_app_loadbalancer(self, vpc_id, subnet_id, name=None,
+                                desc=None, address=None, type=None,
+                                eip=None, tags=None, billing=None,
+                                performance_level=None,
+                                auto_renew_length=None,
+                                auto_renew_time_unit=None,
+                                resource_group_id=None,
+                                allow_delete=None,
+                                allocate_ipv6=None,
+                                client_token=None, config=None):
+        """
+        Create a app LoadBalancer with the specified options.
+
+        :param vpc_id:
+                id of vpc which the LoadBalancer belong to
+        :type vpc_id: string
+
+        :param subnet_id:
+                id of subnet which the LoadBalancer belong to
+        :type subnet_id: string
+
+        :param name:
+                the name of LoadBalancer to create
+        :type name: string
+
+        :param desc:
+                The description of LoadBalancer
+        :type desc: string
+
+        :param type:
+                LoadBalancer type, default is "application"
+        :type type: string
+
+        :param address:
+                specify the private IP address of LoadBalancer
+        :type address: string
+
+        :param eip:
+                bind an existing eip to the LoadBalancer
+        :type eip: string
+
+        :param tags:
+                list of tag key-value pairs
+        :type tags: list
+
+        :param billing:
+                billing information, required for prepaid LoadBalancer
+        :type billing: dict
+
+        :param performance_level:
+                performance level parameter
+        :type performance_level: string
+
+        :param auto_renew_length:
+                auto renew length
+        :type auto_renew_length: int
+
+        :param auto_renew_time_unit:
+                auto renew time unit, "month" or "year"
+        :type auto_renew_time_unit: string
+
+        :param resource_group_id:
+                resource group id
+        :type resource_group_id: string
+
+        :param allow_delete:
+                whether allow to delete, default is true
+        :type allow_delete: bool
+
+        :param allocate_ipv6:
+                whether allocate ipv6 address
+        :type allocate_ipv6: bool
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['vpcId'] = compat.convert_to_string(vpc_id)
+        body['subnetId'] = compat.convert_to_string(subnet_id)
+
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+        if address is not None:
+            body['address'] = compat.convert_to_string(address)
+        if type is not None:
+            body['type'] = compat.convert_to_string(type)
+        if eip is not None:
+            body['eip'] = compat.convert_to_string(eip)
+        if tags is not None:
+            body['tags'] = tags
+        if billing is not None:
+            body['billing'] = billing
+        if performance_level is not None:
+            body['performanceLevel'] = compat.convert_to_string(performance_level)
+        if auto_renew_length is not None:
+            body['autoRenewLength'] = auto_renew_length
+        if auto_renew_time_unit is not None:
+            body['autoRenewTimeUnit'] = compat.convert_to_string(auto_renew_time_unit)
+        if resource_group_id is not None:
+            body['resourceGroupId'] = compat.convert_to_string(resource_group_id)
+        if allow_delete is not None:
+            body['allowDelete'] = allow_delete
+        if allocate_ipv6 is not None:
+            body['allocateIpv6'] = allocate_ipv6
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def update_app_loadbalancer(self, blb_id, name=None, desc=None,
+                                allow_delete=None, allocate_ipv6=None,
+                                client_token=None, config=None):
+        """
+        Modify the special attribute to new value of the LoadBalancer
+        owned by the user.
+
+        :param blb_id:
+                id of LoadBalancer to update
+        :type blb_id: string
+
+        :param name:
+                name of LoadBalancer
+        :type name: string
+
+        :param desc:
+                The description of LoadBalancer
+        :type desc: string
+
+        :param allow_delete:
+                whether allow to delete, default is true
+        :type allow_delete: bool
+
+        :param allocate_ipv6:
+                whether allocate ipv6 address
+        :type allocate_ipv6: bool
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm
+                will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id)
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+        if allow_delete is not None:
+            body['allowDelete'] = allow_delete
+        if allocate_ipv6 is not None:
+            body['allocateIpv6'] = allocate_ipv6
+
+        return self._send_request(http_methods.PUT, path, json.dumps(body),
+                                  params=params, config=config)
+
+    def describe_app_loadbalancers(self, address=None, name=None, blb_id=None,
+                                   bcc_id=None, exactly_match=None,
+                                   marker=None, max_keys=None,
+                                   config=None):
+        """
+        Return a list of LoadBalancers
+
+        :param address:
+            Intranet service address in dotted decimal notation
+        :type address: string
+
+        :param name:
+            name of LoadBalancer to describe
+        :type name: string
+
+        :param blb_id:
+            id of LoadBalancer to describe (exact match only)
+        :type blb_id: string
+
+        :param bcc_id:
+            bcc which bind the LoadBalancers (exact match only)
+        :type bcc_id: string
+
+        :param exactly_match:
+            true for exact match, false for fuzzy match, default is false
+        :type exactly_match: bool
+
+        :param marker:
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result
+            which listing should begin.
+            If the marker is not specified, the list result will
+            listing from the first one.
+        :type marker: string
+
+        :param max_keys:
+            The optional parameter to specifies the max number of list
+            result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb')
+        params = {}
+
+        if address is not None:
+            params[b'address'] = address
+        if name is not None:
+            params[b'name'] = name
+        if blb_id is not None:
+            params[b'blbId'] = blb_id
+        if bcc_id is not None:
+            params[b'bccId'] = bcc_id
+        if exactly_match is not None:
+            params[b'exactlyMatch'] = exactly_match
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_loadbalancer_detail(self, blb_id, config=None):
+        """
+        Return detail imformation of specific LoadBalancer
+
+        :param blb_id:
+            id of LoadBalancer to describe
+        :type blb_id: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id)
+
+        return self._send_request(http_methods.GET, path,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def delete_app_loadbalancer(self, blb_id, client_token=None, config=None):
+        """
+        delete the LoadBalancer owned by the user.
+
+        :param blb_id:
+                id of LoadBalancer to describe
+        :type blb_id: string
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm
+                will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id)
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        return self._send_request(http_methods.DELETE, path,
+                                  params=params, config=config)
+
+    """
+        Listener API
+    """
+
+    @required(blb_id=(bytes, str),
+              listener_port=int,
+              scheduler=(bytes, str))
+    def create_app_tcp_listener(self, blb_id, listener_port,
+                                scheduler, tcp_session_timeout=None,
+                                description=None, client_token=None,
+                                config=None):
+        """
+        Create a app tcp listener rule with the specified options.
+
+        :param blb_id:
+            the id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param scheduler
+            balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection' or 'Hash'
+        :type scheduler: string
+
+        :param tcp_session_timeout:
+            tcp connection timeout (unit: second), default 900
+        :value 10-4000
+        :type tcp_session_timeout: int
+
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+         :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'TCPlistener')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'listenerPort': listener_port,
+            'scheduler': compat.convert_to_string(scheduler)
+        }
+        if tcp_session_timeout is not None:
+            body['tcpSessionTimeout'] = tcp_session_timeout
+        if description is not None:
+            body['description'] = description
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int,
+              scheduler=(bytes, str))
+    def create_app_udp_listener(self, blb_id, listener_port,
+                                scheduler, udp_session_timeout=None,
+                                description=None, client_token=None,
+                                config=None):
+        """
+        Create a app udp listener rule with the specified options.
+
+        :param blb_id:
+            the id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param scheduler
+            balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection' or 'Hash'
+        :type scheduler: string
+
+        :param udp_session_timeout:
+            udp connection timeout (unit: second), default 90
+        :value 5-4000
+        :type udp_session_timeout: int
+
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+         :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'UDPlistener')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'listenerPort': listener_port,
+            'scheduler': compat.convert_to_string(scheduler)
+        }
+        if udp_session_timeout is not None:
+            body['udpSessionTimeout'] = udp_session_timeout
+        if description is not None:
+            body['description'] = description
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int,
+              scheduler=(bytes, str))
+    def create_app_http_listener(self, blb_id, listener_port,
+                                 scheduler, keep_session=None,
+                                 keep_session_type=None,
+                                 keep_session_timeout=None,
+                                 keep_session_cookie_name=None,
+                                 x_forwarded_for=None,
+                                 server_timeout=None,
+                                 redirect_port=None,
+                                 x_forwarded_proto=None,
+                                 additional_attributes=None,
+                                 description=None,
+                                 client_token=None,
+                                 config=None):
+        """
+        Create a app http listener rule with the specified options.
+        :param blb_id:
+            the id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param scheduler:
+            balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection'
+        :type scheduler: string
+
+        :param keep_session:
+            Whether to enable the session hold function,
+            that is,the request sent by the same client will
+            reach the same backend server
+        :value true or false  default:false
+        :type keep_session: bool
+
+        :param keep_session_type:
+            The cookie handling method maintained by the session,
+            valid only if the session is held open
+            :value 'insert' or 'rewrite'  default:insert
+        :type keep_session_type: string
+
+        :param keep_session_timeout:
+            The time the cookie is kept in session (in seconds),
+            valid only if the session is held open
+            :value 1-15552000  default:3600
+        :type keep_session_timeout: int
+
+        :param keep_session_cookie_name:
+            The session keeps the name of the cookie that needs to be
+            overridden if and only if session persistence is enabled
+            and keep_session_type="rewrite"
+        :type keep_session_cookie_name: int
+
+        :param x_forwarded_for:
+            Whether to enable the real IP address of the client,
+            the backend server can obtain the real address of the client
+            through the X-Forwarded-For HTTP header.
+        :value true or false, default: False
+        :type x_forwarded_for: bool
+
+        :param server_timeout:
+            Backend server maximum timeout (unit: second)
+        :value 1-3600, default: 30
+        :type server_timeout:int
+
+        :param redirect_port:
+            Forward the request received by this listener to the
+            HTTPS listener, which is specified by the HTTPS listener.
+        :type redirect_port:int
+
+        :param x_forwarded_proto:
+            Whether to obtain the listener protocol type through
+            X-Forwarded-Proto header.
+        :value true or false, default: False
+        :type x_forwarded_proto: bool
+
+        :param additional_attributes:
+            HTTP custom configuration, such as gzip settings.
+        :type additional_attributes: list
+
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+
+        :param client_token:
+            If the clientToken is not specified by the user,
+            a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'HTTPlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        body = {
+            'listenerPort': listener_port,
+            'scheduler': compat.convert_to_string(scheduler)}
+        if keep_session is not None:
+            body['keepSession'] = keep_session
+        if keep_session_type is not None:
+            body['keepSessionType'] = \
+                compat.convert_to_string(keep_session_type)
+        if keep_session_timeout is not None:
+            body['keepSessionTimeout'] = keep_session_timeout
+        if keep_session_cookie_name is not None:
+            body['keepSessionCookieName'] = keep_session_cookie_name
+        if x_forwarded_for is not None:
+            body['xForwardedFor'] = x_forwarded_for
+        if server_timeout is not None:
+            body['serverTimeout'] = server_timeout
+        if redirect_port is not None:
+            body['redirectPort'] = redirect_port
+        if x_forwarded_proto is not None:
+            body['xForwardedProto'] = x_forwarded_proto
+        if additional_attributes is not None:
+            body['additionalAttributes'] = additional_attributes
+        if description is not None:
+            body['description'] = description
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int,
+              scheduler=(bytes, str), cert_ids=list)
+    def create_app_https_listener(self, blb_id, listener_port,
+                                  scheduler, cert_ids,
+                                  keep_session=None,
+                                  keep_session_type=None,
+                                  keep_session_timeout=None,
+                                  keep_session_cookie_name=None,
+                                  x_forwarded_for=None, server_timeout=None,
+                                  ie6_compatible=None, encryption_type=None,
+                                  encryption_protocols=None,
+                                  dual_auth=None, client_certIds=None,
+                                  additional_cert_domains=None,
+                                  x_forwarded_proto=None,
+                                  additional_attributes=None,
+                                  applied_ciphers=None,
+                                  description=None,
+                                  client_token=None, config=None):
+        """
+        Create a app https listener rule with the specified options.
+        :param blb_id:
+            The id of blb which the listener work on
+        :type blb_id: string
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+        :param scheduler:
+            balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection'
+        :type scheduler: string
+        :param cert_ids:
+            The certificate to be loaded by the listener.
+        :type cert_ids: List<String>
+        :param keep_session:
+            Whether to enable the session hold function,
+            that is, the request sent by the same client will reach the
+            same backend server
+        :value true or false, default: false
+        :type keep_session: bool
+        :param keep_session_type:
+            The cookie handling method maintained by the session,
+            valid only if the session is held open
+        :value 'insert' or 'rewrite', default:insert
+        :type keep_session_type: string
+        :param keep_session_timeout:
+            The time the cookie is kept in session (in seconds),
+            valid only if the session is held open
+        :value 1-15552000, default:3600
+        :type keep_session_timeout: int
+        :param keep_session_cookie_name:
+            The session keeps the name of the cookie that needs
+            to be overridden if and only if session persistence
+            is enabled and keep_session_type="rewrite"
+        :type keep_session_cookie_name: int
+        :param x_forwarded_for:
+            Whether to enable the real IP address of the client,
+            the backend server can obtain the real address of the client
+            through the X-Forwarded-For HTTP header.
+        :value true or false, default: false
+        :type x_forwarded_for: bool
+        :param server_timeout:
+            Backend server maximum timeout (unit: second)
+        :value 1-3600, default: 30
+        :type server_timeout: int
+        :param ie6_compatible:
+            compatible with IE6 HTTPS request
+            (the protocol format is earlier SSL3.0, the security is poor)
+        :value true or false, default: true
+        :type ie6_compatible: bool
+        :param encryption_type:
+            Encryption options, support three types:
+            compatibleIE/incompatibleIE/userDefind,
+            corresponding to:
+            IE-compatible encryption/disabled unsecure encryption/custom encryption,
+            when encryptionType is valid and legitimate,
+            ie6Compatible field transfer value will not take effect
+        type: encryption_type:string
+        :param encryption_protocols:
+            When the encryptionType value is userDefind,
+            the list of protocol types is a string list composed of four protocols:
+            "sslv3", "tlsv10", "tlsv11", "tlsv12".
+        type: encryption_protocols:list
+        :param dual_auth:
+            Whether to Open Two-way Authentication,
+            default:false
+        :type dual_auth: boolean
+        :param client_certIds:
+            When dualAuth is true, the loaded client certificate chain
+        :type client_certIds: list
+        :param client_token:
+            If the clientToken is not specified by the user,
+            a random String generated by default algorithm will be used.
+        :type client_token: string
+        :param additional_cert_domains:
+            Additional domain,each element is an object that contains two attributes, namely "cert_id" and "host"
+        :type additional_cert_domains: list
+        :param x_forwarded_proto:
+            Whether to obtain the listener protocol type through
+            X-Forwarded-Proto header.
+        :value true or false, default: False
+        :type x_forwarded_proto: bool
+        :param additional_attributes:
+            HTTP custom configuration, such as gzip settings.
+        :type additional_attributes: list
+        :param applied_ciphers:
+            Custom cipher suite string.
+        :type applied_ciphers: string
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+        :return
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'HTTPSlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        body = {
+            'listenerPort': listener_port,
+            'scheduler': compat.convert_to_string(scheduler),
+            'certIds': cert_ids}
+        if keep_session is not None:
+            body['keepSession'] = keep_session
+        if keep_session_type is not None:
+            body['keepSessionType'] = \
+                compat.convert_to_string(keep_session_type)
+        if keep_session_timeout is not None:
+            body['keepSessionTimeout'] = keep_session_timeout
+        if keep_session_cookie_name is not None:
+            body['keepSessionCookieName'] = keep_session_cookie_name
+        if x_forwarded_for is not None:
+            body['xForwardedFor'] = x_forwarded_for
+        if server_timeout is not None:
+            body['serverTimeout'] = server_timeout
+        if ie6_compatible is not None:
+            body['ie6Compatible'] = ie6_compatible
+        if encryption_type is not None:
+            body['encryptionType'] = \
+                compat.convert_to_string(encryption_type)
+        if encryption_protocols is not None:
+            body['encryptionProtocols'] = encryption_protocols
+        if dual_auth is not None:
+            body['dualAuth'] = dual_auth
+        if client_certIds is not None:
+            body['clientCertIds'] = client_certIds
+        if additional_cert_domains is not None:
+            body['additionalCertDomains'] = additional_cert_domains
+        if x_forwarded_proto is not None:
+            body['xForwardedProto'] = x_forwarded_proto
+        if additional_attributes is not None:
+            body['additionalAttributes'] = additional_attributes
+        if applied_ciphers is not None:
+            body['appliedCiphers'] = compat.convert_to_string(applied_ciphers)
+        if description is not None:
+            body['description'] = description
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body),
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int,
+              scheduler=(bytes, str), cert_ids=list)
+    def create_app_ssl_listener(self, blb_id, listener_port,
+                                scheduler, cert_ids,
+                                ie6_compatible=None,
+                                encryption_type=None,
+                                encryption_protocols=None,
+                                dual_auth=None, client_certIds=None,
+                                applied_ciphers=None,
+                                description=None,
+                                client_token=None, config=None):
+        """
+        Create a app ssl listener rule with the specified options.
+
+        :param blb_id:
+            The id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param scheduler:
+            balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection'
+        :type scheduler: string
+
+        :param cert_ids:
+            The SSL certificate to be loaded by the listener.
+            Currently HTTPS listeners can only bind one SSL certificate.
+        :type cert_ids: List<String>
+
+        :param ie6_compatible:
+            compatible with IE6 HTTPS request
+            (the protocol format is earlier SSL3.0, the security is poor)
+        :value true or false, default: true
+        :type ie6_compatible: bool
+
+        :param encryption_type:
+            Encryption options, support three types:
+            compatibleIE/incompatibleIE/userDefind,
+            corresponding to:
+            IE-compatible encryption/disabled unsecure encryption/custom encryption,
+            when encryptionType is valid and legitimate,
+            ie6Compatible field transfer value will not take effect
+        type: encryption_type:string
+
+        :param encryption_protocols:
+            When the encryptionType value is userDefind,
+            the list of protocol types is a string list composed of four protocols:
+            "sslv3", "tlsv10", "tlsv11", "tlsv12".
+        type: encryption_protocols:list
+
+        :param dual_auth:
+            Whether to Open Two-way Authentication,
+            default:false
+        :type dual_auth: boolean
+
+        :param client_certIds:
+            When dualAuth is true, the loaded client certificate chain
+        :type client_certIds: list
+
+        :param client_token:
+            If the clientToken is not specified by the user,
+            a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'SSLlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        body = {
+            'listenerPort': listener_port,
+            'scheduler': compat.convert_to_string(scheduler),
+            'certIds': cert_ids}
+        if ie6_compatible is not None:
+            body['ie6Compatible'] = ie6_compatible
+        if encryption_type is not None:
+            body['encryptionType'] = \
+                compat.convert_to_string(encryption_type)
+        if encryption_protocols is not None:
+            body['encryptionProtocols'] = encryption_protocols
+        if dual_auth is not None:
+            body['dualAuth'] = dual_auth
+        if client_certIds is not None:
+            body['clientCertIds'] = client_certIds
+        if applied_ciphers is not None:
+            body['appliedCiphers'] = compat.convert_to_string(applied_ciphers)
+        if description is not None:
+            body['description'] = description
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body),
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int)
+    def update_app_tcp_listener(self, blb_id, listener_port,
+                                scheduler=None,
+                                tcp_session_timeout=None,
+                                description=None,
+                                client_token=None,
+                                config=None):
+        """
+        update a app tcp listener rule with the specified options.
+
+        :param blb_id:
+            the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port:
+             port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port:int
+
+        :param scheduler
+            balancing algorithm
+        :value 'RoundRobin'or'LeastConnection'or'Hash'
+        :type scheduler:string
+
+        :param tcp_session_timeout:
+            tcp connection timeout (unit: second), default 900
+        :value 10-4000
+        :type tcp_session_timeout: int
+
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'TCPlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        params[b'listenerPort'] = listener_port
+
+        body = {}
+        if scheduler is not None:
+            body['scheduler'] = compat.convert_to_string(scheduler)
+        if tcp_session_timeout is not None:
+            body['tcpSessionTimeout'] = tcp_session_timeout
+        if description is not None:
+            body['description'] = description
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int)
+    def update_app_udp_listener(self, blb_id, listener_port,
+                                scheduler=None, udp_session_timeout=None,
+                                description=None, client_token=None,
+                                config=None):
+        """
+        update a app udp listener rule with the specified options.
+
+        :param blb_id:
+                the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port:
+                port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port:int
+
+        :param scheduler
+              balancing algorithm
+        :value 'RoundRobin'or'LeastConnection'or'Hash'
+        :type scheduler:string
+
+        :param udp_session_timeout:
+            udp connection timeout (unit: second), default 90
+        :value 5-4000
+        :type udp_session_timeout: int
+
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+         :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'UDPlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        params[b'listenerPort'] = listener_port
+
+        body = {}
+        if scheduler is not None:
+            body['scheduler'] = compat.convert_to_string(scheduler)
+        if udp_session_timeout is not None:
+            body['udpSessionTimeout'] = udp_session_timeout
+        if description is not None:
+            body['description'] = description
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body),
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int)
+    def update_app_http_listener(self, blb_id, listener_port,
+                                 scheduler=None, keep_session=None,
+                                 keep_session_type=None,
+                                 keep_session_timeout=None,
+                                 keep_session_cookie_name=None,
+                                 x_forwarded_for=None,
+                                 server_timeout=None,
+                                 redirect_port=None,
+                                 x_forwarded_proto=None,
+                                 additional_attributes=None,
+                                 description=None,
+                                 client_token=None,
+                                 config=None):
+        """
+        update a app http listener rule with the specified options.
+        :param blb_id:
+            The id of blb which the listener work on
+        :type blb_id: string
+        :param listener_port:
+            Port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+        :param scheduler:
+            Balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection' or 'Hash'
+        :type scheduler: string
+        :param keep_session:
+            Whether to enable the session hold function, that is,
+            the request sent by the same client will reach the
+            same backend server
+        :value true or false, default:false
+        :type keep_session: bool
+        :param keep_session_type:
+            The cookie handling method maintained by the session,
+            valid only if the session is held open
+        :value 'insert' or 'rewrite', default:insert
+        :type keep_session_type: string
+        :param keep_session_timeout:
+            The time the cookie is kept in session (in seconds),
+            valid only if the session is held open
+        :value 1-15552000, default:3600
+        :type keep_session_timeout: int
+        :param keep_session_cookie_name:
+            The session keeps the name of the cookie that needs
+            to be overridden,if and only if session persistence is
+            enabled and keep_session_type="rewrite"
+        :type keep_session_cookie_name: int
+        :param x_forwarded_for:
+            Whether to enable the real IP address of the client,
+            the backend server can obtain the real address of the
+            client through the X-Forwarded-For HTTP header.
+        :value true or false, default: false
+        :type x_forwarded_for: bool
+        :param server_timeout:
+            Backend server maximum timeout (unit: second)
+        :value 1-3600, default: 30
+        :type server_timeout: int
+        :param redirect_port:
+            Forward the request received by this listener to the HTTPS
+            listener, which is specified by the HTTPS listener.
+        :type redirect_port: int
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'HTTPlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        params[b'listenerPort'] = listener_port
+
+        body = {}
+        if scheduler is not None:
+            body['scheduler'] = compat.convert_to_string(scheduler)
+        if keep_session is not None:
+            body['keepSession'] = keep_session
+        if keep_session_type is not None:
+            body['keepSessionType'] = \
+                compat.convert_to_string(keep_session_type)
+        if keep_session_timeout is not None:
+            body['keepSessionTimeout'] = keep_session_timeout
+        if keep_session_cookie_name is not None:
+            body['keepSessionCookieName'] = keep_session_cookie_name
+        if x_forwarded_for is not None:
+            body['xForwardedFor'] = x_forwarded_for
+        if server_timeout is not None:
+            body['serverTimeout'] = server_timeout
+        if redirect_port is not None:
+            body['redirectPort'] = redirect_port
+        if x_forwarded_proto is not None:
+            body['xForwardedProto'] = x_forwarded_proto
+        if additional_attributes is not None:
+            body['additionalAttributes'] = additional_attributes
+        if description is not None:
+            body['description'] = description
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body),
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int)
+    def update_app_https_listener(self, blb_id, listener_port,
+                                  scheduler=None,
+                                  keep_session=None,
+                                  keep_session_type=None,
+                                  keep_session_timeout=None,
+                                  keep_session_cookie_name=None,
+                                  x_forwarded_for=None,
+                                  server_timeout=None,
+                                  cert_ids=None,
+                                  ie6_compatible=None,
+                                  encryption_type=None,
+                                  encryption_protocols=None,
+                                  dual_auth=None,
+                                  client_certIds=None,
+                                  additional_cert_domains=None,
+                                  x_forwarded_proto=None,
+                                  applied_ciphers=None,
+                                  description=None,
+                                  client_token=None,
+                                  config=None):
+        """
+        update a app https listener rule with the specified options.
+        :param blb_id:
+            The id of blb which the listener work on
+        :type blb_id: string
+        :param listener_port:
+            Port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+        :param scheduler:
+            Balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection' or 'Hash'
+        :type scheduler: string
+        :param keep_session:
+            Whether to enable the session hold function, that is, the request
+            sent by the same client will reach the same backend server
+        :value true or false, default: false
+        :type keep_session: bool
+        :param keep_session_type:
+            The cookie handling method maintained by the session,
+            valid only if the session is held open
+        :value 'insert' or 'rewrite', default: insert
+        :type keep_session_type: string
+        :param keep_session_timeout:
+            The time the cookie is kept in session (in seconds),
+            valid only if the session is held open
+        :value 1-15552000, default:3600
+        :type keep_session_timeout: int
+        :param keep_session_cookie_name:
+            The session keeps the name of the cookie that needs to be
+            overridden,if and only if session persistence is enabled and
+            keep_session_type="rewrite"
+        :type keep_session_cookie_name: int
+        :param x_forwarded_for:
+            Whether to enable the real IP address of the client,
+            the backend server can obtain the real address of the client
+            through the X-Forwarded-For HTTP header.
+        :value true or false, default: False
+        :type x_forwarded_for: bool
+        :param server_timeout:
+            Backend server maximum timeout (unit: second)
+        :value 1-3600, default: 30
+        :type server_timeout: int
+        :param cert_ids:
+            The SSL certificate to be loaded by the listener.
+            Currently HTTPS listeners can only bind one SSL certificate.
+        :type cert_ids:List<String>
+        :param ie6_compatible:
+            Is it compatible with IE6 HTTPS request
+            (the protocol format is earlier SSL3.0, the security is poor)
+        :value true or false, default: true
+        :type ie6_compatible: bool
+        :param encryption_type:
+            Encryption options, support three types:
+            compatibleIE/incompatibleIE/userDefind,
+            corresponding to:
+            IE-compatible encryption/disabled unsecure encryption/custom encryption,
+            when encryptionType is valid and legitimate,
+            ie6Compatible field transfer value will not take effect
+        type: encryption_type:string
+        :param encryption_protocols:
+            When the encryptionType value is userDefind,
+            the list of protocol types is a string list composed of four protocols:
+            "sslv3", "tlsv10", "tlsv11", "tlsv12".
+        type: encryption_protocols:list
+        :param dual_auth:
+            Whether to Open Two-way Authentication,
+            default:false
+        :type dual_auth: boolean
+        :param client_certIds:
+            When dualAuth is true, the loaded client certificate chain
+        :type client_certIds: list
+        :param additional_cert_domains:
+            Additional domain name,each element is an object that contains two attributes, namely "cert_id" and "host"
+        :type additional_cert_domains: list
+        :param x_forwarded_proto:
+            Whether to obtain the listener protocol type through
+            X-Forwarded-Proto header.
+        :value true or false, default: False
+        :type x_forwarded_proto: bool
+        :param applied_ciphers:
+            Custom cipher suite string.
+        :type applied_ciphers: string
+        :param description:
+            description of the listener, no more than 200 characters
+        :type description: string
+        :param client_token:
+            If the clientToken is not specified by the user,
+            a random String generated by default algorithm will be used.
+        :type client_token: string
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'HTTPSlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        params[b'listenerPort'] = listener_port
+        body = {}
+        if scheduler is not None:
+            body['scheduler'] = compat.convert_to_string(scheduler)
+        if keep_session is not None:
+            body['keepSession'] = keep_session
+        if keep_session_type is not None:
+            body['keepSessionType'] = \
+                compat.convert_to_string(keep_session_type)
+        if keep_session_timeout is not None:
+            body['keepSessionTimeout'] = keep_session_timeout
+        if keep_session_cookie_name is not None:
+            body['keepSessionCookieName'] = keep_session_cookie_name
+        if x_forwarded_for is not None:
+            body['xForwardedFor'] = x_forwarded_for
+        if server_timeout is not None:
+            body['serverTimeout'] = server_timeout
+        if cert_ids is not None:
+            body['certIds'] = cert_ids
+        if ie6_compatible is not None:
+            body['compatibleIE'] = ie6_compatible
+        if encryption_type is not None:
+            body['encryptionType'] = \
+                compat.convert_to_string(encryption_type)
+        if encryption_protocols is not None:
+            body['encryptionProtocols'] = encryption_protocols
+        if dual_auth is not None:
+            body['dualAuth'] = dual_auth
+        if client_certIds is not None:
+            body['clientCertIds'] = client_certIds
+        if additional_cert_domains is not None:
+            body['additionalCertDomains'] = additional_cert_domains
+        if x_forwarded_proto is not None:
+            body['xForwardedProto'] = x_forwarded_proto
+        if applied_ciphers is not None:
+            body['appliedCiphers'] = compat.convert_to_string(applied_ciphers)
+        if description is not None:
+            body['description'] = description
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int)
+    def update_app_ssl_listener(self, blb_id, listener_port,
+                                scheduler=None,
+                                cert_ids=None,
+                                ie6_compatible=None,
+                                encryption_type=None,
+                                encryption_protocols=None,
+                                dual_auth=None,
+                                client_certIds=None,
+                                applied_ciphers=None,
+                                description=None,
+                                client_token=None,
+                                config=None):
+        """
+        update a app ssl listener rule with the specified options.
+
+        :param blb_id:
+            The id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param scheduler:
+            balancing algorithm
+        :value 'RoundRobin' or 'LeastConnection'
+        :type scheduler: string
+
+        :param cert_ids:
+            The SSL certificate to be loaded by the listener.
+            Currently HTTPS listeners can only bind one SSL certificate.
+        :type cert_ids: List<String>
+
+        :param ie6_compatible:
+            compatible with IE6 HTTPS request
+            (the protocol format is earlier SSL3.0, the security is poor)
+        :value true or false, default: true
+        :type ie6_compatible: bool
+
+        :param encryption_type:
+            Encryption options, support three types:
+            compatibleIE/incompatibleIE/userDefind,
+            corresponding to:
+            IE-compatible encryption/disabled unsecure encryption/custom encryption,
+            when encryptionType is valid and legitimate,
+            ie6Compatible field transfer value will not take effect
+        type: encryption_type:string
+
+        :param encryption_protocols:
+            When the encryptionType value is userDefind,
+            the list of protocol types is a string list composed of four protocols:
+            "sslv3", "tlsv10", "tlsv11", "tlsv12".
+        type: encryption_protocols:list
+
+        :param dual_auth:
+            Whether to Open Two-way Authentication,
+            default:false
+        :type dual_auth: boolean
+
+        :param client_certIds:
+            When dualAuth is true, the loaded client certificate chain
+        :type client_certIds: list
+
+        :param client_token:
+            If the clientToken is not specified by the user,
+            a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'SSLlistener')
+        params = {}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+        params[b'listenerPort'] = listener_port
+        body = {}
+        if scheduler is not None:
+            body['scheduler'] = compat.convert_to_string(scheduler)
+        if cert_ids is not None:
+            body['certIds'] = cert_ids
+        if ie6_compatible is not None:
+            body['compatibleIE'] = ie6_compatible
+        if encryption_type is not None:
+            body['encryptionType'] = \
+                compat.convert_to_string(encryption_type)
+        if encryption_protocols is not None:
+            body['encryptionProtocols'] = encryption_protocols
+        if dual_auth is not None:
+            body['dualAuth'] = dual_auth
+        if client_certIds is not None:
+            body['clientCertIds'] = client_certIds
+        if applied_ciphers is not None:
+            body['appliedCiphers'] = compat.convert_to_string(applied_ciphers)
+        if description is not None:
+            body['description'] = description
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body),
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_tcp_listener(self, blb_id, listener_port=None,
+                                  marker=None, max_keys=None,
+                                  config=None):
+        """
+        get app tcp listeners identified by bibID
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port to query
+        :type listener_port:int
+
+        :param marker
+            The optional parameter marker specified in the
+            original request to specify
+            where in the results to begin listing.
+            Together with the marker, specifies the list result
+            which listing should begin.
+            If the marker is not specified, the list result will
+            listing from the first one.
+        :type marker: string
+
+        :param max_keys
+            The optional parameter to specifies the max number of
+            list result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'TCPlistener')
+        params = {}
+
+        if listener_port is not None:
+            params[b'listenerPort'] = listener_port
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_udp_listener(self, blb_id, listener_port=None,
+                                  marker=None, max_keys=None,
+                                  config=None):
+        """
+        get app udp listeners identified by bibID
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port to query
+        :type listener_port:int
+
+        :param marker
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin.
+            If the marker is not specified, the list result will
+            listing from the first one.
+        :type marker: string
+
+        :param max_keys
+        The optional parameter to specifies the max number of
+        list result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'UDPlistener')
+        params = {}
+
+        if listener_port is not None:
+            params[b'listenerPort'] = listener_port
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_http_listener(self, blb_id, listener_port=None,
+                                   marker=None, max_keys=None,
+                                   config=None):
+        """
+        get app http listeners identified by bibID
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port to query
+        :type listener_port:int
+
+        :param marker
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin.
+            If the marker is not specified, the list result will listing
+            from the first one.
+        :type marker: string
+
+        :param max_keys
+            The optional parameter to specifies the max number of list
+            result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'HTTPlistener')
+        params = {}
+
+        if listener_port is not None:
+            params[b'listenerPort'] = listener_port
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_https_listener(self, blb_id, listener_port=None,
+                                    marker=None, max_keys=None,
+                                    config=None):
+        """
+        get app https listeners identified by bibID
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port to query
+        :type listener_port:int
+
+        :param marker
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin.
+            If the marker is not specified, the list result will listing
+            from the first one.
+        :type marker: string
+
+        :param max_keys
+            The optional parameter to specifies the max number of list
+            result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'HTTPSlistener')
+        params = {}
+
+        if listener_port is not None:
+            params[b'listenerPort'] = listener_port
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_ssl_listener(self, blb_id, listener_port=None,
+                                  marker=None, max_keys=None, config=None):
+        """
+        get app ssl listeners identified by bibID
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port to query
+        :type listener_port:int
+
+        :param marker
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin.
+            If the marker is not specified, the list result will listing
+            from the first one.
+        :type marker: string
+
+        :param max_keys
+            The optional parameter to specifies the max number of list
+            result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'SSLlistener')
+        params = {}
+
+        if listener_port is not None:
+            params[b'listenerPort'] = listener_port
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_all_listener(self, blb_id, listener_port=None,
+                                  marker=None, max_keys=None, config=None):
+        """
+        get app all listeners identified by bibID
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port to query
+        :type listener_port:int
+
+        :param marker
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin.
+            If the marker is not specified, the list result will listing
+            from the first one.
+        :type marker: string
+
+        :param max_keys
+            The optional parameter to specifies the max number of list
+            result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'listener')
+        params = {}
+
+        if listener_port is not None:
+            params[b'listenerPort'] = listener_port
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str),
+              portList=list)
+    def delete_app_listeners(self, blb_id, portList,
+                             port_type_list=None,
+                             client_token=None,
+                             config=None):
+        """
+        Release app listener under the specified LoadBalancer,
+        the listener is specified by listening to the port.
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param portList:
+            The ports of listeners to be released
+        :type portList:list<int>
+
+        :param port_type_list:
+            List of port+type objects for deleting by protocol on the same port.
+            Each element is a dict with "port" and "type" fields.
+        :type port_type_list: list
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'listener')
+        params = {}
+
+        params[b'batchdelete'] = None
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['portList'] = portList
+        if port_type_list is not None:
+            body['portTypeList'] = port_type_list
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int,
+              app_policy_vos=list)
+    def create_policys(self, blb_id, listener_port,
+                       app_policy_vos, listener_type=None,
+                       client_token=None,
+                       config=None):
+        """
+        Create policys.
+
+        :param blb_id:
+            the id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be linstened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param app_policy_vos
+            policy list the listener binds.
+            If the listener type is TCP,
+            there is only one policy
+            and only the full match is supported.
+        https://cloud.baidu.com/doc/BLB/API.html#AppPolicy
+        :type app_policy_vos: list<AppPolicy>
+
+        :param listener_type:
+            Protocol type, required when multiple protocols share the same port.
+        :type listener_type: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'policys')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'listenerPort': listener_port,
+            'appPolicyVos': app_policy_vos
+        }
+        if listener_type is not None:
+            body['type'] = compat.convert_to_string(listener_type)
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int)
+    def describe_policys(self, blb_id, listener_port,
+                         listener_type=None,
+                         marker=None, max_keys=None,
+                         config=None):
+        """
+        get policys
+
+        :param blb_id
+             the id of blb which the listener work on
+        :type blb_id:string
+
+        :param listener_port
+             The listener port used by listener
+        :type listener_port:int
+
+        :param listener_type:
+            Protocol type, required when multiple protocols share the same port.
+        :type listener_type: string
+
+        :param marker
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin.
+            If the marker is not specified, the list result will listing
+            from the first one.
+        :type marker: string
+
+        :param max_keys
+            The optional parameter to specifies the max number of list
+            result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'policys')
+        params = {}
+        params[b'port'] = listener_port
+        if listener_type is not None:
+            params[b'type'] = listener_type
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path,
+                                  params=params, config=config)
+
+    @required(blb_id=(bytes, str),
+              listener_port=int,
+              policys_list=list)
+    def delete_policys(self, blb_id, listener_port,
+                       policys_list,
+                       listener_type=None,
+                       client_token=None, config=None):
+        """
+        Release the listener under the specified LoadBalancer,
+        the listener is specified by listening to the port.
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param listener_port
+             The listener port used by listener
+        :type listener_port:int
+
+         :param policys_list
+             All policy identifiers to be released
+        :type policys_list:list<str>
+
+        :param listener_type:
+            Protocol type, required when multiple protocols share the same port.
+        :type listener_type: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'policys')
+        params = {}
+
+        params[b'batchdelete'] = None
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'port': listener_port,
+            'policyIdList': policys_list
+        }
+        if listener_type is not None:
+            body['type'] = compat.convert_to_string(listener_type)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int, policy_list=list)
+    def update_policys(self, blb_id, listener_port, policy_list,
+                       listener_type=None, client_token=None, config=None):
+        """
+        Batch update policies for the specified listener.
+
+        :param blb_id:
+            the id of blb which the listener work on
+        :type blb_id: string
+
+        :param listener_port:
+            port to be listened owned by listener
+        :value 1-65535
+        :type listener_port: int
+
+        :param policy_list:
+            list of policy objects to be updated, each contains
+            policyId, priority, description
+        :type policy_list: list
+
+        :param listener_type:
+            Protocol type, required when multiple protocols share the same port.
+        :type listener_type: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'policys')
+        params = {b'batchupdate': None}
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'port': listener_port,
+            'policyList': policy_list
+        }
+        if listener_type is not None:
+            body['type'] = compat.convert_to_string(listener_type)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    """
+        ServerGroup API
+    """
+
+    @required(blb_id=(bytes, str))
+    def create_app_server_group(self, blb_id,
+                                name=None,
+                                desc=None,
+                                backend_server_list=None,
+                                client_token=None,
+                                config=None):
+        """
+        create server group for the specified LoadBalancer,
+        support batch add
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param name:
+            name of server group
+        :type name:string
+
+        :param desc:
+            description of server group
+        :type desc:string
+
+        :param backend_server_list
+            List of backend servers to be added
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type backend_server_list:List<AppBackendServer>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroup')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+        if backend_server_list is not None:
+            body['backendServerList'] = backend_server_list
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str))
+    def update_app_server_group(self, blb_id, sg_id,
+                                name=None,
+                                desc=None,
+                                client_token=None,
+                                config=None):
+        """
+        update the information of the app server group
+        of the specified LoadBalancer
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group to be updated
+        :type sg_id:string
+
+        :param name:
+            name of server group
+        :type name:string
+
+        :param desc:
+            description of server group
+        :type desc:string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroup')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['sgId'] = compat.convert_to_string(sg_id)
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_server_group(self, blb_id,
+                                  name=None,
+                                  exactly_match=None,
+                                  marker=None,
+                                  max_keys=None, config=None):
+        """
+        Query the imformation of app server group
+        of the specified LoadBalancer
+
+        :param blb_id:
+            Id of LoadBalancer
+        :type blb_id:string
+
+        :param name:
+            name of server group
+        :type name:string
+
+        :param exactly_match:
+            Set whether the name matches globally
+        :type exactly_match:boolean
+
+        :param marker:
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin. If the marker is not specified,
+            the list result will listing from the first one.
+        :type marker: string
+
+        :param max_keys:
+            The optional parameter to specifies the max number of
+            list result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroup')
+        params = {}
+
+        if name is not None:
+            params[b'name'] = name
+        if exactly_match is not None:
+            params[b'exactlyMatch'] = exactly_match
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str))
+    def delete_app_server_group(self, blb_id, sg_id,
+                                client_token=None,
+                                config=None):
+        """
+        delete the app server group of the specified LoadBalancer,
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group to be updated
+        :type sg_id:string
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroup')
+        params = {}
+
+        params[b'delete'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['sgId'] = compat.convert_to_string(sg_id)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str), port=int,
+              protocol_type=(bytes, str))
+    def create_app_server_group_port(self, blb_id, sg_id,
+                                     port, protocol_type,
+                                     enable_health_check=None,
+                                     health_check=None,
+                                     health_check_port=None,
+                                     health_check_urlpath=None,
+                                     health_check_timeout_insecond=None,
+                                     health_check_interval_insecond=None,
+                                     health_check_down_retry=None,
+                                     health_check_up_retry=None,
+                                     health_check_normal_status=None,
+                                     health_check_host=None,
+                                     udp_health_check_string=None,
+                                     client_token=None,
+                                     config=None):
+        """
+        create server group for the specified LoadBalancer,
+        support batch add
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+        :param port:
+            Port number, integer between 1 and 65535
+        :type port:string
+        :param protocol_type:
+            Protocol type of listening port, "TCP"/"UDP"/"HTTP"
+        :type protocol_type:string
+        :param enable_health_check:
+            Whether to enable health check, default is true
+        :type enable_health_check: bool
+
+        :param health_check:
+            Health check protocol
+        :value 'HTTP' or 'TCP',default:'HTTP'
+        :type health_check: string
+        :param health_check_port:
+            Health check port, the default is the same as port
+        :type health_check_port: int
+        :param health_check_urlpath:
+            Health check URI, default '/'.
+            Effective when the health check protocol is "HTTP"
+        :type health_check_urlpath: string
+         :param health_check_timeout_insecond:
+            Health check timeout (unit: second)
+        :value 1-60, default: 3
+        :type health_check_timeout_insecond: int
+        :param health_check_interval_insecond:
+            Health check interval (unit: second)
+        :value 1-10, default: 3
+        :type health_check_interval_insecond: int
+        :param health_check_down_retry:
+            The unhealthy down retry, that is, how many consecutive health
+            check failures, shields the backend server.
+        :value 2-5, default: 3
+        :type health_check_down_retry: int
+        :param health_check_up_retry:
+            Health up retry, that is, how many consecutive health checks
+            are successful, then re-use the back-end server
+        :value:2-5, default: 3
+        :type health_check_up_retry: int
+        :param health_check_normal_status:
+            The HTTP status code when the health check is normal supports
+            a combination of five types of status codes,
+            such as "http_1xx|http_2xx", Effective when the health check
+            protocol is "HTTP"
+        :value default: http_2xx|http_3xx
+        :type health_check_normal_status: string
+        :param health_check_host:
+            The host field in the header of the 7-layer health check request,
+            for example "localhost", effective when the health check protocol is "HTTP"
+        :type health_check_host: string
+        :param udp_health_check_string:
+            The health check string for the udp listener,
+            it must be passed when the health check type is "UDP"
+        :type udp_health_check_string: string
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+          :param config:
+        :type config: baidubce.BceClientConfiguration
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroupport')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'sgId': compat.convert_to_string(sg_id),
+            'port': port,
+            'type': compat.convert_to_string(protocol_type)
+        }
+        if enable_health_check is not None:
+            body['enableHealthCheck'] = enable_health_check
+        if health_check is not None:
+            body['healthCheck'] = compat.convert_to_string(health_check)
+        if health_check_port is not None:
+            body['healthCheckPort'] = health_check_port
+        if health_check_urlpath is not None:
+            body['healthCheckUrlPath'] = \
+                compat.convert_to_string(health_check_urlpath)
+        if health_check_timeout_insecond is not None:
+            body['healthCheckTimeoutInSecond'] = health_check_timeout_insecond
+        if health_check_interval_insecond is not None:
+            body['healthCheckIntervalInSecond'] = health_check_interval_insecond
+        if health_check_down_retry is not None:
+            body['healthCheckDownRetry'] = health_check_down_retry
+        if health_check_up_retry is not None:
+            body['healthCheckUpRetry'] = health_check_up_retry
+        if health_check_normal_status is not None:
+            body['healthCheckNormalStatus'] = \
+                compat.convert_to_string(health_check_normal_status)
+        if health_check_host is not None:
+            body['healthCheckHost'] = \
+                compat.convert_to_string(health_check_host)
+        if udp_health_check_string is not None:
+            body['udpHealthCheckString'] = \
+                compat.convert_to_string(udp_health_check_string)
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str),
+              port_id=(bytes, str))
+    def update_app_server_group_port(self, blb_id, sg_id, port_id,
+                                     enable_health_check=None,
+                                     health_check=None,
+                                     health_check_port=None,
+                                     health_check_urlpath=None,
+                                     health_check_timeout_insecond=None,
+                                     health_check_interval_insecond=None,
+                                     health_check_down_retry=None,
+                                     health_check_up_retry=None,
+                                     health_check_normal_status=None,
+                                     health_check_host=None,
+                                     udp_health_check_string=None,
+                                     client_token=None,
+                                     config=None):
+        """
+        update server group for the specified LoadBalancer,
+        support batch add
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param port_id:
+            The id of the server group port to be updated
+        :type port_id:string
+
+        :param enable_health_check:
+            Whether to enable health check, default is true
+        :type enable_health_check: bool
+
+        :param health_check:
+            Health check protocol
+        :value 'HTTP' or 'TCP',default:'HTTP'
+        :type health_check: string
+
+        :param health_check_port:
+            Health check port, the default is the same as port
+        :type health_check_port: int
+
+        :param health_check_urlpath:
+            Health check URI, default '/'.
+            Effective when the health check protocol is "HTTP"
+        :type health_check_urlpath: string
+
+         :param health_check_timeout_insecond:
+            Health check timeout (unit: second)
+        :value 1-60, default: 3
+        :type health_check_timeout_insecond: int
+
+        :param health_check_interval_insecond:
+            Health check interval (unit: second)
+        :value 1-10, default: 3
+        :type health_check_interval_insecond: int
+
+        :param health_check_down_retry:
+            The unhealthy down retry, that is, how many consecutive health
+            check failures, shields the backend server.
+        :value 2-5, default: 3
+        :type health_check_down_retry: int
+
+        :param health_check_up_retry:
+            Health up retry, that is, how many consecutive health checks
+            are successful, then re-use the back-end server
+        :value:2-5, default: 3
+        :type health_check_up_retry: int
+
+        :param health_check_normal_status:
+            The HTTP status code when the health check is normal supports
+            a combination of five types of status codes,
+            such as "http_1xx|http_2xx", Effective when the health check
+            protocol is "HTTP"
+        :value default: http_2xx|http_3xx
+        :type health_check_normal_status: string
+
+        :param health_check_host:
+            The host field in the header of the 7-layer health check request,
+            for example "localhost", effective when the health check protocol is "HTTP"
+        :type health_check_host: string
+
+        :param udp_health_check_string:
+            The health check string for the udp listener
+        :type udp_health_check_string: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroupport')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'sgId': compat.convert_to_string(sg_id),
+            'portId': compat.convert_to_string(port_id)
+        }
+        if enable_health_check is not None:
+            body['enableHealthCheck'] = enable_health_check
+        if health_check is not None:
+            body['healthCheck'] = compat.convert_to_string(health_check)
+        if health_check_port is not None:
+            body['healthCheckPort'] = health_check_port
+        if health_check_urlpath is not None:
+            body['healthCheckUrlPath'] = \
+                compat.convert_to_string(health_check_urlpath)
+        if health_check_timeout_insecond is not None:
+            body['healthCheckTimeoutInSecond'] = health_check_timeout_insecond
+        if health_check_interval_insecond is not None:
+            body['healthCheckIntervalInSecond'] = health_check_interval_insecond
+        if health_check_down_retry is not None:
+            body['healthCheckDownRetry'] = health_check_down_retry
+        if health_check_up_retry is not None:
+            body['healthCheckUpRetry'] = health_check_up_retry
+        if health_check_normal_status is not None:
+            body['healthCheckNormalStatus'] = \
+                compat.convert_to_string(health_check_normal_status)
+        if health_check_host is not None:
+            body['healthCheckHost'] = \
+                compat.convert_to_string(health_check_host)
+        if udp_health_check_string is not None:
+            body['udpHealthCheckString'] = \
+                compat.convert_to_string(udp_health_check_string)
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str),
+              port_list=list)
+    def delete_app_server_group_port(self, blb_id, sg_id,
+                                     port_list,
+                                     client_token=None, config=None):
+        """
+        delete server group of the specified LoadBalancer,
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param port_list:
+            The ports of listeners to be released
+        :type port_list:list<string>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'appservergroupport')
+        params = {}
+
+        params[b'batchdelete'] = None
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'sgId': compat.convert_to_string(sg_id),
+            'portIdList': port_list
+        }
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str),
+              backend_server_list=list)
+    def create_app_blb_rs(self, blb_id, sg_id,
+                          backend_server_list,
+                          client_token=None,
+                          config=None):
+        """
+        Add backend server for the specified LoadBalancer and server group,
+        support batch add
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param backend_server_list
+                List of backend servers to be added
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type backend_server_list:List<AppBackendServer>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'blbrs')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'sgId': compat.convert_to_string(sg_id),
+            'backendServerList': backend_server_list
+        }
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str),
+              backend_server_list=list)
+    def update_app_blb_rs(self, blb_id, sg_id,
+                          backend_server_list,
+                          client_token=None,
+                          config=None):
+        """
+        update backend server for the specified LoadBalancer and server group,
+        support batch update
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param backend_server_list
+                List of backend servers to be added
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type backend_server_list:List<AppBackendServer>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'blbrs')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'sgId': compat.convert_to_string(sg_id),
+            'backendServerList': backend_server_list
+        }
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str))
+    def describe_app_blb_rs(self, blb_id, sg_id,
+                            marker=None, max_keys=None,
+                            config=None):
+        """
+        Query the list of backend servers under the specified LoadBalancer
+        and server group
+
+        :param blb_id:
+            Id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param marker:
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin. If the marker is not specified,
+            the list result will listing from the first one.
+        :type marker: string
+
+        :param max_keys:
+            The optional parameter to specifies the max number of
+            list result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'blbrs')
+        params = {}
+        params[b'sgId'] = compat.convert_to_string(sg_id)
+
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str),
+              backend_server_list=list)
+    def delete_app_blb_rs(self, blb_id, sg_id,
+                          backend_server_list,
+                          client_token=None,
+                          config=None):
+        """
+        delete backend server for the specified LoadBalancer and server group,
+        support batch delete
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param backend_server_list
+                List of backend servers to be deleted
+        :type backend_server_list:List<string>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'blbrs')
+        params = {}
+
+        params[b'batchdelete'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'sgId': compat.convert_to_string(sg_id),
+            'backendServerIdList': backend_server_list
+        }
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str))
+    def describe_rs_mount(self, blb_id, sg_id, config=None):
+        """
+        describe servers of specific server group
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'blbrsmount')
+
+        params = {
+            'sgId': compat.convert_to_string(sg_id)
+        }
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              sg_id=(bytes, str))
+    def describe_rs_unmount(self, blb_id, sg_id, config=None):
+        """
+        describe servers of specific server group
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param sg_id:
+            id of the server group
+        :type sg_id:string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'blbrsunmount')
+
+        params = {
+            'sgId': compat.convert_to_string(sg_id)
+        }
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def create_app_ip_group(self, blb_id,
+                            name=None,
+                            desc=None,
+                            member_list=None,
+                            client_token=None,
+                            config=None):
+        """
+        create ip group for the specified LoadBalancer,
+        support batch add
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param name:
+            name of ip group
+        :type name:string
+
+        :param desc:
+            description of ip group
+        :type desc:string
+
+        :param member_list
+            List of backend servers to be added
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type member_list:List<AppIpGroupMemberVO>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+        if member_list is not None:
+            body['memberList'] = member_list
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str))
+    def update_app_ip_group(self, blb_id, ip_group_id,
+                            name=None,
+                            desc=None,
+                            client_token=None,
+                            config=None):
+        """
+        update the information of the app ip group
+        of the specified LoadBalancer
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group to be updated
+        :type ip_group_id:string
+
+        :param name:
+            name of server group
+        :type name:string
+
+        :param desc:
+            description of server group
+        :type desc:string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['ipGroupId'] = compat.convert_to_string(ip_group_id)
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_ip_group(self, blb_id,
+                              name=None,
+                              exactly_match=None,
+                              marker=None,
+                              max_keys=None, config=None):
+        """
+        Query the imformation of app ip group
+        of the specified LoadBalancer
+
+        :param blb_id:
+            Id of LoadBalancer
+        :type blb_id:string
+
+        :param name:
+            name of ip group
+        :type name:string
+
+        :param exactly_match:
+            Set whether the name matches globally
+        :type exactly_match:boolean
+
+        :param marker:
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin. If the marker is not specified,
+            the list result will listing from the first one.
+        :type marker: string
+
+        :param max_keys:
+            The optional parameter to specifies the max number of
+            list result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup')
+        params = {}
+
+        if name is not None:
+            params[b'name'] = name
+        if exactly_match is not None:
+            params[b'exactlyMatch'] = exactly_match
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str))
+    def delete_app_ip_group(self, blb_id, ip_group_id,
+                            client_token=None,
+                            config=None):
+        """
+        delete the app ip group of the specified LoadBalancer,
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group to be updated
+        :type ip_group_id:string
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup')
+        params = {}
+
+        params[b'delete'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['ipGroupId'] = compat.convert_to_string(ip_group_id)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str),
+              protocol_type=(bytes, str))
+    def create_app_ip_group_port(self, blb_id, ip_group_id,
+                                 protocol_type,
+                                 health_check=None,
+                                 health_check_port=None,
+                                 health_check_urlpath=None,
+                                 health_check_timeout_insecond=None,
+                                 health_check_interval_insecond=None,
+                                 health_check_down_retry=None,
+                                 health_check_up_retry=None,
+                                 health_check_normal_status=None,
+                                 udp_health_check_string=None,
+                                 client_token=None,
+                                 config=None):
+        """
+        create server group for the specified LoadBalancer,
+        support batch add
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+        :param ip_group_id:
+            id of the ip group
+        :type ip_group_id:string
+        :param protocol_type:
+            Protocol type of listening port, "TCP"/"UDP"/"HTTP"
+        :type protocol_type:string
+        :param health_check:
+            Health check protocol
+        :value 'HTTP' or 'TCP',default:'HTTP'
+        :type health_check: string
+        :param health_check_port:
+            Health check port, the default is the same as port
+        :type health_check_port: int
+        :param health_check_urlpath:
+            Health check URI, default '/'.
+            Effective when the health check protocol is "HTTP"
+        :type health_check_urlpath: string
+         :param health_check_timeout_insecond:
+            Health check timeout (unit: second)
+        :value 1-60, default: 3
+        :type health_check_timeout_insecond: int
+        :param health_check_interval_insecond:
+            Health check interval (unit: second)
+        :value 1-10, default: 3
+        :type health_check_interval_insecond: int
+        :param health_check_down_retry:
+            The unhealthy down retry, that is, how many consecutive health
+            check failures, shields the backend server.
+        :value 2-5, default: 3
+        :type health_check_down_retry: int
+        :param health_check_up_retry:
+            Health up retry, that is, how many consecutive health checks
+            are successful, then re-use the back-end server
+        :value:2-5, default: 3
+        :type health_check_up_retry: int
+        :param health_check_normal_status:
+            The HTTP status code when the health check is normal supports
+            a combination of five types of status codes,
+            such as "http_1xx|http_2xx", Effective when the health check
+            protocol is "HTTP"
+        :value default: http_2xx|http_3xx
+        :type health_check_normal_status: string
+        :param udp_health_check_string:
+            The health check string for the udp listener,
+            it must be passed when the health check type is "UDP"
+        :type udp_health_check_string: string
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'backendpolicy')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'ipGroupId': compat.convert_to_string(ip_group_id),
+            'type': compat.convert_to_string(protocol_type)
+        }
+        if health_check is not None:
+            body['healthCheck'] = compat.convert_to_string(health_check)
+        if health_check_port is not None:
+            body['healthCheckPort'] = health_check_port
+        if health_check_urlpath is not None:
+            body['healthCheckUrlPath'] = \
+                compat.convert_to_string(health_check_urlpath)
+        if health_check_timeout_insecond is not None:
+            body['healthCheckTimeoutInSecond'] = health_check_timeout_insecond
+        if health_check_interval_insecond is not None:
+            body['healthCheckIntervalInSecond'] = health_check_interval_insecond
+        if health_check_down_retry is not None:
+            body['healthCheckDownRetry'] = health_check_down_retry
+        if health_check_up_retry is not None:
+            body['healthCheckUpRetry'] = health_check_up_retry
+        if health_check_normal_status is not None:
+            body['healthCheckNormalStatus'] = \
+                compat.convert_to_string(health_check_normal_status)
+        if udp_health_check_string is not None:
+            body['udpHealthCheckString'] = \
+                compat.convert_to_string(udp_health_check_string)
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str),
+              port_id=(bytes, str))
+    def update_app_ip_group_port(self, blb_id, ip_group_id, port_id,
+                                 health_check=None,
+                                 health_check_port=None,
+                                 health_check_urlpath=None,
+                                 health_check_timeout_insecond=None,
+                                 health_check_interval_insecond=None,
+                                 health_check_down_retry=None,
+                                 health_check_up_retry=None,
+                                 health_check_normal_status=None,
+                                 udp_health_check_string=None,
+                                 client_token=None,
+                                 config=None):
+        """
+        update server group for the specified LoadBalancer,
+        support batch add
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group
+        :type ip_group_id:string
+
+        :param port_id:
+            The id of the server group port to be updated
+        :type port_id:string
+
+        :param health_check:
+            Health check protocol
+        :value 'HTTP' or 'TCP',default:'HTTP'
+        :type health_check: string
+
+        :param health_check_port:
+            Health check port, the default is the same as port
+        :type health_check_port: int
+
+        :param health_check_urlpath:
+            Health check URI, default '/'.
+            Effective when the health check protocol is "HTTP"
+        :type health_check_urlpath: string
+
+         :param health_check_timeout_insecond:
+            Health check timeout (unit: second)
+        :value 1-60, default: 3
+        :type health_check_timeout_insecond: int
+
+        :param health_check_interval_insecond:
+            Health check interval (unit: second)
+        :value 1-10, default: 3
+        :type health_check_interval_insecond: int
+
+        :param health_check_down_retry:
+            The unhealthy down retry, that is, how many consecutive health
+            check failures, shields the backend server.
+        :value 2-5, default: 3
+        :type health_check_down_retry: int
+
+        :param health_check_up_retry:
+            Health up retry, that is, how many consecutive health checks
+            are successful, then re-use the back-end server
+        :value:2-5, default: 3
+        :type health_check_up_retry: int
+
+        :param health_check_normal_status:
+            The HTTP status code when the health check is normal supports
+            a combination of five types of status codes,
+            such as "http_1xx|http_2xx", Effective when the health check
+            protocol is "HTTP"
+        :value default: http_2xx|http_3xx
+        :type health_check_normal_status: string
+
+        :param udp_health_check_string:
+            The health check string for the udp listener
+        :type udp_health_check_string: string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'backendpolicy')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'ipGroupId': compat.convert_to_string(ip_group_id),
+            'id': compat.convert_to_string(port_id)
+        }
+        if health_check is not None:
+            body['healthCheck'] = compat.convert_to_string(health_check)
+        if health_check_port is not None:
+            body['healthCheckPort'] = health_check_port
+        if health_check_urlpath is not None:
+            body['healthCheckUrlPath'] = \
+                compat.convert_to_string(health_check_urlpath)
+        if health_check_timeout_insecond is not None:
+            body['healthCheckTimeoutInSecond'] = health_check_timeout_insecond
+        if health_check_interval_insecond is not None:
+            body['healthCheckIntervalInSecond'] = health_check_interval_insecond
+        if health_check_down_retry is not None:
+            body['healthCheckDownRetry'] = health_check_down_retry
+        if health_check_up_retry is not None:
+            body['healthCheckUpRetry'] = health_check_up_retry
+        if health_check_normal_status is not None:
+            body['healthCheckNormalStatus'] = \
+                compat.convert_to_string(health_check_normal_status)
+        if udp_health_check_string is not None:
+            body['udpHealthCheckString'] = \
+                compat.convert_to_string(udp_health_check_string)
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str),
+              port_list=list)
+    def delete_app_ip_group_port(self, blb_id, ip_group_id,
+                                 port_list,
+                                 client_token=None, config=None):
+        """
+        delete server group of the specified LoadBalancer,
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group
+        :type ip_group_id:string
+
+        :param port_list:
+            The ports of listeners to be released
+        :type port_list:list<string>
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'backendpolicy')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {
+            'ipGroupId': compat.convert_to_string(ip_group_id),
+            'backendPolicyIdList': port_list
+        }
+
+        return self._send_request(http_methods.DELETE, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str))
+    def create_app_ip_group_member(self, blb_id, ip_group_id, member_list,
+                                   name=None,
+                                   desc=None,
+                                   client_token=None,
+                                   config=None):
+        """
+        create ip group for the specified LoadBalancer,
+        support batch add
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group to be updated
+        :type ip_group_id:string
+
+        :param member_list
+            List of member to be added
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type member_list:List<AppIpGroupMemberVO>
+
+        :param name:
+            name of ip group
+        :type name:string
+
+        :param desc:
+            description of ip group
+        :type desc:string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'member')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['ipGroupId'] = compat.convert_to_string(ip_group_id)
+        body['memberList'] = member_list
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str))
+    def update_app_ip_group_member(self, blb_id, ip_group_id, member_list,
+                                   name=None,
+                                   desc=None,
+                                   client_token=None,
+                                   config=None):
+        """
+        update the information of the app ip group
+        of the specified LoadBalancer
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group to be updated
+        :type ip_group_id:string
+
+        :param member_list
+            List of member to be updated
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type member_list:List<AppIpGroupMemberVO>
+
+        :param name:
+            name of server group
+        :type name:string
+
+        :param desc:
+            description of server group
+        :type desc:string
+
+        :param client_token:
+            If the clientToken is not specified by the user, a random String
+            generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'member')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['ipGroupId'] = compat.convert_to_string(ip_group_id)
+        body['memberList'] = member_list
+        if name is not None:
+            body['name'] = compat.convert_to_string(name)
+        if desc is not None:
+            body['desc'] = compat.convert_to_string(desc)
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str))
+    def delete_app_ip_group_member(self, blb_id, ip_group_id, memberid_list,
+                                   client_token=None,
+                                   config=None):
+        """
+        delete the app ip group of the specified LoadBalancer,
+
+        :param blb_id:
+            id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group to be updated
+        :type ip_group_id:string
+
+        :param memberid_list
+            List of memberid to be deleted
+        https://cloud.baidu.com/doc/BLB/API.html#AppBackendServer
+        :type memberid_list:List<string>
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'member')
+        params = {}
+
+        params[b'delete'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['ipGroupId'] = compat.convert_to_string(ip_group_id)
+        body['memberIdList'] = memberid_list
+
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              ip_group_id=(bytes, str))
+    def describe_app_ip_group_member(self, blb_id, ip_group_id,
+                                     name=None,
+                                     exactly_match=None,
+                                     marker=None,
+                                     max_keys=None, config=None):
+        """
+        Query the imformation of app ip group
+        of the specified LoadBalancer
+
+        :param blb_id:
+            Id of LoadBalancer
+        :type blb_id:string
+
+        :param ip_group_id:
+            id of the ip group to be updated
+        :type ip_group_id:string
+
+        :param marker:
+            The optional parameter marker specified in the original
+            request to specify where in the results to begin listing.
+            Together with the marker, specifies the list result which
+            listing should begin. If the marker is not specified,
+            the list result will listing from the first one.
+        :type marker: string
+
+        :param max_keys:
+            The optional parameter to specifies the max number of
+            list result to return.
+            The default value is 1000.
+        :type max_keys: int
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'ipgroup', 'member')
+        params = {}
+
+        params[b'ipGroupId'] = ip_group_id
+        if marker is not None:
+            params[b'marker'] = marker
+        if max_keys is not None:
+            params[b'maxKeys'] = max_keys
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              securitygroupids=list)
+    def bind_app_security_groups(self, blb_id, securitygroupids,
+                                 client_token=None, config=None):
+        """
+        bind the blb security groups (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param securitygroupids:
+                List of security group ids to be unbind
+        :type securitygroupids:List<string>
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'blb', blb_id, 'securitygroup')
+        params = {}
+
+        params[b'bind'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['securityGroupIds'] = securitygroupids
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              securitygroupids=list)
+    def unbind_app_security_groups(self, blb_id, securitygroupids,
+                                   client_token=None, config=None):
+        """
+        unbind the blb security groups (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param securitygroupids:
+                List of security group ids to be bind
+        :type securitygroupids:List<string>
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'blb', blb_id, 'securitygroup')
+        params = {}
+
+        params[b'unbind'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['securityGroupIds'] = securitygroupids
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_security_groups(self, blb_id, config=None):
+        """
+        describe the blb security groups (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'blb', blb_id, 'securitygroup')
+        params = {}
+
+        return self._send_request(http_methods.GET, path, config=config)
+
+    @required(blb_id=(bytes, str),
+              enterprisesecuritygroupids=list)
+    def bind_app_enterprise_security_groups(self, blb_id, enterprisesecuritygroupids,
+                                            client_token=None, config=None):
+        """
+        bind the blb enterprise security groups (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param enterprisesecuritygroupids:
+                List of enterprise security group ids to be bind
+        :type enterprisesecuritygroupids:List<string>
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'blb', blb_id, 'enterprise', 'securitygroup')
+        params = {}
+
+        params[b'bind'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['enterpriseSecurityGroupIds'] = enterprisesecuritygroupids
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str),
+              enterprisesecuritygroupids=list)
+    def unbind_app_enterprise_security_groups(self, blb_id, enterprisesecuritygroupids,
+                                              client_token=None, config=None):
+        """
+        unbind the blb enterprise security groups (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param enterprisesecuritygroupids:
+                List of enterprise security group ids to be unbind
+        :type enterprisesecuritygroupids:List<string>
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'blb', blb_id, 'enterprise', 'securitygroup')
+        params = {}
+
+        params[b'unbind'] = None
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['enterpriseSecurityGroupIds'] = enterprisesecuritygroupids
+        return self._send_request(http_methods.PUT, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str))
+    def describe_app_enterprise_security_groups(self, blb_id, config=None):
+        """
+        describe the blb enterprise security groups (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'blb', blb_id, 'enterprise', 'securitygroup')
+        params = {}
+
+        return self._send_request(http_methods.GET, path, config=config)
+
+    @required(blb_id=(bytes, str), listener_port=int, apppolicyvos=list)
+    def create_app_ipgroup_policys(self, blb_id, listener_port, apppolicyvos, type=None,
+                                   client_token=None, config=None):
+        """
+        create app blb ipgroup policys (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param listener_port:
+                port of listener
+        :type blb_id:int
+
+        :param apppolicyvos:
+                binding policy list of listener
+        :type apppolicyvos:list
+
+        :param type:
+                protocol of listener
+        :type type:string
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'policys')
+        params = {}
+
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        body = {}
+        body['listenerPort'] = listener_port
+        if type is not None:
+            body['type'] = type
+        body['appPolicyVos'] = apppolicyvos
+
+        return self._send_request(http_methods.POST, path,
+                                  body=json.dumps(body), params=params,
+                                  config=config)
+
+    @required(blb_id=(bytes, str), port=int)
+    def describe_app_ipgroup_policys(self, blb_id, port, type=None, marker=None,
+                                     maxkeys=None, client_token=None, config=None):
+        """
+        describe app blb ipgroup policys (application/ipv6 LoadBalancer)
+
+        :param blb_id:
+                id of LoadBalancer
+        :type blb_id:string
+
+        :param port:
+                the listener port used by listener
+        :type port:int
+
+        :param type:
+                protocol of listener
+        :type type:string
+
+        :param marker:
+                The optional parameter marker specified in the original
+                request to specify where in the results to begin listing.
+                Together with the marker, specifies the list result which
+                listing should begin.
+                If the marker is not specified, the list result will listing
+                from the first one.
+        :type marker:string
+
+        :param maxkeys:
+                The optional parameter to specifies the max number of
+                list result to return.
+                The default value is 1000.
+        :type maxkeys:int
+
+        :param client_token:
+                If the clientToken is not specified by the user,
+                a random String generated by default algorithm will be used.
+        :type client_token: string
+
+        :param config:
+        :type config: baidubce.BceClientConfiguration
+
+        :return:
+        :rtype baidubce.bce_response.BceResponse
+        """
+        path = utils.append_uri(self.version, 'appblb', blb_id, 'policys')
+        params = {}
+
+        params[b'port'] = port
+
+        if type is not None:
+            params[b'type'] = type
+        if marker is not None:
+            params[b'marker'] = marker
+        if maxkeys is not None:
+            params[b'maxKeys'] = maxkeys
+        if client_token is None:
+            params[b'clientToken'] = generate_client_token()
+        else:
+            params[b'clientToken'] = client_token
+
+        return self._send_request(http_methods.GET, path, params=params,
+                                  config=config)
+
+
+def generate_client_token_by_uuid():
+    """
+    The default method to generate the random string for client_token
+    if the optional parameter client_token is not specified by the user.
+
+    :return:
+    :rtype string
+    """
+    return str(uuid.uuid4())
+
+
+generate_client_token = generate_client_token_by_uuid

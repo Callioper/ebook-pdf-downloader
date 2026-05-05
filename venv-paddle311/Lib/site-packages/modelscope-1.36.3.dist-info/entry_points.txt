@@ -1,0 +1,3 @@
+[console_scripts]
+modelscope = modelscope.cli.cli:run_cmd
+ms = modelscope.cli.cli:run_cmd

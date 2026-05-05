@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: 2022 James R. Barlow
+# SPDX-License-Identifier: MPL-2.0
+"""For extracting information about PDFs prior to OCR."""
+
+from __future__ import annotations
+
+from ocrmypdf.pdfinfo._types import Colorspace, Encoding, FloatRect
+from ocrmypdf.pdfinfo.info import PageInfo, PdfInfo
+
+__all__ = ["Colorspace", "Encoding", "FloatRect", "PageInfo", "PdfInfo"]

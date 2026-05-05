@@ -1,0 +1,59 @@
+Metadata-Version: 2.1
+Name: aistudio-sdk
+Version: 0.3.8
+Summary: Python client library for the AIStudio API
+Home-page: UNKNOWN
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python
+Description-Content-Type: text/markdown
+Requires-Dist: psutil
+Requires-Dist: requests
+Requires-Dist: tqdm
+Requires-Dist: bce-python-sdk
+Requires-Dist: prettytable
+Requires-Dist: click
+
+Python Sdk
+===
+实现封装一言API的PythonSDK，支持AIStudio开发者进行基于一言的项目/应用/插件开发需求
+实现封装AIStudio模型库API的PythonSDK，支持AIStudio开发者进行模型库的操作开发需求
+
+快速开始
+---
+如何构建、安装、运行
+
+```bash
+pip install aistudio-sdk --upgrade
+```
+
+测试
+---
+如何执行自动化测试
+
+如何贡献
+---
+贡献patch流程及质量要求
+
+版本信息
+---
+本项目的各版本信息和变更历史可以在[这里][changelog]查看。
+
+维护者
+---
+### owners
+* xiangyiqing(xiangyiqing@baidu.com)
+
+### committers
+* xiangyiqing(xiangyiqing@baidu.com)
+* linyichong(linyichong@baidu.com)
+* suoyi(suoyi@baidu.com)
+
+讨论
+---
+
+
+
+[changelog]: http://
+
+
