@@ -166,11 +166,12 @@ def _build_subtree(items: List[Dict], start: int, parent_level: int):
     return children, i
 
 
-async def apply_bookmark_to_pdf(pdf_path: str, bookmark: str) -> bool:
-    """将解析后的书签注入 PDF 文件"""
+async def apply_bookmark_to_pdf(pdf_path: str, bookmark: str, python_cmd: str = "") -> bool:
+    """将解析后的书签注入 PDF 文件，支持 exe 环境下通过系统 Python 兜底"""
     if not os.path.exists(pdf_path):
         return False
 
+    # First try: direct import (works in dev/venv)
     try:
         import fitz
 
@@ -185,10 +186,38 @@ async def apply_bookmark_to_pdf(pdf_path: str, bookmark: str) -> bool:
         doc.close()
         return True
     except ImportError:
-        pass
+        pass  # fitz not available, try subprocess fallback
     except Exception as e:
         logger.warning(f"apply_bookmark_to_pdf error: {e}")
+        return False
 
+    # Fallback: use system Python subprocess (works in frozen exe)
+    if not python_cmd:
+        return False
+    try:
+        toc = await parse_bookmark_hierarchy(bookmark)
+        if not toc:
+            return False
+        pdf_toc = _convert_to_pdf_toc(toc)
+        import json, subprocess as _sp
+        script = (
+            "import json,sys;"
+            "data=json.loads(sys.stdin.read());"
+            "import fitz;"
+            "doc=fitz.open(data['p']);"
+            "doc.set_toc(data['t']);"
+            "doc.save(data['p'], incremental=True);"
+            "doc.close();"
+            "print('OK')"
+        )
+        r = _sp.run([python_cmd, "-c", script],
+                    input=json.dumps({"p": pdf_path, "t": pdf_toc}),
+                    capture_output=True, text=True, timeout=30)
+        if r.returncode == 0 and r.stdout.strip() == "OK":
+            return True
+        logger.warning(f"apply_bookmark_to_pdf subprocess failed: {r.stderr[:200]}")
+    except Exception as e:
+        logger.warning(f"apply_bookmark_to_pdf subprocess error: {e}")
     return False
 
 
