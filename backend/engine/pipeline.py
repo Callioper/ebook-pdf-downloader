@@ -553,11 +553,14 @@ async def _download_via_aa_and_stacks(
                         return None
 
                     # ── 核心：同步下载 + 心跳检测 ──
-                    def _stacks_sync_download(md5: str, dl_dir: str, ss_code: str = "") -> Optional[str]:
+                    def _stacks_sync_download(md5: str, dl_dir: str, ss_code: str = "",
+                                               progress_data: Optional[Dict[str, Any]] = None) -> Optional[str]:
                         url = stacks_url.rstrip("/")
                         key = str(stacks_api_key or "")
                         seen_fps = set()
                         extra_search_paths: List[str] = []
+                        if progress_data is None:
+                            progress_data = {}
 
                         # Step 0: 从 stacks API 获取实际下载路径
                         try:
@@ -742,6 +745,17 @@ async def _download_via_aa_and_stacks(
                             except Exception as e:
                                 task_store.add_log(task_id, f"AA: heartbeat error: {str(e)[:100]}")
 
+                            # Emit progress via shared mutable dict
+                            if progress_data is not None:
+                                elapsed = deadline - stacks_timeout
+                                elapsed = max(time.time() - elapsed, 1)
+                                pct = min(int(elapsed / stacks_timeout * 100), 99)
+                                remaining = int(deadline - time.time())
+                                eta_str = _format_eta(max(remaining, 0))
+                                progress_data["progress"] = pct
+                                progress_data["detail"] = f"AA stacks 下载中... ({remaining}s 剩余)"
+                                progress_data["eta"] = eta_str
+
                             time.sleep(3)  # 心跳间隔
 
                         task_store.add_log(task_id, f"AA: stacks heartbeat polling timed out after {stacks_timeout}s")
@@ -749,8 +763,25 @@ async def _download_via_aa_and_stacks(
 
                     download_dir = config.get("download_dir", "")
                     ss_code_local = report.get("ss_code", "")
-                    stack_result = await asyncio.get_event_loop().run_in_executor(
-                        None, _stacks_sync_download, md5, download_dir, ss_code_local)
+                    # Set up shared progress tracking
+                    _progress: Dict[str, Any] = {}
+
+                    # Start stacks download in executor
+                    _future = asyncio.get_event_loop().run_in_executor(
+                        None, _stacks_sync_download, md5, download_dir, ss_code_local, _progress)
+
+                    # Poll progress every 3 seconds while waiting
+                    while not _future.done():
+                        await asyncio.sleep(3)
+                        if _progress:
+                            await _emit_progress(
+                                task_id, "download_pages",
+                                _progress.get("progress", 50),
+                                _progress.get("detail", ""),
+                                _progress.get("eta", ""),
+                            )
+
+                    stack_result = await _future
                     if stack_result:
                         ss_code = report.get("ss_code", "")
                         safe_title = re.sub(r'[<>:"/\\|?*]', '_', report.get("title", "book")).strip()[:80]
