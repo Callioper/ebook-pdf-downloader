@@ -1534,8 +1534,11 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                             _eta_str = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
                         if _pct != _last_emit or _now - _ocr_start - _last_emit > 10:
                             _last_emit = _pct if _pct > 0 else _now
-                            await _emit(task_id, "step_progress", {"step": "ocr", "progress": _pct, "detail": f"{_page_cur}/{_page_tot} 页", "eta": _eta_str})
-                            task_store.update(task_id, {"ocr_progress": _pct, "ocr_detail": f"{_page_cur}/{_page_tot} 页"})
+                            await _emit_progress(
+                                task_id, "ocr", _pct,
+                                f"{_page_cur}/{_page_tot} 页",
+                                _eta_str,
+                            )
                 return await proc.wait()
 
             try:
