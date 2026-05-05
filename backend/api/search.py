@@ -668,7 +668,25 @@ async def check_ocr(engine: str = Query(default="")):
             if result.returncode == 0:
                 return {"ok": True, "engine": "ocrmypdf", "version": result.stdout.strip().split("\n")[0]}
         elif engine == "tesseract":
-            result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=5)
+            # Check common install paths first (frozen exe may not have user PATH)
+            found_path = None
+            for tess_path in [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+            ]:
+                if os.path.exists(tess_path):
+                    found_path = tess_path
+                    break
+            if not found_path:
+                try:
+                    import shutil as _sh
+                    found_path = _sh.which("tesseract")
+                except Exception:
+                    pass
+
+            tess_exe = found_path or "tesseract"
+            result = subprocess.run([tess_exe, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 ver = result.stdout.split("\n")[0].strip()
                 for prefix in ["tesseract v", "tesseract ", "v"]:
@@ -678,54 +696,12 @@ async def check_ocr(engine: str = Query(default="")):
                 has_chi_sim = False
                 languages = ""
                 try:
-                    langs_r = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10)
+                    langs_r = subprocess.run([tess_exe, "--list-langs"], capture_output=True, text=True, timeout=10)
                     languages = (langs_r.stdout or langs_r.stderr or "").strip()
                     has_chi_sim = "chi_sim" in languages
                 except Exception:
                     pass
                 return {"ok": True, "engine": "tesseract", "version": ver, "languages": languages, "has_chi_sim": has_chi_sim}
-            # Check common install paths (Tesseract may exist but not in PATH)
-            found_path = None
-            for tess_path in [
-                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"C:\Program Files\Tesseract-OCR\program\tesseract.exe",
-                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
-                os.path.expandvars(r"%ProgramFiles%\Tesseract-OCR\tesseract.exe"),
-                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\program\tesseract.exe"),
-            ]:
-                if os.path.exists(tess_path):
-                    found_path = tess_path
-                    break
-            if not found_path:
-                # Walk common install dirs
-                for base_dir in [
-                    r"C:\Program Files\Tesseract-OCR",
-                    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR"),
-                ]:
-                    if os.path.isdir(base_dir):
-                        for root, dirs, files in os.walk(base_dir):
-                            for f in files:
-                                if f.lower() == "tesseract.exe":
-                                    found_path = os.path.join(root, f)
-                                    break
-                            if found_path:
-                                break
-                    if found_path:
-                        break
-            if found_path:
-                try:
-                    r = subprocess.run([found_path, "--version"], capture_output=True, text=True, timeout=5)
-                    if r.returncode == 0:
-                        # Add to PATH so subsequent calls work
-                        os.environ["PATH"] = os.path.dirname(found_path) + os.pathsep + os.environ.get("PATH", "")
-                        ver = r.stdout.split("\n")[0].strip()
-                        for prefix in ["tesseract v", "tesseract ", "v"]:
-                            if ver.startswith(prefix):
-                                ver = ver[len(prefix):]
-                                break
-                        return {"ok": True, "engine": "tesseract", "version": ver, "note": "已自动添加到PATH"}
-                except Exception:
-                    pass
             # Check if winget has it registered
             if os.name == "nt":
                 try:
@@ -787,6 +763,20 @@ async def check_ocr(engine: str = Query(default="")):
             except Exception:
                 pass
             return {"ok": False, "engine": "appleocr", "message": "AppleOCR 未安装"}
+        elif engine == "llm_ocr":
+            from config import get_config as _get_config_llm
+            cfg = _get_config_llm()
+            endpoint = cfg.get("llm_ocr_endpoint", "")
+            model = cfg.get("llm_ocr_model", "")
+            api_key = cfg.get("llm_ocr_api_key", "")
+            if not endpoint or not model:
+                return {"ok": False, "engine": "llm_ocr", "message": "未配置端点或模型名"}
+            try:
+                from engine.llm_ocr import verify_llm_model
+                ok, msg = await verify_llm_model(endpoint, model, api_key)
+                return {"ok": ok, "engine": "llm_ocr", "message": msg, "endpoint": endpoint}
+            except Exception as e:
+                return {"ok": False, "engine": "llm_ocr", "message": f"验证失败: {str(e)[:100]}"}
         return {"ok": False, "engine": engine, "message": f"{engine} not found"}
     except FileNotFoundError:
         return {"ok": False, "engine": engine, "message": f"{engine} 未安装或不在 PATH 中"}
@@ -954,7 +944,17 @@ async def install_ocr(body: InstallOCRRequest):
             # Install packages
             r1 = subprocess.run([_venv_py, "-m", "pip", "install", "--upgrade", "pip"],
                                 capture_output=True, text=True, timeout=60)
-            r2 = subprocess.run([_venv_py, "-m", "pip", "install", "ocrmypdf", "paddleocr==3.3.0", "paddlex==3.3.0"],
+
+            # Try GPU paddlepaddle first (silent if no CUDA)
+            subprocess.run([_venv_py, "-m", "pip", "install", "paddlepaddle-gpu"],
+                           capture_output=True, timeout=120)
+
+            # Pin paddlepaddle 3.0.0 + paddleocr<3.3 for compatibility
+            r2 = subprocess.run([_venv_py, "-m", "pip", "install",
+                                "paddlepaddle==3.0.0",
+                                "paddleocr>=3.2.0,<3.3.0",
+                                "paddlex", "ocrmypdf", "ocrmypdf-paddleocr",
+                                ],
                                 capture_output=True, text=True, timeout=300)
             if r2.returncode != 0:
                 return {"ok": False, "message": f"PaddleOCR 依赖安装失败: {r2.stderr[-200:]}"}
@@ -979,6 +979,8 @@ async def install_ocr(body: InstallOCRRequest):
                 cmd, capture_output=True, text=True, timeout=300
             )
             return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
+        elif engine == "llm_ocr":
+            return {"ok": False, "message": "LLM OCR 需要手动配置端点，请在设置中填写 Ollama/LM Studio 地址"}
         else:
             return {"ok": False, "message": f"Unknown engine: {engine}"}
     except Exception as e:
