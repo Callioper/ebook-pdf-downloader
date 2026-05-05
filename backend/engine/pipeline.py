@@ -1486,10 +1486,14 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             ]
 
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
+            # Ensure Tesseract is in PATH for PaddleOCR (venv doesn't inherit user PATH)
+            _ocr_env = {**os.environ, "PATH": os.environ.get("PATH", "")
+                        + r";C:\Program Files\Tesseract-OCR"}
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_ocr_env,
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
