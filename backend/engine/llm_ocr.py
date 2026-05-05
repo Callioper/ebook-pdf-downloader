@@ -87,8 +87,13 @@ async def verify_llm_model(
             if resp.status_code != 200:
                 return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
             data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            if "test123" in content.lower() or "Test123" in content:
+            choices = data.get("choices", [])
+            if not choices:
+                return False, "OCR 验证失败: 响应中没有 choices"
+            content = choices[0].get("message", {}).get("content", "").strip()
+            if not content:
+                return False, "OCR 验证失败: 响应中无内容"
+            if "test123" in content.lower():
                 return True, f"OCR 验证通过: 识别到 '{content}'"
             return False, f"OCR 验证失败: 返回了 '{content[:50]}' 但不包含 Test123"
     except Exception as e:
@@ -149,7 +154,13 @@ async def ocr_page(
                 logger.warning(f"LLM OCR page failed: HTTP {resp.status_code}")
                 return None
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            choices = data.get("choices", [])
+            if not choices:
+                return None
+            content = choices[0].get("message", {}).get("content", "")
+            if not content:
+                return None
+            return content
     except Exception as e:
         logger.warning(f"LLM OCR page error: {e}")
         return None
@@ -211,36 +222,41 @@ async def run_llm_ocr(
     if add_log is None:
         add_log = lambda msg: None
 
-    add_log("LLM OCR: extracting page images...")
-    images = extract_page_images(pdf_path, dpi=200)
-    total = len(images)
-    add_log(f"LLM OCR: {total} pages to process")
+    try:
+        add_log("LLM OCR: extracting page images...")
+        images = await asyncio.to_thread(extract_page_images, pdf_path, 200)
+        total = len(images)
+        add_log(f"LLM OCR: {total} pages to process")
 
-    ocr_results: List[Optional[str]] = []
-    start_time = time.time()
+        ocr_results: List[Optional[str]] = []
+        start_time = time.time()
 
-    for i, img_bytes in enumerate(images):
-        page_num = i + 1
-        add_log(f"LLM OCR: processing page {page_num}/{total}...")
+        for i, img_bytes in enumerate(images):
+            page_num = i + 1
+            add_log(f"LLM OCR: processing page {page_num}/{total}...")
 
-        text = await ocr_page(endpoint, model_name, img_bytes, api_key, language, timeout=min(120, timeout // max(total, 1) or 120))
-        ocr_results.append(text)
+            text = await ocr_page(endpoint, model_name, img_bytes, api_key, language, timeout=min(120, max(30, timeout // max(total, 1))))
+            ocr_results.append(text)
 
-        if emit_progress:
-            await emit_progress(
-                step="ocr",
-                progress=int((i + 1) / total * 100),
-                detail=f"{page_num}/{total} 页",
-                eta=_compute_eta(start_time, page_num, total),
-            )
+            if emit_progress:
+                await emit_progress(
+                    step="ocr",
+                    progress=int((i + 1) / total * 100),
+                    detail=f"{page_num}/{total} 页",
+                    eta=_compute_eta(start_time, page_num, total),
+                )
 
-    add_log("LLM OCR: building searchable PDF...")
-    ok = build_searchable_pdf(pdf_path, output_pdf, ocr_results)
-    if ok:
-        add_log("LLM OCR: searchable PDF created successfully")
-        return 0
-    else:
-        add_log("LLM OCR: failed to build output PDF")
+        add_log("LLM OCR: building searchable PDF...")
+        ok = await asyncio.to_thread(build_searchable_pdf, pdf_path, output_pdf, ocr_results)
+        if ok:
+            add_log("LLM OCR: searchable PDF created successfully")
+            return 0
+        else:
+            add_log("LLM OCR: failed to build output PDF")
+            return 1
+    except Exception as e:
+        if add_log:
+            add_log(f"LLM OCR fatal error: {e}")
         return 1
 
 
