@@ -74,6 +74,7 @@ async def _run_ocrmypdf_with_progress(
     env: Optional[Dict[str, Optional[str]]] = None,
     timeout: int = 7200,
     total_pages: int = 0,
+    output_pdf: str = "",
 ) -> int:
     """Run ocrmypdf with real-time stderr progress parsing.
     Reads stderr line by line, parses [page/total] and Page X of Y,
@@ -92,16 +93,58 @@ async def _run_ocrmypdf_with_progress(
     _last = 0
     _had_output = False
 
+    def _count_output_pages() -> int:
+        """Try to open output PDF and count pages. Returns 0 if not accessible yet."""
+        if not output_pdf:
+            return 0
+        try:
+            import fitz as _fitz
+            _doc = _fitz.open(output_pdf)
+            _n = len(_doc)
+            _doc.close()
+            return _n
+        except Exception:
+            return 0
+
     async def _monitor(p):
         """Emit heartbeat progress while process is running."""
-        nonlocal _cur, _had_output
+        nonlocal _cur, _tot, _last
         while p.returncode is None:
             await asyncio.sleep(5)
             if p.returncode is not None:
                 break
-            _elapsed = int(time.time() - _start)
-            _detail = f"处理中... {_elapsed//60}分{_elapsed%60}秒" if _elapsed >= 60 else f"处理中... {_elapsed}秒"
-            if _cur == 0 or total_pages == 0:
+            # Check if task was cancelled
+            _t = task_store.get(task_id)
+            if _t and _t.get("status") == "cancelled":
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+                break
+
+            # Try file-based page counting (works for all engines)
+            _file_pages = 0
+            if output_pdf and total_pages > 0:
+                _file_pages = _count_output_pages()
+
+            _now = time.time()
+            _elapsed_sec = int(_now - _start)
+
+            if _file_pages > 0 and _file_pages >= _cur:
+                # File-based progress found — update real page tracking
+                _cur = _file_pages
+                _tot = total_pages
+                _pct = int(_cur / _tot * 100) if _tot > 0 else 0
+                _eta = ""
+                if _cur > 1 and _elapsed_sec > 5:
+                    _sec_pp = _elapsed_sec / _cur
+                    _rem = (_tot - _cur) * _sec_pp
+                    _eta = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
+                await _emit_progress(task_id, "ocr", _pct, f"{_cur}/{_tot} 页", _eta)
+                _last = _pct
+            elif _cur == 0 or total_pages == 0:
+                # No page info available yet — fallback to heartbeat
+                _detail = f"处理中... {_elapsed_sec//60}分{_elapsed_sec%60}秒" if _elapsed_sec >= 60 else f"处理中... {_elapsed_sec}秒"
                 await _emit_progress(task_id, "ocr", 0, _detail, "")
 
     _monitor_task = asyncio.create_task(_monitor(proc))
@@ -1591,7 +1634,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
 
             try:
-                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages)
+                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages, output_pdf=output_pdf)
                 if _exit == 0:
                     os.replace(output_pdf, pdf_path)
                     task_store.add_log(task_id, "OCR completed successfully")
@@ -1614,6 +1657,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
                 "--optimize", "0",
+                "--force-ocr",
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", "1",
                 "--output-type", "pdf",
@@ -1624,7 +1668,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
             try:
-                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages)
+                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages, output_pdf=output_pdf)
                 if _exit == 0:
                     os.replace(output_pdf, pdf_path)
                     task_store.add_log(task_id, "OCR completed successfully")
@@ -1666,7 +1710,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             _ocr_env = {**os.environ, "PATH": os.environ.get("PATH", "")
                         + r";C:\Program Files\Tesseract-OCR"}
             try:
-                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, env=_ocr_env, timeout=ocr_timeout, total_pages=_total_pages)
+                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, env=_ocr_env, timeout=ocr_timeout, total_pages=_total_pages, output_pdf=output_pdf)
                 if _exit == 0:
                     task_store.add_log(task_id, "OCR completed, validating quality...")
                     if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
