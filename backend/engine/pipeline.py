@@ -1357,6 +1357,26 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 _sp.run(_pip_cmd + ["uninstall", "-y", "ocrmypdf-easyocr"],
                         capture_output=True, timeout=15)
                 task_store.add_log(task_id, "OCR: uninstalled ocrmypdf-easyocr")
+
+        # ── Detect PaddleOCR Python 3.11 venv ──
+        _paddle_venv_py = ""
+        if ocr_engine == "paddleocr":
+            _base_dir = os.path.dirname(os.path.dirname(__file__))
+            for _cand in [
+                r"D:\opencode\book-downloader\venv-paddle311\Scripts\python.exe",
+                os.path.join(_base_dir, "venv-paddle311", "Scripts", "python.exe"),
+            ]:
+                if os.path.exists(_cand):
+                    # Verify the venv has all needed packages
+                    _vr = _sp.run([_cand, "-c", "import ocrmypdf_paddleocr"],
+                                  capture_output=True, timeout=15)
+                    if _vr.returncode == 0:
+                        _paddle_venv_py = _cand
+                        task_store.add_log(task_id, f"PaddleOCR: using venv at {_paddle_venv_py}")
+                        break
+            if not _paddle_venv_py:
+                task_store.add_log(task_id,
+                    "PaddleOCR: Python 3.11 venv not found — 点击设置页 OCR → PaddleOCR → 安装 自动搭建")
     except Exception as _e:
         task_store.add_log(task_id, f"OCR: plugin management warning: {_e}")
 
@@ -1450,9 +1470,12 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 return report
 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            if not _paddle_venv_py:
+                task_store.add_log(task_id, "PaddleOCR: Python 3.11 venv not available, skipping OCR")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
             cmd = [
-                _py_for_ocr, "-m", "ocrmypdf",
-                "--ocr-engine", "tesseract",
+                _paddle_venv_py, "-m", "ocrmypdf",
                 "--plugin", "ocrmypdf_paddleocr",
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", "1",  # PaddleOCR thread safety
