@@ -827,6 +827,9 @@ async def _download_via_aa_and_stacks(
                     hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
                     fs_resp = _req.get(fs_url, headers=hdrs, timeout=120, verify=False, stream=True)
                     if fs_resp.status_code == 200:
+                        _total_size = int(fs_resp.headers.get("Content-Length", 0))
+                        _downloaded = 0
+                        _dl_start = time.time()
                         cd = fs_resp.headers.get("Content-Disposition", "")
                         fname = f"{md5}.pdf"
                         if cd and "filename=" in cd:
@@ -836,6 +839,18 @@ async def _download_via_aa_and_stacks(
                             for chunk in fs_resp.iter_content(65536):
                                 if chunk:
                                     f.write(chunk)
+                                    _downloaded += len(chunk)
+                                    if _total_size > 0 and _downloaded % (65536 * 100) == 0:
+                                        _pct = int(_downloaded / _total_size * 100)
+                                        _elapsed = time.time() - _dl_start
+                                        _speed = _downloaded / _elapsed / 1024 / 1024 if _elapsed > 0 else 0
+                                        _remaining = (_total_size - _downloaded) / (_downloaded / _elapsed) if _downloaded > 0 else 0
+                                        await _emit_progress(
+                                            task_id, "download_pages",
+                                            _pct,
+                                            f"AA 下载中... {_downloaded//1024//1024}MB/{_total_size//1024//1024}MB ({_speed:.1f} MB/s)",
+                                            _format_eta(_remaining),
+                                        )
                         if os.path.getsize(fpath) > 1024:
                             with open(fpath, "rb") as fh:
                                 if fh.read(4) == b"%PDF" and verify_md5(fpath, md5):
@@ -857,6 +872,7 @@ async def _download_via_libgen(
 ) -> Optional[str]:
     """LibGen 兜底下载（所有其他方式失败后的最后选择）"""
     task_store.add_log(task_id, "LibGen: trying as last resort...")
+    await _emit_progress(task_id, "download_pages", 80, "LibGen: 搜索中...", "")
     try:
         import libgen_api_enhanced as lg
         from libgen_api_enhanced import LibgenSearch
@@ -892,6 +908,7 @@ async def _download_via_libgen(
             return None
 
         task_store.add_log(task_id, f"LibGen: found {len(results)} results")
+        await _emit_progress(task_id, "download_pages", 85, f"LibGen: 找到 {len(results)} 个结果，下载中...", "")
         for item in results[:5]:
             try:
                 md5 = item.get("md5", item.get("Mirror_MD5", ""))
@@ -1060,17 +1077,20 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                 dl = ZLibDownloader(config)
 
                 # 先登录获取配额信息
+                await _emit_progress(task_id, "download_pages", 55, "ZL 登录中...", "")
                 login_result = await dl.zlib_login()
                 if login_result.get("ok"):
                     task_store.add_log(task_id, "ZL: logged in")
                     balance = login_result.get("balance", "")
                     if balance:
                         task_store.add_log(task_id, f"ZL: {balance}")
+                        await _emit_progress(task_id, "download_pages", 60, f"ZL {balance}", "")
 
                     # 搜索全部候选条目（不做标题过滤，返回所有结果让用户选）
                     candidates = await dl.zlib_search_candidates(
                         isbn=isbn, title=title, authors=authors,
                     )
+                    await _emit_progress(task_id, "download_pages", 70, f"ZL 搜索到 {len(candidates)} 个候选，等待选择", "")
                     if candidates:
                         task_store.add_log(task_id, f"ZL: found {len(candidates)} candidates, requesting user selection...")
                         confirmed = await _wait_for_user_confirmation(
@@ -1094,6 +1114,7 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                                 )
                                 if zl_path:
                                     task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
+                                    await _emit_progress(task_id, "download_pages", 90, "ZL 下载完成，验证中...", "")
                                     downloaded = True
                                     download_source = "zlibrary"
                                     report["download_path"] = zl_path
