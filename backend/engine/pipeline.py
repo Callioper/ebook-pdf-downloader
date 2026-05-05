@@ -92,6 +92,7 @@ async def _run_ocrmypdf_with_progress(
     _tot = 0
     _last = 0
     _had_output = False
+    _last_mtime = 0.0
 
     def _count_output_pages() -> int:
         """Try to open output PDF and count pages. Returns 0 if not accessible yet."""
@@ -108,7 +109,7 @@ async def _run_ocrmypdf_with_progress(
 
     async def _monitor(p):
         """Emit heartbeat progress while process is running."""
-        nonlocal _cur, _tot, _last
+        nonlocal _cur, _tot, _last, _last_mtime
         while p.returncode is None:
             await asyncio.sleep(5)
             if p.returncode is not None:
@@ -122,15 +123,21 @@ async def _run_ocrmypdf_with_progress(
                     pass
                 break
 
-            # Try file-based page counting (works for all engines)
+            # Try file-based page counting (mtime-gated for performance)
             _file_pages = 0
             if output_pdf and total_pages > 0:
-                _file_pages = _count_output_pages()
+                try:
+                    _mtime = os.path.getmtime(output_pdf)
+                    if _mtime > _last_mtime:
+                        _last_mtime = _mtime
+                        _file_pages = _count_output_pages()
+                except Exception:
+                    pass
 
             _now = time.time()
             _elapsed_sec = int(_now - _start)
 
-            if _file_pages > 0 and _file_pages >= _cur:
+            if _file_pages > 0 and _file_pages > _cur:
                 # File-based progress found — update real page tracking
                 _cur = _file_pages
                 _tot = total_pages
@@ -139,7 +146,7 @@ async def _run_ocrmypdf_with_progress(
                 if _cur > 1 and _elapsed_sec > 5:
                     _sec_pp = _elapsed_sec / _cur
                     _rem = (_tot - _cur) * _sec_pp
-                    _eta = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
+                    _eta = _format_eta(_rem)
                 await _emit_progress(task_id, "ocr", _pct, f"{_cur}/{_tot} 页", _eta)
                 _last = _pct
             elif _cur == 0 or total_pages == 0:
