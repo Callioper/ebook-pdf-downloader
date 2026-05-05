@@ -167,25 +167,29 @@ def build_searchable_pdf(
     """
     import fitz
 
-    doc = fitz.open(original_pdf)
-    for i, text in enumerate(ocr_results):
-        if not text or not text.strip():
-            continue
-        if i >= len(doc):
-            break
-        page = doc[i]
-        rect = page.rect
-        page.insert_textbox(
-            rect,
-            text,
-            fontname="helv",
-            fontsize=8,
-            color=(0, 0, 0),
-            render_mode=3,  # invisible but selectable/searchable
-        )
-    doc.save(output_pdf, garbage=4, deflate=True)
-    doc.close()
-    return True
+    try:
+        doc = fitz.open(original_pdf)
+        for i, text in enumerate(ocr_results):
+            if not text or not text.strip():
+                continue
+            if i >= len(doc):
+                break
+            page = doc[i]
+            rect = page.rect
+            page.insert_textbox(
+                rect,
+                text,
+                fontname="helv",
+                fontsize=8,
+                color=(0, 0, 0),
+                render_mode=3,  # invisible but selectable/searchable
+            )
+        doc.save(output_pdf, garbage=4, deflate=True)
+        doc.close()
+        return True
+    except Exception as e:
+        logger.error(f"build_searchable_pdf failed: {e}")
+        return False
 
 
 async def run_llm_ocr(
@@ -218,16 +222,17 @@ async def run_llm_ocr(
     for i, img_bytes in enumerate(images):
         page_num = i + 1
         add_log(f"LLM OCR: processing page {page_num}/{total}...")
+
+        text = await ocr_page(endpoint, model_name, img_bytes, api_key, language, timeout=min(120, timeout // max(total, 1) or 120))
+        ocr_results.append(text)
+
         if emit_progress:
             await emit_progress(
                 step="ocr",
-                progress=int(i / total * 100),
+                progress=int((i + 1) / total * 100),
                 detail=f"{page_num}/{total} 页",
                 eta=_compute_eta(start_time, page_num, total),
             )
-
-        text = await ocr_page(endpoint, model_name, img_bytes, api_key, language, timeout=120)
-        ocr_results.append(text)
 
     add_log("LLM OCR: building searchable PDF...")
     ok = build_searchable_pdf(pdf_path, output_pdf, ocr_results)
