@@ -1686,7 +1686,13 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
         elif ocr_engine == "llm_ocr":
             task_store.add_log(task_id, "Running LLM-based OCR...")
-            
+
+            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
+                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
+                report["ocr_done"] = True
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
             llm_endpoint = config.get("llm_ocr_endpoint", "http://localhost:11434")
             llm_model = config.get("llm_ocr_model", "")
             llm_api_key = config.get("llm_ocr_api_key", "")
