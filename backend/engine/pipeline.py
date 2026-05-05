@@ -69,6 +69,93 @@ def _format_eta(remaining_seconds: float) -> str:
     return f"约{hours}时{minutes}分"
 
 
+async def _run_ocrmypdf_with_progress(
+    task_id: str, cmd: List[str],
+    env: Optional[Dict[str, Optional[str]]] = None,
+    timeout: int = 7200,
+    total_pages: int = 0,
+) -> int:
+    """Run ocrmypdf with real-time stderr progress parsing.
+    Reads stderr line by line, parses [page/total] and Page X of Y,
+    emits step_progress events with page count and ETA.
+    Returns the process exit code.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env={**{"PYTHONUNBUFFERED": "1"}, **{k: v for k, v in (env or os.environ).items() if v is not None}} if env else {"PYTHONUNBUFFERED": "1", **os.environ},
+    )
+    _start = time.time()
+    _cur = 0
+    _tot = 0
+    _last = 0
+    _had_output = False
+
+    async def _monitor(p):
+        """Emit heartbeat progress while process is running."""
+        nonlocal _cur, _had_output
+        while p.returncode is None:
+            await asyncio.sleep(5)
+            if p.returncode is not None:
+                break
+            _elapsed = int(time.time() - _start)
+            _detail = f"处理中... {_elapsed//60}分{_elapsed%60}秒" if _elapsed >= 60 else f"处理中... {_elapsed}秒"
+            if _cur == 0 or total_pages == 0:
+                await _emit_progress(task_id, "ocr", 0, _detail, "")
+
+    _monitor_task = asyncio.create_task(_monitor(proc))
+
+    async def _reader(p) -> int:
+        nonlocal _cur, _tot, _last, _had_output
+        async for _line in p.stdout:
+            _text = _line.decode(errors='replace').strip()
+            if not _text:
+                continue
+            _had_output = True
+
+            task_store.add_log(task_id, f"  {_text[:200]}")
+
+            _m = re.search(r'\[(\d+)/(\d+)\]', _text)
+            if _m:
+                _cur = int(_m.group(1))
+                _tot = int(_m.group(2))
+
+            _m2 = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', _text)
+            if _m2:
+                _cur = int(_m2.group(1))
+                _tot = int(_m2.group(2))
+
+            # Parse tesseract output like "46 [tesseract] lots of diacritics"
+            if total_pages > 0:
+                _m3 = re.match(r'\s*(\d+)\s+\[tesseract\]', _text)
+                if _m3:
+                    _cur = int(_m3.group(1))
+                    _tot = total_pages
+
+            _now = time.time()
+            if _tot > 0 and _cur > 0:
+                _pct = int(_cur / _tot * 100)
+                _elapsed = _now - _start
+                _eta = ""
+                if _cur > 1 and _elapsed > 5:
+                    _sec_pp = _elapsed / _cur
+                    _rem = (_tot - _cur) * _sec_pp
+                    _eta = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
+                if _pct != _last or _now - _start - _last > 10:
+                    _last = _pct if _pct > 0 else _now
+                    await _emit_progress(task_id, "ocr", _pct, f"{_cur}/{_tot} 页", _eta)
+        return await p.wait()
+
+    try:
+        return await asyncio.wait_for(_reader(proc), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise
+    finally:
+        _monitor_task.cancel()
+
+
 async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     task_store.add_log(task_id, "Step 1/7: Fetching metadata from database...")
     await _emit(task_id, "step_progress", {"step": "fetch_metadata", "progress": 50})
@@ -1440,6 +1527,10 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         capture_output=True, timeout=15)
                 task_store.add_log(task_id, "OCR: uninstalled ocrmypdf-easyocr")
 
+        if ocr_engine == "llm_ocr":
+            # No plugin management needed for LLM OCR (uses HTTP API)
+            pass
+
         # ── Detect PaddleOCR Python 3.11 venv ──
         _paddle_venv_py = ""
         if ocr_engine == "paddleocr":
@@ -1465,6 +1556,16 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     try:
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
 
+        # Count PDF pages for progress tracking
+        _total_pages = 0
+        try:
+            import fitz as _fitz
+            _doc = _fitz.open(pdf_path)
+            _total_pages = len(_doc)
+            _doc.close()
+        except Exception:
+            pass
+
         if ocr_engine == "tesseract":
             task_store.add_log(task_id, "Running OCRmyPDF with Tesseract...")
 
@@ -1479,6 +1580,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
                 "--ocr-engine", "tesseract",
+                "--force-ocr",
+                "--optimize", "0",
                 "-l", ocr_lang,
                 "-j", str(ocr_jobs),
                 "--output-type", "pdf",
@@ -1487,62 +1590,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             ]
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            # Read stderr line by line for real-time progress
-            _ocr_start = time.time()
-            _page_cur = 0
-            _page_tot = 0
-            _last_emit = 0
-
-            async def _ocr_reader(proc) -> int:
-                nonlocal _page_cur, _page_tot, _last_emit
-                async for _line in proc.stderr:
-                    _text = _line.decode(errors='replace').strip()
-                    if not _text:
-                        continue
-
-                    # Log progress-relevant lines
-                    if any(k in _text.lower() for k in ('tesseract', 'page', 'error', 'warning', '[1;', 'pagen', 'processing')):
-                        task_store.add_log(task_id, f"  {_text[:200]}")
-
-                    # Parse "[45/216]" format (ocrmypdf output)
-                    _m = re.search(r'\[(\d+)/(\d+)\]', _text)
-                    if _m:
-                        _page_cur = int(_m.group(1))
-                        _page_tot = int(_m.group(2))
-
-                    # Parse "Page 45 of 216" format (tesseract output)
-                    _m2 = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', _text)
-                    if _m2:
-                        _page_cur = int(_m2.group(1))
-                        _page_tot = int(_m2.group(2))
-
-                    # Emit progress update every 3 pages or 10 seconds
-                    _now = time.time()
-                    if _page_tot > 0 and _page_cur > 0:
-                        _pct = int(_page_cur / _page_tot * 100)
-                        _elapsed = _now - _ocr_start
-                        _eta_str = ""
-                        if _page_cur > 1 and _elapsed > 5:
-                            _sec_pp = _elapsed / _page_cur
-                            _rem = (_page_tot - _page_cur) * _sec_pp
-                            _eta_str = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
-                        if _pct != _last_emit or _now - _ocr_start - _last_emit > 10:
-                            _last_emit = _pct if _pct > 0 else _now
-                            await _emit_progress(
-                                task_id, "ocr", _pct,
-                                f"{_page_cur}/{_page_tot} 页",
-                                _eta_str,
-                            )
-                return await proc.wait()
-
             try:
-                _exit = await asyncio.wait_for(_ocr_reader(proc), timeout=ocr_timeout)
+                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages)
                 if _exit == 0:
                     os.replace(output_pdf, pdf_path)
                     task_store.add_log(task_id, "OCR completed successfully")
@@ -1551,7 +1600,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     task_store.add_log(task_id, f"OCR failed with exit code {_exit}")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100, "detail": "完成"})
             except asyncio.TimeoutError:
-                proc.kill()
                 task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
         elif ocr_engine == "easyocr":
             task_store.add_log(task_id, "Running OCRmyPDF with EasyOCR...")
@@ -1565,6 +1613,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
+                "--optimize", "0",
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", "1",
                 "--output-type", "pdf",
@@ -1574,22 +1623,16 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             ]
 
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
-                if proc.returncode == 0:
+                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages)
+                if _exit == 0:
                     os.replace(output_pdf, pdf_path)
                     task_store.add_log(task_id, "OCR completed successfully")
                     report["ocr_done"] = True
                 else:
-                    task_store.add_log(task_id, f"OCR failed: {stderr.decode(errors='replace')}")
+                    task_store.add_log(task_id, f"EasyOCR failed with exit code {_exit}")
             except asyncio.TimeoutError:
-                proc.kill()
-                task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
+                task_store.add_log(task_id, f"EasyOCR timed out after {ocr_timeout}s")
 
         elif ocr_engine == "paddleocr":
             task_store.add_log(task_id, "Running OCRmyPDF with PaddleOCR...")
@@ -1609,8 +1652,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             cmd = [
                 _paddle_venv_py, "-m", "ocrmypdf",
                 "--plugin", "ocrmypdf_paddleocr",
+                "--optimize", "0",
                 "-l", ocr_lang or "chi_sim+eng",
-                "-j", "1",  # PaddleOCR thread safety
+                "-j", "1",  # PaddlePaddle is not multi-process safe
                 "--output-type", "pdf",
                 "--mode", "force",
                 pdf_path,
@@ -1621,15 +1665,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             # Ensure Tesseract is in PATH for PaddleOCR (venv doesn't inherit user PATH)
             _ocr_env = {**os.environ, "PATH": os.environ.get("PATH", "")
                         + r";C:\Program Files\Tesseract-OCR"}
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=_ocr_env,
-            )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=ocr_timeout)
-                if proc.returncode == 0:
+                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, env=_ocr_env, timeout=ocr_timeout, total_pages=_total_pages)
+                if _exit == 0:
                     task_store.add_log(task_id, "OCR completed, validating quality...")
                     if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
                         os.replace(output_pdf, pdf_path)
@@ -1642,11 +1680,56 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         except Exception:
                             pass
                 else:
-                    err = stderr.decode(errors='replace')[:500] if stderr else "unknown error"
-                    task_store.add_log(task_id, f"PaddleOCR failed: {err}")
+                    task_store.add_log(task_id, f"PaddleOCR failed with exit code {_exit}")
             except asyncio.TimeoutError:
-                proc.kill()
                 task_store.add_log(task_id, f"PaddleOCR timed out after {ocr_timeout}s")
+
+        elif ocr_engine == "llm_ocr":
+            task_store.add_log(task_id, "Running LLM-based OCR...")
+            
+            llm_endpoint = config.get("llm_ocr_endpoint", "http://localhost:11434")
+            llm_model = config.get("llm_ocr_model", "")
+            llm_api_key = config.get("llm_ocr_api_key", "")
+            
+            if not llm_endpoint or not llm_model:
+                task_store.add_log(task_id, "LLM OCR: endpoint or model not configured")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
+
+            try:
+                from engine.llm_ocr import run_llm_ocr
+
+                async def _emit_llm(step=None, progress=None, detail=None, eta=None, **kwargs):
+                    await _emit_progress(task_id, step, progress, detail or "", eta or "")
+
+                exit_code = await asyncio.wait_for(
+                    run_llm_ocr(
+                        task_id=task_id,
+                        pdf_path=pdf_path,
+                        output_pdf=output_pdf,
+                        endpoint=llm_endpoint,
+                        model_name=llm_model,
+                        api_key=llm_api_key,
+                        language=ocr_lang,
+                        timeout=ocr_timeout,
+                        emit_progress=_emit_llm,
+                        add_log=lambda msg: task_store.add_log(task_id, f"  {msg}"),
+                    ),
+                    timeout=ocr_timeout,
+                )
+                if exit_code == 0:
+                    os.replace(output_pdf, pdf_path)
+                    task_store.add_log(task_id, "LLM OCR completed successfully")
+                    report["ocr_done"] = True
+                else:
+                    task_store.add_log(task_id, f"LLM OCR failed with exit code {exit_code}")
+            except asyncio.TimeoutError:
+                task_store.add_log(task_id, f"LLM OCR timed out after {ocr_timeout}s")
+            except Exception as e:
+                task_store.add_log(task_id, f"LLM OCR error: {e}")
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
