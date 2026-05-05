@@ -19,6 +19,9 @@ interface AppConfig {
   zlib_password: string
   aa_membership_key: string
   ocr_engine: string
+  llm_ocr_endpoint: string
+  llm_ocr_model: string
+  llm_ocr_api_key: string
   [key: string]: unknown
 }
 
@@ -133,7 +136,10 @@ const DEFAULT_CONFIG: AppConfig = {
   zlib_email: '',
   zlib_password: '',
   aa_membership_key: '',
-  ocr_engine: 'ocrmypdf',
+  ocr_engine: 'tesseract',
+  llm_ocr_endpoint: 'http://localhost:11434',
+  llm_ocr_model: '',
+  llm_ocr_api_key: '',
 }
 
 const OCR_ENGINES = [
@@ -141,7 +147,7 @@ const OCR_ENGINES = [
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
   { key: 'easyocr', name: 'EasyOCR', desc: 'PyTorch 引擎，CPU 较慢' },
   { key: 'appleocr', name: 'AppleOCR', desc: '仅 macOS 支持' },
-  { key: 'ocrmypdf', name: 'OCRmyPDF', desc: 'PDF OCR 优化工具' },
+  { key: 'llm_ocr', name: 'LLM OCR', desc: '本地大模型 OCR (Ollama/LM Studio)' },
 ]
 
 const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
@@ -512,7 +518,7 @@ export default function ConfigSettings() {
   useEffect(() => {
     if (!config || autoOcrRef.current) return
     autoOcrRef.current = true
-    const engines = ['ocrmypdf', 'tesseract', 'paddleocr', 'easyocr', 'appleocr']
+    const engines = ['tesseract', 'paddleocr', 'easyocr', 'appleocr', 'llm_ocr']
     engines.forEach((eng) => {
       fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
         .then((r) => r.json())
@@ -524,6 +530,9 @@ export default function ConfigSettings() {
               installed: data.ok || false,
               installing: false,
               msg: data.version || data.message || (data.ok ? '已安装' : '未检测到'),
+              has_chi_sim: data.has_chi_sim,
+              languages: data.languages,
+              venv: data.venv,
             },
           }))
         })
@@ -854,6 +863,9 @@ export default function ConfigSettings() {
           installed: data.ok || false,
           installing: false,
           msg: data.version || data.message || (data.ok ? '已安装' : '未检测到'),
+          has_chi_sim: data.has_chi_sim,
+          languages: data.languages,
+          venv: data.venv,
         },
       }))
     } catch (e) {
@@ -1330,7 +1342,7 @@ export default function ConfigSettings() {
               disabled={proxyChecking}
               className="px-3 py-1.5 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
             >
-              {proxyChecking ? '登录中...' : '登录'}
+              {proxyChecking ? '检测中...' : '检测'}
             </button>
             {proxyChecking ? (
               <span className="text-xs text-purple-500">检测中...</span>
@@ -1455,7 +1467,7 @@ export default function ConfigSettings() {
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
             <div className="grid grid-cols-2 gap-2">
-              {OCR_ENGINES.filter(e => e.key !== 'ocrmypdf').map((eng) => {
+              {OCR_ENGINES.map((eng) => {
                 const info = ocrEngines[eng.key]
                 const isSelected = form.ocr_engine === eng.key
                 return (
@@ -1517,6 +1529,49 @@ export default function ConfigSettings() {
               })}
             </div>
           </div>
+
+          {form.ocr_engine === 'llm_ocr' && (
+            <div className="border-t border-gray-200 pt-3 space-y-2">
+              <span className="text-xs font-medium text-gray-600 block">LLM OCR 配置</span>
+              <div>
+                <label className="text-xs text-gray-500">API 端点</label>
+                <input
+                  type="text"
+                  value={form.llm_ocr_endpoint || ''}
+                  onChange={(e) => updateForm({ llm_ocr_endpoint: e.target.value })}
+                  placeholder="http://localhost:11434"
+                  spellCheck={false}
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-400 mt-0.5">Ollama 默认 11434，LM Studio 默认 1234</p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">模型名称</label>
+                <input
+                  type="text"
+                  value={form.llm_ocr_model || ''}
+                  onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
+                  placeholder="llama3.2-vision 或 minicpm-v"
+                  spellCheck={false}
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">API Key (可选)</label>
+                <input
+                  type="password"
+                  value={form.llm_ocr_api_key || ''}
+                  onChange={(e) => updateForm({ llm_ocr_api_key: e.target.value })}
+                  placeholder="LM Studio 通常不需要"
+                  spellCheck={false}
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
+                提示：使用前请确保 Ollama/LM Studio 已运行，且模型为多模态（vision）模型。点击设置页上方检测按钮验证。
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-3 pt-2">
             <div>
