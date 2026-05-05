@@ -52,6 +52,8 @@ export function useTaskWebSocket({ taskId, onUpdate, onMessage }: UseTaskWebSock
                 task_id: taskId,
                 current_step: msg.step || '',
                 progress: msg.progress || 0,
+                step_detail: msg.detail as string | undefined,
+                step_eta: msg.eta as string | undefined,
               } as TaskItem
               onUpdate(pendingTask as TaskItem)
             }
