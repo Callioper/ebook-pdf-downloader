@@ -683,6 +683,7 @@ async def _download_via_aa_and_stacks(
                         # Step 3: 心跳轮询（每3秒检测一次）
                         task_store.add_log(task_id, "AA: heartbeat polling for stacks download...")
                         deadline = time.time() + stacks_timeout
+                        start_time = deadline - stacks_timeout
                         while time.time() < deadline:
                             try:
                                 sr = _req.get(f"{url}/api/status", headers=_bearer(), timeout=5)
@@ -735,11 +736,12 @@ async def _download_via_aa_and_stacks(
                                     # 3c. 检测是否正在下载
                                     active = [item for item in sd.get("queue", [])
                                               if isinstance(item, dict) and item.get("md5") == md5 and not item.get("completed_at")]
-                                    remaining = int(deadline - time.time())
                                     if active:
+                                        remaining = int(deadline - time.time())
                                         if remaining % 6 == 0:
                                             task_store.add_log(task_id, f"AA: stacks downloading... ({remaining}s left)")
                                     else:
+                                        remaining = int(deadline - time.time())
                                         if remaining % 15 == 0:
                                             task_store.add_log(task_id, f"AA: stacks heartbeat ({remaining}s left)...")
                             except Exception as e:
@@ -747,13 +749,12 @@ async def _download_via_aa_and_stacks(
 
                             # Emit progress via shared mutable dict
                             if progress_data is not None:
-                                elapsed = deadline - stacks_timeout
-                                elapsed = max(time.time() - elapsed, 1)
+                                elapsed = max(time.time() - start_time, 1)
                                 pct = min(int(elapsed / stacks_timeout * 100), 99)
                                 remaining = int(deadline - time.time())
                                 eta_str = _format_eta(max(remaining, 0))
                                 progress_data["progress"] = pct
-                                progress_data["detail"] = f"AA stacks 下载中... ({remaining}s 剩余)"
+                                progress_data["detail"] = f"AA stacks 等待中... ({remaining}s 剩余)"
                                 progress_data["eta"] = eta_str
 
                             time.sleep(3)  # 心跳间隔
