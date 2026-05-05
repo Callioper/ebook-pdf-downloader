@@ -121,7 +121,14 @@ export default function TaskListPage() {
                           style={{ width: `${task.progress}%` }}
                         />
                       </div>
-                      <span className="text-xs text-gray-400">{task.progress}%</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs text-gray-400">{task.progress}%</span>
+                        {task.status === 'running' && task.step_eta && (
+                          <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                            {task.step_eta}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500">{task.source}</td>
