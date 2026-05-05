@@ -43,7 +43,13 @@ export default function TaskDetailPage() {
     if (msg.type === 'step_progress') {
       setTask((prev) =>
         prev
-          ? { ...prev, current_step: msg.step || prev.current_step, progress: msg.progress || prev.progress }
+          ? {
+              ...prev,
+              current_step: msg.step || prev.current_step,
+              progress: msg.progress || prev.progress,
+              step_detail: (msg.detail as string) || prev.step_detail,
+              step_eta: (msg.eta as string) || prev.step_eta,
+            }
           : prev
       )
     }
@@ -134,8 +140,16 @@ export default function TaskDetailPage() {
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold text-gray-800">{task.title || '(无标题)'}</h2>
               {statusBadge(task.status)}
-            </div>
-            <span className="text-xs text-gray-400">ID: {task.task_id}</span>
+                {task.status === 'running' && task.step_eta && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600 border border-blue-200">
+                    <svg className="w-3 h-3 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    剩余 {task.step_eta}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-gray-400">ID: {task.task_id}</span>
           </div>
 
           <div className="flex flex-wrap gap-x-6 gap-y-1 mb-4 text-xs text-gray-500">
