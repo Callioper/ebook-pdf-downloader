@@ -68,6 +68,8 @@ class TaskStore:
             "status": STATUS_PENDING,
             "current_step": "",
             "progress": 0,
+            "step_detail": "",
+            "step_eta": "",
             "logs": [],
             "error": "",
             "report": {},
@@ -99,6 +101,15 @@ class TaskStore:
             task["updated_at"] = time.time()
             self._save()
         return dict(task)
+
+    def update_progress(self, task_id: str, step: str, progress: int, detail: str = "", eta: str = "") -> Optional[Dict[str, Any]]:
+        """Update progress fields and persist. Returns updated task or None."""
+        return self.update(task_id, {
+            "current_step": step,
+            "progress": progress,
+            "step_detail": detail,
+            "step_eta": eta,
+        })
 
     def add_log(self, task_id: str, log_line: str) -> Optional[Dict[str, Any]]:
         with self._lock:
