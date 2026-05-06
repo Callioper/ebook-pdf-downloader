@@ -1763,7 +1763,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
         elif ocr_engine == "llm_ocr":
-            task_store.add_log(task_id, "Running LLM-based OCR...")
+            task_store.add_log(task_id, "Running LLM-based OCR via ocrmypdf plugin...")
 
             if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
                 task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
@@ -1774,7 +1774,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             llm_endpoint = config.get("llm_ocr_endpoint", "http://localhost:11434")
             llm_model = config.get("llm_ocr_model", "")
             llm_api_key = config.get("llm_ocr_api_key", "")
-            
+
             if not llm_endpoint or not llm_model:
                 task_store.add_log(task_id, "LLM OCR: endpoint or model not configured")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
@@ -1783,33 +1783,50 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
 
+            cmd = [
+                _py_for_ocr, "-m", "ocrmypdf",
+                "--plugin", "ocrmypdf_llmocr",
+                "--llm-ocr-endpoint", llm_endpoint,
+                "--llm-ocr-model", llm_model,
+                "--llm-ocr-lang", ocr_lang or "chi_sim+eng",
+                "--optimize", "0",
+                "--oversample", ocr_oversample,
+                "-j", "1",
+                "--output-type", "pdf",
+                "--pdf-renderer", "sandwich",
+                pdf_path,
+                output_pdf,
+            ]
+            if llm_api_key:
+                cmd.insert(cmd.index("--llm-ocr-lang") + 2, "--llm-ocr-api-key")
+                cmd.insert(cmd.index("--llm-ocr-api-key") + 1, llm_api_key)
+
+            # Ensure PYTHONPATH includes our plugin directory
+            _backend_dir = os.path.dirname(os.path.dirname(__file__))
+            _engine_dir = os.path.dirname(__file__)
+            _ocr_env = {
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    [_backend_dir, _engine_dir]
+                    + os.environ.get("PYTHONPATH", "").split(os.pathsep)
+                    if os.environ.get("PYTHONPATH")
+                    else [_backend_dir, _engine_dir]
+                ),
+                "PYTHONUNBUFFERED": "1",
+            }
+
             try:
-                from engine.llm_ocr import run_llm_ocr
-
-                async def _emit_llm(step=None, progress=None, detail=None, eta=None, **kwargs):
-                    await _emit_progress(task_id, step, progress, detail or "", eta or "")
-
-                exit_code = await asyncio.wait_for(
-                    run_llm_ocr(
-                        task_id=task_id,
-                        pdf_path=pdf_path,
-                        output_pdf=output_pdf,
-                        endpoint=llm_endpoint,
-                        model_name=llm_model,
-                        api_key=llm_api_key,
-                        language=ocr_lang,
-                        timeout=ocr_timeout,
-                        emit_progress=_emit_llm,
-                        add_log=lambda msg: task_store.add_log(task_id, f"  {msg}"),
-                    ),
-                    timeout=ocr_timeout,
+                _exit = await _run_ocrmypdf_with_progress(
+                    task_id, cmd, env=_ocr_env,
+                    timeout=ocr_timeout, total_pages=_total_pages,
+                    output_pdf=output_pdf,
                 )
-                if exit_code == 0:
+                if _exit == 0:
                     os.replace(output_pdf, pdf_path)
                     task_store.add_log(task_id, "LLM OCR completed successfully")
                     report["ocr_done"] = True
                 else:
-                    task_store.add_log(task_id, f"LLM OCR failed with exit code {exit_code}")
+                    task_store.add_log(task_id, f"LLM OCR failed with exit code {_exit}")
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, f"LLM OCR timed out after {ocr_timeout}s")
             except Exception as e:
