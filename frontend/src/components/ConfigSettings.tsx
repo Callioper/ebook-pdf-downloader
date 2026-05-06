@@ -22,6 +22,7 @@ interface AppConfig {
   llm_ocr_endpoint: string
   llm_ocr_model: string
   llm_ocr_api_key: string
+  ocr_oversample: number
   [key: string]: unknown
 }
 
@@ -140,6 +141,7 @@ const DEFAULT_CONFIG: AppConfig = {
   llm_ocr_endpoint: 'http://localhost:11434',
   llm_ocr_model: '',
   llm_ocr_api_key: '',
+  ocr_oversample: 200,
 }
 
 const OCR_ENGINES = [
@@ -1527,11 +1529,11 @@ export default function ConfigSettings() {
                   </div>
                 )
               })}
-            </div>
+          </div>
           </div>
 
-          {form.ocr_engine === 'llm_ocr' && (
-            <div className="border-t border-gray-200 pt-3 space-y-2">
+          {/* LLM OCR configuration */}
+          <div className="border-t border-gray-200 pt-3 space-y-2">
               <span className="text-xs font-medium text-gray-600 block">LLM OCR 配置</span>
               <div>
                 <label className="text-xs text-gray-500">API 端点</label>
@@ -1571,7 +1573,6 @@ export default function ConfigSettings() {
                 提示：使用前请确保 Ollama/LM Studio 已运行，且模型为多模态（vision）模型。点击设置页上方检测按钮验证。
               </p>
             </div>
-          )}
 
           <div className="grid grid-cols-3 gap-3 pt-2">
             <div>
@@ -1608,6 +1609,19 @@ export default function ConfigSettings() {
                 min={60}
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">OCR 采样 DPI</label>
+              <input
+                type="number"
+                min={150}
+                max={400}
+                step={50}
+                value={form.ocr_oversample || 200}
+                onChange={(e) => updateForm({ocr_oversample: parseInt(e.target.value)})}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <span className="text-xs text-gray-400">越低越快，150-400，推荐 200</span>
             </div>
           </div>
 

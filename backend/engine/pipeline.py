@@ -1531,6 +1531,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     ocr_lang = config.get("ocr_languages", "chi_sim+eng")
     ocr_jobs = config.get("ocr_jobs", 4)
     ocr_timeout = config.get("ocr_timeout", 7200)
+    ocr_oversample = str(config.get("ocr_oversample", 200))
 
     task_store.add_log(task_id, f"OCR engine: {ocr_engine}, languages: {ocr_lang}, jobs: {ocr_jobs}")
 
@@ -1665,7 +1666,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 _py_for_ocr, "-m", "ocrmypdf",
                 "--optimize", "0",
                 "--force-ocr",
-                "--oversample", "200",
+                "--oversample", ocr_oversample,
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", str(ocr_jobs),
                 "--output-type", "pdf",
@@ -1718,6 +1719,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         ocr_lang=ocr_lang,
                         num_workers=ocr_jobs,
                         timeout_per_chunk=ocr_timeout,
+                        oversample=int(ocr_oversample),
                         add_log=lambda msg: task_store.add_log(task_id, f"  {msg}"),
                         emit_progress=lambda **kw: _emit_progress(task_id, **kw),
                     ),
@@ -1731,7 +1733,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     _paddle_venv_py, "-m", "ocrmypdf",
                     "--plugin", "ocrmypdf_paddleocr",
                     "--optimize", "0",
-                    "--oversample", "200",
+                    "--oversample", ocr_oversample,
                     "-l", ocr_lang or "chi_sim+eng",
                     "-j", "1",
                     "--output-type", "pdf",

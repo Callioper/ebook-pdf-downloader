@@ -12,6 +12,7 @@
   "ocr_jobs": 4,
   "ocr_languages": "chi_sim+eng",
   "ocr_timeout": 7200,
+  "ocr_oversample": 200,
   "nlc_max_workers": 5,
   "ebook_data_geter_path": "",
   "ebook_db_path": "",
