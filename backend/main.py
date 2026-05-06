@@ -29,6 +29,19 @@ from task_store import task_store
 from version import VERSION
 from engine.flaresolverr import stop_flaresolverr
 
+import sys
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 logger = logging.getLogger("book-downloader")
 
 

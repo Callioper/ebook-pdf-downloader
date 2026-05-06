@@ -8,8 +8,10 @@ import json
 import logging
 import os
 import re
+import sys
 from typing import Any, Dict, List, Optional
 
+import fitz
 import requests
 from bs4 import BeautifulSoup
 
@@ -171,15 +173,18 @@ async def apply_bookmark_to_pdf(pdf_path: str, bookmark: str, python_cmd: str = 
     if not os.path.exists(pdf_path):
         return False
 
-    # First try: direct import (works in dev/venv)
+    # First try: direct import (works in dev/venv and frozen exe with fitz bundled)
     try:
-        import fitz
+        try:
+            import fitz as _fitz
+        except ImportError:
+            import pymupdf as _fitz
 
         toc = await parse_bookmark_hierarchy(bookmark)
         if not toc:
             return False
 
-        doc = fitz.open(pdf_path)
+        doc = _fitz.open(pdf_path)
         pdf_toc = _convert_to_pdf_toc(toc)
         doc.set_toc(pdf_toc)
         doc.save(pdf_path, incremental=True)
@@ -188,11 +193,16 @@ async def apply_bookmark_to_pdf(pdf_path: str, bookmark: str, python_cmd: str = 
     except ImportError:
         pass  # fitz not available, try subprocess fallback
     except Exception as e:
-        logger.warning(f"apply_bookmark_to_pdf error: {e}")
+        logger.warning(f"apply_bookmark_to_pdf direct error: {e}")
         return False
 
     # Fallback: use system Python subprocess (works in frozen exe)
     if not python_cmd:
+        logger.warning("apply_bookmark_to_pdf: no python_cmd provided")
+        return False
+    # Ensure we don't try to run the exe itself as a subprocess
+    if getattr(sys, 'frozen', False) and python_cmd == sys.executable:
+        logger.warning("apply_bookmark_to_pdf: python_cmd is frozen exe, skipping subprocess")
         return False
     try:
         toc = await parse_bookmark_hierarchy(bookmark)

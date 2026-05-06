@@ -711,21 +711,6 @@ async def check_ocr(engine: str = Query(default="")):
                         return {"ok": False, "engine": "tesseract", "message": "Tesseract 已通过 winget 注册但可能未完整安装，点击安装按钮重新安装"}
                 except FileNotFoundError:
                     pass
-        elif engine == "easyocr":
-            # Use system Python to check (pip install goes to system Python, not frozen exe)
-            py = _pip_install_cmd()[0]
-            r = subprocess.run([py, "-c", "import easyocr; print(easyocr.__version__)"],
-                               capture_output=True, text=True, timeout=10)
-            if r.returncode == 0:
-                ver = r.stdout.strip().split("\n")[0]
-                return {"ok": True, "engine": "easyocr", "version": ver}
-            try:
-                import site; user_site = site.getusersitepackages()
-                if user_site not in sys.path: sys.path.insert(0, user_site)
-                import easyocr
-                return {"ok": True, "engine": "easyocr"}
-            except ImportError:
-                pass
         elif engine == "paddleocr":
             _base_dir = os.path.dirname(os.path.dirname(__file__))
             _venv_candidates = [
@@ -949,14 +934,6 @@ async def install_ocr(body: InstallOCRRequest):
             if r3.returncode == 0:
                 return {"ok": True, "message": "PaddleOCR venv 安装完成"}
             return {"ok": False, "message": f"ocrmypdf-paddleocr 插件安装失败: {r3.stderr[-200:]}"}
-        elif engine == "easyocr":
-            CREATE_NO_WINDOW = 0x08000000
-            cmd = _pip_install_cmd() + ["ocrmypdf-easyocr"]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300,
-                creationflags=CREATE_NO_WINDOW,
-            )
-            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:] or result.stderr.strip()[-500:]}
         elif engine == "appleocr":
             if sys.platform != "darwin":
                 return {"ok": False, "message": "AppleOCR 仅 macOS 支持"}

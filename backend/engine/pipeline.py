@@ -1533,6 +1533,16 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     ocr_jobs = config.get("ocr_jobs", 4)
     ocr_timeout = config.get("ocr_timeout", 7200)
     ocr_oversample = str(config.get("ocr_oversample", 200))
+    _opt_level = "0"
+    if config.get("pdf_compress", False):
+        import shutil as _opt_sh
+        if _opt_sh.which("gswin64c") or _opt_sh.which("gs"):
+            _opt_level = "1"
+            task_store.add_log(task_id, "PDF compression enabled (GhostScript found)")
+        else:
+            task_store.add_log(task_id, "PDF compression requested but GhostScript not found, skipping")
+    else:
+        task_store.add_log(task_id, "PDF compression disabled")
 
     task_store.add_log(task_id, f"OCR engine: {ocr_engine}, languages: {ocr_lang}, jobs: {ocr_jobs}")
 
@@ -1565,19 +1575,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     # ── Ensure the right OCR plugin is (un)installed ──
     try:
         import subprocess as _sp
-        _pip_cmd = [_py_for_ocr, "-m", "pip"]
-        if ocr_engine == "easyocr":
-            _r = _sp.run(_pip_cmd + ["install", "ocrmypdf-easyocr"],
-                         capture_output=True, text=True, timeout=30)
-            if _r.returncode != 0:
-                task_store.add_log(task_id, f"EasyOCR plugin install failed: {_r.stderr[-200:]}")
-        else:
-            _r = _sp.run(_pip_cmd + ["list", "--format=columns"],
-                         capture_output=True, text=True, timeout=15)
-            if "ocrmypdf-easyocr" in _r.stdout:
-                _sp.run(_pip_cmd + ["uninstall", "-y", "ocrmypdf-easyocr"],
-                        capture_output=True, timeout=15)
-                task_store.add_log(task_id, "OCR: uninstalled ocrmypdf-easyocr")
 
         if ocr_engine == "llm_ocr":
             # No plugin management needed for LLM OCR (uses HTTP API)
@@ -1633,7 +1630,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 _py_for_ocr, "-m", "ocrmypdf",
                 "--ocr-engine", "tesseract",
                 "--force-ocr",
-                "--optimize", "0",
+                "--optimize", _opt_level,
+                "--force-ocr",
+                "--oversample", ocr_oversample,
                 "-l", ocr_lang,
                 "-j", str(ocr_jobs),
                 "--output-type", "pdf",
@@ -1645,51 +1644,22 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             try:
                 _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages, output_pdf=output_pdf)
                 if _exit == 0:
-                    os.replace(output_pdf, pdf_path)
-                    task_store.add_log(task_id, "OCR completed successfully")
-                    report["ocr_done"] = True
+                    task_store.add_log(task_id, "OCR completed, validating quality...")
+                    if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
+                        os.replace(output_pdf, pdf_path)
+                        task_store.add_log(task_id, "OCR quality check passed")
+                        report["ocr_done"] = True
+                    else:
+                        task_store.add_log(task_id, "OCR quality check failed (possible garbled text), keeping original PDF")
+                        try:
+                            os.remove(output_pdf)
+                        except Exception:
+                            pass
                 else:
-                    task_store.add_log(task_id, f"OCR failed with exit code {_exit}")
+                    task_store.add_log(task_id, f"Tesseract failed with exit code {_exit}")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100, "detail": "完成"})
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, f"OCR timed out after {ocr_timeout}s")
-        elif ocr_engine == "easyocr":
-            task_store.add_log(task_id, "Running OCRmyPDF with EasyOCR...")
-
-            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
-                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
-                report["ocr_done"] = True
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-                return report
-
-            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
-            cmd = [
-                _py_for_ocr, "-m", "ocrmypdf",
-                "--optimize", "0",
-                "--force-ocr",
-                "--oversample", ocr_oversample,
-                "-l", ocr_lang or "chi_sim+eng",
-                "-j", str(ocr_jobs),
-                "--output-type", "pdf",
-                "--pdf-renderer", "sandwich",
-                "--easyocr-batch-size", "8",
-                "--easyocr-workers", "2",
-                pdf_path,
-                output_pdf,
-            ]
-
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
-            try:
-                _exit = await _run_ocrmypdf_with_progress(task_id, cmd, timeout=ocr_timeout, total_pages=_total_pages, output_pdf=output_pdf)
-                if _exit == 0:
-                    os.replace(output_pdf, pdf_path)
-                    task_store.add_log(task_id, "OCR completed successfully")
-                    report["ocr_done"] = True
-                else:
-                    task_store.add_log(task_id, f"EasyOCR failed with exit code {_exit}")
-            except asyncio.TimeoutError:
-                task_store.add_log(task_id, f"EasyOCR timed out after {ocr_timeout}s")
-
         elif ocr_engine == "paddleocr":
             task_store.add_log(task_id, "Running OCRmyPDF with PaddleOCR...")
             
@@ -1721,6 +1691,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         num_workers=ocr_jobs,
                         timeout_per_chunk=ocr_timeout,
                         oversample=int(ocr_oversample),
+                        optimize=_opt_level,
                         add_log=lambda msg: task_store.add_log(task_id, f"  {msg}"),
                         emit_progress=lambda **kw: _emit_progress(task_id, **kw),
                     ),
@@ -1733,7 +1704,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 cmd = [
                     _paddle_venv_py, "-m", "ocrmypdf",
                     "--plugin", "ocrmypdf_paddleocr",
-                    "--optimize", "0",
+                    "--optimize", _opt_level,
                     "--oversample", ocr_oversample,
                     "-l", ocr_lang or "chi_sim+eng",
                     "-j", "1",
@@ -1994,3 +1965,4 @@ async def run_pipeline(task_id: str):
             "report": report,
         })
         await _emit(task_id, "task_failed", {"task_id": task_id, "error": str(e)})
+

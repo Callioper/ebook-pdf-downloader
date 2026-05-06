@@ -84,6 +84,7 @@ async def run_paddleocr_parallel(
     num_workers: int,
     timeout_per_chunk: int = 1800,
     oversample: int = 200,
+    optimize: str = "0",
     add_log: Optional[Callable] = None,
     emit_progress: Optional[Callable] = None,
 ) -> int:
@@ -112,7 +113,7 @@ async def run_paddleocr_parallel(
         cmd = [
             paddle_python, "-m", "ocrmypdf",
             "--plugin", "ocrmypdf_paddleocr",
-            "--optimize", "0",
+            "--optimize", optimize,
             "--oversample", str(oversample),
             "-l", ocr_lang or "chi_sim+eng",
             "-j", "1",

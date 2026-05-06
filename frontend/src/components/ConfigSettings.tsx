@@ -141,7 +141,6 @@ const DEFAULT_CONFIG: AppConfig = {
 const OCR_ENGINES = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
-  { key: 'easyocr', name: 'EasyOCR', desc: 'PyTorch 引擎，CPU 较慢' },
   { key: 'appleocr', name: 'AppleOCR', desc: '仅 macOS 支持' },
 ]
 
@@ -181,10 +180,10 @@ python -m pip install ocrmypdf
 
 \`\`\`powershell
 # 安装所有 OCR 引擎（推荐，一步到位）
-python -m pip install ocrmypdf-easyocr ocrmypdf-paddleocr paddleocr
+python -m pip install ocrmypdf-paddleocr paddleocr
 
 # 或分开安装
-python -m pip install ocrmypdf-easyocr paddleocr
+python -m pip install paddleocr
 python -m pip install ocrmypdf-paddleocr  # 需要先装好 paddleocr
 \`\`\`
 
@@ -209,7 +208,6 @@ winget install --id UB-Mannheim.TesseractOCR --accept-package-agreements --accep
 
 \`\`\`powershell
 python -c "import ocrmypdf; print('ocrmypdf:', ocrmypdf.__version__)"
-python -c "import easyocr; print('easyocr ok')"
 python -c "from paddle import paddle; print('paddle:', paddle.__version__)"
 "C:\\Program Files\\Tesseract-OCR\\tesseract.exe" --version
 \`\`\`
@@ -513,7 +511,7 @@ export default function ConfigSettings() {
   useEffect(() => {
     if (!config || autoOcrRef.current) return
     autoOcrRef.current = true
-    const engines = ['tesseract', 'paddleocr', 'easyocr', 'appleocr']
+    const engines = ['tesseract', 'paddleocr', 'appleocr']
     engines.forEach((eng) => {
       fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
         .then((r) => r.json())
@@ -1487,9 +1485,6 @@ export default function ConfigSettings() {
                     )}
                     {eng.key === 'paddleocr' && info?.installed && (info as any)?.venv && (
                       <p className="text-xs text-green-600 mb-1.5">运行环境: {(info as any).venv}</p>
-                    )}
-                    {eng.key === 'easyocr' && info?.installed && (
-                      <p className="text-xs text-amber-600 mb-1.5">警告: 安装后会自动拦截 Tesseract 引擎，切换引擎时自动处理</p>
                     )}
                     <div className="flex items-center gap-1.5">
                       <button
