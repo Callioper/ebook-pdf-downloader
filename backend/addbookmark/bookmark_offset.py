@@ -1,7 +1,5 @@
 """Calculate page offset between 书葵网 pages and actual PDF pages."""
 
-import fitz
-
 
 def find_toc_page_by_label(pdf_path: str) -> int:
     """
@@ -10,6 +8,7 @@ def find_toc_page_by_label(pdf_path: str) -> int:
     DuXiu scan naming: !00001.jpg = TOC page.
     Returns: 0-indexed physical page number, or -1 if not found.
     """
+    import fitz
     doc = fitz.open(pdf_path)
     for i in range(min(30, len(doc))):
         label = doc[i].get_label()
@@ -30,10 +29,10 @@ def detect_offset_by_label_match(
 
     Formula: offset = (anchor_physical_page + 1) - anchor_shukui_page
     """
+    import fitz
     scanned = fitz.open(scanned_pdf)
     ocr_doc = fitz.open(ocr_pdf)
 
-    # Parse first bookmark entry's page number
     lines = bookmark_text.strip().split('\n')
     anchor_shukui_page = None
     for line in lines:
@@ -50,7 +49,6 @@ def detect_offset_by_label_match(
         ocr_doc.close()
         return 0
 
-    # Find label=000001.jpg in scanned PDF
     stacks_anchor_page = None
     for i in range(len(scanned)):
         if scanned[i].get_label() == '000001.jpg':
