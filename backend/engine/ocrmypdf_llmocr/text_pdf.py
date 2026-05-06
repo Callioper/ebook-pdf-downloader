@@ -1,12 +1,9 @@
 """Create a text-only PDF with invisible text layer positioned by estimated line heights."""
 
-import logging
 from pathlib import Path
 
 import pikepdf
 from PIL import Image
-
-log = logging.getLogger(__name__)
 
 
 def create_text_only_pdf(
@@ -29,7 +26,7 @@ def create_text_only_pdf(
         _write_empty_pdf(output_pdf)
         return
 
-    lines = page_text.split('\n')
+    lines = page_text.splitlines()
     lines = [l for l in lines if l.strip()]
     if not lines:
         _write_empty_pdf(output_pdf)
@@ -54,7 +51,6 @@ def create_text_only_pdf(
     content.write(b'3 Tr\n')
     content.write(b'BT\n')
 
-    font_name = b'/F1'
     font_size = line_h_pt * 0.7
     content.write(f'{font_size:.2f} Tf\n'.encode('ascii'))
 
@@ -62,23 +58,33 @@ def create_text_only_pdf(
         y_pt = page_h_pt - margin_pt - (i + 0.3) * line_h_pt
         x_pt = margin_pt * 0.5
         content.write(f'1 0 0 1 {x_pt:.2f} {y_pt:.2f} Tm\n'.encode('ascii'))
-        escaped = (
-            line_text.replace('\\', '\\\\')
-            .replace('(', '\\(')
-            .replace(')', '\\)')
-        )
-        content.write(f'({escaped}) Tj\n'.encode('utf-8'))
+        hex_str = line_text.encode('utf-16-be').hex()
+        content.write(f'<{hex_str}> Tj\n'.encode('ascii'))
 
     content.write(b'ET\n')
 
     page.contents_add(content)
+    font_ref = pikepdf.Name('/F1')
     resources = pikepdf.Dictionary({
         '/Font': pikepdf.Dictionary({
             '/F1': pikepdf.Dictionary({
                 '/Type': '/Font',
-                '/Subtype': '/Type1',
+                '/Subtype': '/Type0',
                 '/BaseFont': '/Courier',
-                '/Encoding': '/WinAnsiEncoding',
+                '/Encoding': '/Identity-H',
+                '/DescendantFonts': pikepdf.Array([
+                    pikepdf.Dictionary({
+                        '/Type': '/Font',
+                        '/Subtype': '/CIDFontType2',
+                        '/BaseFont': '/Courier',
+                        '/CIDSystemInfo': pikepdf.Dictionary({
+                            '/Registry': '(Adobe)',
+                            '/Ordering': '(Identity)',
+                            '/Supplement': 0,
+                        }),
+                        '/DW': int(font_size * 0.6),
+                    }),
+                ]),
             }),
         }),
     })

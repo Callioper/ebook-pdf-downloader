@@ -44,9 +44,9 @@ class LlmOcrEngine(OcrEngine):
         """Called by ocrmypdf for each page image."""
         import base64
 
-        from .text_pdf import create_text_only_pdf
+        from .text_pdf import create_text_only_pdf, _write_empty_pdf
 
-        img_bytes = open(input_file, 'rb').read()
+        img_bytes = Path(input_file).read_bytes()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
 
         endpoint = getattr(options, 'llm_ocr_endpoint', 'http://localhost:11434')
@@ -121,11 +121,3 @@ def _call_llm_sync(endpoint: str, model: str, api_key: str, img_b64: str, lang: 
         log.warning(f"LLM OCR page error: {e}")
         return None
 
-
-def _write_empty_pdf(output_pdf):
-    """Minimal empty PDF for pages with no text."""
-    import pikepdf
-    pdf = pikepdf.Pdf.new()
-    pdf.add_blank_page()
-    pdf.save(output_pdf)
-    pdf.close()
