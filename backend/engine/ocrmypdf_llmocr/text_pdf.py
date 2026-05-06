@@ -1,9 +1,51 @@
 """Create a text-only PDF with invisible text layer positioned by estimated line heights."""
 
+import os
 from pathlib import Path
 
 from fpdf import FPDF
+from fpdf.enums import TextMode
 from PIL import Image
+
+
+def _find_cjk_font() -> str:
+    """Find a CJK-capable TTF/OTC font on the system. Returns path or empty string."""
+    candidates = [
+        # Windows — prefer .ttf over .ttc (fpdf2 has subsetting issues with .ttc)
+        r'C:\Windows\Fonts\simhei.ttf',
+        r'C:\Windows\Fonts\simkai.ttf',
+        r'C:\Windows\Fonts\simfang.ttf',
+        r'C:\Windows\Fonts\STSONG.TTF',
+        r'C:\Windows\Fonts\STKAITI.TTF',
+        r'C:\Windows\Fonts\msyh.ttc',
+        r'C:\Windows\Fonts\msyh.ttf',
+        r'C:\Windows\Fonts\simsun.ttc',
+        # Linux
+        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+        '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+        # macOS
+        '/System/Library/Fonts/PingFang.ttc',
+        '/System/Library/Fonts/STHeiti Light.ttc',
+        '/Library/Fonts/Arial Unicode.ttf',
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    # Try fontconfig on Linux
+    try:
+        import subprocess
+        r = subprocess.run(['fc-list', ':lang=zh', 'file'], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            first = r.stdout.strip().split('\n')[0]
+            path = first.split(':')[0].strip()
+            if os.path.exists(path):
+                return path
+    except Exception:
+        pass
+    return ''
 
 
 def create_text_only_pdf(
@@ -17,7 +59,7 @@ def create_text_only_pdf(
     This PDF is later grafted onto the original page image by ocrmypdf's
     sandwich renderer, giving each text line approximate position matching.
 
-    Uses fpdf2 which supports CJK fonts natively via built-in Unicode font.
+    Uses fpdf2 with system CJK font for Unicode text embedding.
     """
     if not page_text or not page_text.strip():
         _write_empty_pdf(output_pdf)
@@ -40,17 +82,23 @@ def create_text_only_pdf(
     margin_pt = page_h_pt * 0.05
     usable_h = page_h_pt - 2 * margin_pt
     line_h_pt = usable_h / max(len(lines), 1)
-    font_size = line_h_pt * 0.7
+    # Invisible text — use a small fixed font size so CJK text fits in page width
+    font_size = min(12.0, line_h_pt * 0.7)
 
     pdf = FPDF(unit='pt', format=(page_w_pt, page_h_pt))
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
-    # Use built-in Unicode font (supports CJK)
-    pdf.add_font('Noto', '', r'C:\Windows\Fonts\msyh.ttc', uni=True)
-    pdf.set_font('Noto', '', font_size)
+
+    font_path = _find_cjk_font()
+    if font_path:
+        pdf.add_font('CJK', '', font_path)
+        pdf.set_font('CJK', '', font_size)
+    else:
+        # Fallback: use core font (no CJK glyphs but text is selectable via Unicode)
+        pdf.set_font('Courier', '', font_size)
+
     pdf.set_text_color(0, 0, 0)
-    # Invisible text: stored in PDF but not painted on screen
-    pdf._out('3 Tr')
+    pdf.text_mode = TextMode.INVISIBLE
 
     for i, line_text in enumerate(lines):
         y_pt = margin_pt + i * line_h_pt
