@@ -1734,6 +1734,83 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             else:
                 task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
+        elif ocr_engine == "llm_ocr":
+            task_store.add_log(task_id, "Running LLM-based OCR via llmocr plugin...")
+
+            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
+                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
+                report["ocr_done"] = True
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            llm_endpoint = config.get("llm_ocr_endpoint", "http://localhost:11434")
+            llm_model = config.get("llm_ocr_model", "")
+            llm_api_key = config.get("llm_ocr_api_key", "")
+
+            if not llm_endpoint or not llm_model:
+                task_store.add_log(task_id, "LLM OCR: endpoint or model not configured")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
+
+            cmd = [
+                _py_for_ocr, "-m", "ocrmypdf",
+                "--plugin", "llmocr",
+                "--llm-ocr-endpoint", llm_endpoint,
+                "--llm-ocr-model", llm_model,
+                "--llm-ocr-lang", ocr_lang or "chi_sim+eng",
+                "--llm-ocr-timeout", "300",
+                "--optimize", _opt_level,
+                "--oversample", ocr_oversample,
+                "-j", str(ocr_jobs),
+                "--output-type", "pdf",
+                "--pdf-renderer", "sandwich",
+                pdf_path,
+                output_pdf,
+            ]
+            if llm_api_key:
+                cmd.insert(cmd.index("--llm-ocr-lang") + 2, "--llm-ocr-api-key")
+                cmd.insert(cmd.index("--llm-ocr-api-key") + 1, llm_api_key)
+
+            _engine_dir = os.path.dirname(__file__)
+            _ocr_env = {
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    [_engine_dir] + os.environ.get("PYTHONPATH", "").split(os.pathsep)
+                    if os.environ.get("PYTHONPATH")
+                    else [_engine_dir]
+                ),
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONIOENCODING": "utf-8",
+            }
+
+            try:
+                _exit = await _run_ocrmypdf_with_progress(
+                    task_id, cmd, env=_ocr_env,
+                    timeout=ocr_timeout, total_pages=_total_pages,
+                    output_pdf=output_pdf,
+                )
+                if _exit == 0:
+                    task_store.add_log(task_id, "LLM OCR completed, validating quality...")
+                    if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
+                        os.replace(output_pdf, pdf_path)
+                        task_store.add_log(task_id, "LLM OCR quality check passed")
+                        report["ocr_done"] = True
+                    else:
+                        task_store.add_log(task_id, "LLM OCR quality check failed, keeping original PDF")
+                        try:
+                            os.remove(output_pdf)
+                        except Exception:
+                            pass
+                else:
+                    task_store.add_log(task_id, f"LLM OCR failed with exit code {_exit}")
+            except asyncio.TimeoutError:
+                task_store.add_log(task_id, f"LLM OCR timed out after {ocr_timeout}s")
+            except Exception as e:
+                task_store.add_log(task_id, f"LLM OCR error: {e}")
+
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
         task_store.add_log(task_id, "ocrmypdf not found in PATH — ocrmypdf 未安装: pip install ocrmypdf, 或见设置页→OCR→安装指引。"
