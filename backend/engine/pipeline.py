@@ -1793,7 +1793,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 "--oversample", ocr_oversample,
                 "-j", "1",
                 "--output-type", "pdf",
-                "--pdf-renderer", "sandwich",
                 pdf_path,
                 output_pdf,
             ]
