@@ -1533,6 +1533,7 @@ export default function ConfigSettings() {
           </div>
 
           {/* LLM OCR configuration */}
+          {form.ocr_engine === 'llm_ocr' && (
           <div className="border-t border-gray-200 pt-3 space-y-2">
               <span className="text-xs font-medium text-gray-600 block">LLM OCR 配置</span>
               <div>
@@ -1573,8 +1574,9 @@ export default function ConfigSettings() {
                 提示：使用前请确保 Ollama/LM Studio 已运行，且模型为多模态（vision）模型。点击设置页上方检测按钮验证。
               </p>
             </div>
+          )}
 
-          <div className="grid grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-4 gap-3 pt-2">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">语言</label>
               <select
