@@ -211,6 +211,12 @@ def main():
 
     test("frontend/dist/index.html exists", lambda: assert_file_exists(os.path.join(FRONTEND_DIR, "dist", "index.html")))
 
+    # ==== Section 8: PDF Parallel (1 test) ====
+    print("\n  [Section 8] PDF Parallel")
+    print("  " + "-" * 40)
+
+    test("pdf split/merge round-trip", test_pdf_split_merge)
+
     # ==== Summary ====
     total = passed + failed
     print(f"\n  {'='*40}")
@@ -225,6 +231,55 @@ def assert_file_exists(filepath):
     """Assert that a file exists"""
     assert os.path.exists(filepath), f"File not found: {filepath}"
     assert os.path.isfile(filepath), f"Path exists but is not a file: {filepath}"
+
+def test_pdf_split_merge():
+    """Test that split_pdf and merge_pdfs round-trip correctly."""
+    import fitz, os, tempfile
+    from engine.pdf_parallel import split_pdf, merge_pdfs
+
+    # Create a 5-page test PDF
+    doc = fitz.open()
+    for i in range(5):
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((50, 50 + i * 20), f"Page {i+1}", fontname="helv", fontsize=12)
+
+    fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    doc.save(pdf_path)
+    doc.close()
+
+    try:
+        chunks = split_pdf(pdf_path, 3)
+        assert len(chunks) == 3, f"Expected 3 chunks, got {len(chunks)}"
+
+        # Verify total pages match
+        total = 0
+        for c in chunks:
+            d = fitz.open(c)
+            total += len(d)
+            d.close()
+        assert total == 5, f"Expected 5 pages total, got {total}"
+
+        # Merge back
+        merged_path = pdf_path.replace('.pdf', '_merged.pdf')
+        ok = merge_pdfs(chunks, merged_path)
+        assert ok, "merge_pdfs failed"
+        assert os.path.exists(merged_path)
+
+        d = fitz.open(merged_path)
+        assert len(d) == 5, f"Merged PDF has {len(d)} pages, expected 5"
+        for i in range(5):
+            text = d[i].get_text().strip()
+            assert f"Page {i+1}" in text, f"Page {i+1} text mismatch: {text}"
+        d.close()
+
+        # Cleanup
+        for c in chunks:
+            os.remove(c)
+        os.remove(merged_path)
+    finally:
+        os.remove(pdf_path)
+
 
 if __name__ == "__main__":
     main()
