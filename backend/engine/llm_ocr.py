@@ -3,8 +3,6 @@
 import base64
 import io
 import logging
-import os
-import time
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
