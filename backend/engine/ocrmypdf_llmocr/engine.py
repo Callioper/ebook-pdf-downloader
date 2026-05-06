@@ -106,10 +106,8 @@ class LlmOcrEngine(OcrEngine):
 
         # 6. Build OcrElement tree
         if llm_text and all_ts_words:
-            # Clean LLM text: keep only meaningful characters, join into one string
-            llm_chars = [c for c in llm_text if c.strip() or c == ' ']
-            # Map LLM characters to Tesseract bboxes (1:1)
-            full_text = _build_llm_tree(page_el, ts_lines, llm_chars, all_ts_words)
+            llm_lines = [l.strip() for l in llm_text.split('\n') if l.strip()]
+            full_text = _build_llm_tree_v2(page_el, ts_lines, llm_lines)
         else:
             # Fallback: Tesseract's own text
             full_text = _build_tesseract_tree(page_el, ts_lines)
@@ -188,45 +186,46 @@ def _build_tesseract_tree(page_el, ts_lines) -> str:
     return '\n'.join(full_parts)
 
 
-def _build_llm_tree(page_el, ts_lines, llm_chars, all_ts_words) -> str:
-    """Build OcrElement tree using Tesseract bboxes + LLM text.
-    Maps LLM characters 1:1 to Tesseract word positions (top-to-bottom, left-to-right).
-    Returns full page text string."""
+def _build_llm_tree_v2(page_el, ts_lines, llm_lines) -> str:
+    """Build OcrElement tree using Tesseract line bboxes + LLM line text.
+    Each Tesseract line gets the corresponding LLM line's full text as one WORD
+    at the line-level bbox. This avoids per-character bbox validation issues
+    that cause text suppression by ocrmypdf's aspect ratio checks."""
     from ocrmypdf.models.ocr_element import OcrElement, OcrClass, BoundingBox
 
-    char_idx = 0
     full_parts = []
-
-    for line_info in ts_lines:
+    for i, line_info in enumerate(ts_lines):
         words = line_info['words']
         if not words:
             continue
 
+        # Line bbox: union of all word bboxes in this line
         l_min_x = min(w['bbox'].left for w in words)
         l_min_y = min(w['bbox'].top for w in words)
         l_max_x = max(w['bbox'].right for w in words)
         l_max_y = max(w['bbox'].bottom for w in words)
         line_bbox = BoundingBox(l_min_x, l_min_y, l_max_x, l_max_y)
+
+        # Get corresponding LLM text for this line
+        if i < len(llm_lines):
+            line_text = llm_lines[i]
+        else:
+            # Fall back to Tesseract text for extra lines
+            line_text = ''.join(w['text'] for w in words if w['text'])
+
+        if not line_text:
+            continue
+
         line_el = OcrElement(ocr_class=OcrClass.LINE, bbox=line_bbox)
-
-        line_chars = []
-        for w in words:
-            if char_idx >= len(llm_chars):
-                break
-            # Map one LLM character to this Tesseract bbox
-            word_el = OcrElement(
-                ocr_class=OcrClass.WORD,
-                bbox=w['bbox'],
-                text=llm_chars[char_idx],
-                confidence=0.9,
-            )
-            line_el.children.append(word_el)
-            line_chars.append(llm_chars[char_idx])
-            char_idx += 1
-
-        if line_chars:
-            page_el.children.append(line_el)
-            full_parts.append(''.join(line_chars))
+        word_el = OcrElement(
+            ocr_class=OcrClass.WORD,
+            bbox=line_bbox,
+            text=line_text,
+            confidence=0.9,
+        )
+        line_el.children.append(word_el)
+        page_el.children.append(line_el)
+        full_parts.append(line_text)
 
     return '\n'.join(full_parts)
 
