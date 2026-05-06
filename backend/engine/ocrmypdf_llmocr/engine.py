@@ -63,8 +63,8 @@ class LlmOcrEngine(OcrEngine):
 
     @staticmethod
     def generate_ocr(input_file, options, page_number: int = 0):
-        """Generate OCR output using Tesseract for layout + LLM for text quality.
-        Returns (page_element, full_text_string)."""
+        """Generate OCR output. Uses Tesseract for precise bbox+text (primary text layer),
+        LLM vision model for high-quality side car text (returned as full_text string)."""
         from ocrmypdf.models.ocr_element import OcrElement, OcrClass, BoundingBox
 
         # 1. Get image dimensions
@@ -81,10 +81,13 @@ class LlmOcrEngine(OcrEngine):
             page_number=page_number,
         )
 
-        # 3. Get word-level bboxes from Tesseract (fast, gives precise positions)
+        # 3. Get word-level bboxes and text from Tesseract (precise, always aligned)
         ts_lines = _tesseract_word_boxes(input_file)
 
-        # 4. Get high-quality text from LLM
+        # 4. Build OcrElement tree using Tesseract's own text+bbox (guaranteed alignment)
+        tesseract_full_text = _build_tesseract_tree(page_el, ts_lines)
+
+        # 5. Get LLM text for high-quality search (side car only, no bbox needed)
         endpoint = getattr(options, 'llm_ocr_endpoint', 'http://localhost:11434')
         model = getattr(options, 'llm_ocr_model', '')
         api_key = getattr(options, 'llm_ocr_api_key', '')
@@ -97,17 +100,10 @@ class LlmOcrEngine(OcrEngine):
             img_b64 = base64.b64encode(img_bytes).decode('utf-8')
             llm_text = _call_llm_sync(endpoint, model, api_key, img_b64, lang)
 
-        # 5. Build text lines — prefer LLM text, fall back to Tesseract text
-        if llm_text and llm_text.strip():
-            llm_lines = [l.strip() for l in llm_text.split('\n') if l.strip()]
-            _build_ocr_tree(page_el, ts_lines, llm_lines)
-            full_text = '\n'.join(llm_lines)
-        else:
-            _build_ocr_tree(page_el, ts_lines, None)
-            full_text = '\n'.join(
-                ' '.join(w['text'] for w in line['words'])
-                for line in ts_lines
-            )
+        # Return LLM text as side car (better for search), fall back to Tesseract
+        full_text = (llm_text or tesseract_full_text).strip()
+        if not full_text:
+            full_text = tesseract_full_text
 
         return page_el, full_text
 
@@ -137,45 +133,30 @@ class LlmOcrEngine(OcrEngine):
         create_text_only_pdf(output_pdf, text, input_file)
 
 
-def _build_ocr_tree(page_el, ts_lines, llm_lines):
-    """Build OcrElement trees from Tesseract bboxes + optional LLM text."""
+def _build_tesseract_tree(page_el, ts_lines) -> str:
+    """Build OcrElement tree using Tesseract's own text + word-level bboxes.
+    These are always correctly aligned because both come from the same source.
+    Returns the full page text string."""
     from ocrmypdf.models.ocr_element import OcrElement, OcrClass, BoundingBox
 
-    for i, line_info in enumerate(ts_lines):
-        # Line bbox: union of all word bboxes
+    full_parts = []
+    for line_info in ts_lines:
         words = line_info['words']
         if not words:
             continue
+
+        # Line bbox: union of all word bboxes in this line
         l_min_x = min(w['bbox'].left for w in words)
         l_min_y = min(w['bbox'].top for w in words)
         l_max_x = max(w['bbox'].right for w in words)
         l_max_y = max(w['bbox'].bottom for w in words)
         line_bbox = BoundingBox(l_min_x, l_min_y, l_max_x, l_max_y)
-
         line_el = OcrElement(ocr_class=OcrClass.LINE, bbox=line_bbox)
 
-        # Determine text for this line
-        if llm_lines and i < len(llm_lines):
-            line_text = llm_lines[i]
-        else:
-            line_text = ' '.join(w['text'] for w in words)
-
-        # Distribute line text across words proportionally by bbox width
-        total_width = sum(
-            (w['bbox'].right - w['bbox'].left) for w in words
-        ) or 1
-        text_parts = line_text.split() if line_text.strip() else [line_text]
-        if not text_parts:
-            text_parts = ['']
-
-        for j, w in enumerate(words):
-            # Proportional text distribution
-            if j < len(text_parts):
-                word_text = text_parts[j]
-            else:
-                word_text = ''
-
-            # Estimate confidence from Tesseract if available
+        line_text_parts = []
+        for w in words:
+            if not w['text']:
+                continue
             conf = w.get('conf', None)
             if conf is not None and conf >= 0:
                 conf = float(conf) / 100.0
@@ -185,12 +166,17 @@ def _build_ocr_tree(page_el, ts_lines, llm_lines):
             word_el = OcrElement(
                 ocr_class=OcrClass.WORD,
                 bbox=w['bbox'],
-                text=word_text,
+                text=w['text'],
                 confidence=conf,
             )
             line_el.children.append(word_el)
+            line_text_parts.append(w['text'])
 
         page_el.children.append(line_el)
+        if line_text_parts:
+            full_parts.append(''.join(line_text_parts))
+
+    return '\n'.join(full_parts)
 
 
 def _find_tesseract() -> str | None:
