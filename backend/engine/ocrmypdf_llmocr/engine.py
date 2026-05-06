@@ -69,8 +69,10 @@ class LlmOcrEngine(OcrEngine):
 
 
 def _call_llm_sync(endpoint: str, model: str, api_key: str, img_b64: str, lang: str) -> str | None:
-    """Synchronous wrapper around the LLM API call. Called from worker processes."""
+    """Synchronous wrapper around the LLM API call. Called from worker processes.
+    Retries on model-unloaded errors with exponential backoff."""
     import httpx
+    import time as _time
 
     lang_hint = "Chinese and English" if "chi_sim" in lang else "English"
 
@@ -101,23 +103,45 @@ def _call_llm_sync(endpoint: str, model: str, api_key: str, img_b64: str, lang: 
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    try:
-        resp = httpx.post(
-            f"{endpoint.rstrip('/')}/v1/chat/completions",
-            json=body,
-            headers=headers,
-            timeout=120,
-        )
-        if resp.status_code != 200:
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = httpx.post(
+                f"{endpoint.rstrip('/')}/v1/chat/completions",
+                json=body,
+                headers=headers,
+                timeout=120,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    return None
+                content = choices[0].get("message", {}).get("content", "")
+                return content if content else None
+
+            err_text = (resp.text or "")[:300].lower()
+            if "model" in err_text and (
+                "unloaded" in err_text
+                or "not loaded" in err_text
+                or "canceled" in err_text
+                or "cancelled" in err_text
+            ):
+                if attempt < max_retries:
+                    delay = min(2 ** attempt, 30)
+                    log.info(
+                        f"LLM OCR page: model unloaded, retrying in {delay}s (attempt {attempt}/{max_retries})"
+                    )
+                    _time.sleep(delay)
+                    continue
             log.warning(f"LLM OCR page failed: HTTP {resp.status_code}")
             return None
-        data = resp.json()
-        choices = data.get("choices", [])
-        if not choices:
+        except Exception as e:
+            log.warning(f"LLM OCR page error (attempt {attempt}): {e}")
+            if attempt < max_retries:
+                _time.sleep(min(2 ** attempt, 30))
+                continue
             return None
-        content = choices[0].get("message", {}).get("content", "")
-        return content if content else None
-    except Exception as e:
-        log.warning(f"LLM OCR page error: {e}")
-        return None
+
+    return None
 
