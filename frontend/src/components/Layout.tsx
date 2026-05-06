@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { API_BASE } from '../constants'
 import ConfirmDownloadModal from './ConfirmDownloadModal'
-import type { TaskItem } from '../types'
 
 interface UpdateInfo {
   current: string
@@ -28,63 +27,6 @@ export default function Layout() {
   const [downloadingPct, setDownloadingPct] = useState(0)
   const [installing, setInstalling] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Backend terminal state
-  const [terminalOpen, setTerminalOpen] = useState(false)
-  const [runningTasks, setRunningTasks] = useState<TaskItem[]>([])
-  const [taskLogs, setTaskLogs] = useState<Record<string, string[]>>({})
-  const logEndRef = useRef<HTMLDivElement>(null)
-
-  const statusBadge = (status: string) => {
-    const base = 'px-2 py-0.5 rounded-full text-xs font-medium '
-    if (status === 'running') return base + 'bg-blue-100 text-blue-700'
-    if (status === 'pending') return base + 'bg-yellow-100 text-yellow-700'
-    if (status === 'completed') return base + 'bg-green-100 text-green-700'
-    if (status === 'failed') return base + 'bg-red-100 text-red-700'
-    return base + 'bg-gray-100 text-gray-600'
-  }
-
-  const fetchRunningTasks = async (includeLogs: boolean = false) => {
-    try {
-      const res = await fetch(`${API_BASE}/tasks`)
-      const data = await res.json()
-      if (!data.tasks) return
-      const running = (data.tasks as TaskItem[]).filter(
-        (t: TaskItem) => t.status === 'running' || t.status === 'pending'
-      )
-      setRunningTasks(running)
-      if (includeLogs) {
-        const logsMap: Record<string, string[]> = {}
-        for (const t of running) {
-          if (t.logs && t.logs.length > 0) {
-            logsMap[t.task_id] = t.logs.slice(-20)
-          }
-        }
-        setTaskLogs(logsMap)
-      }
-    } catch (e) { console.warn('[Layout] fetch running tasks:', e) }
-  }
-
-  // Lightweight poll for navbar badge (no logs, slow interval)
-  useEffect(() => {
-    fetchRunningTasks(false)
-    const interval = setInterval(() => fetchRunningTasks(false), 8000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Heavy poll with logs only when terminal is open
-  useEffect(() => {
-    if (!terminalOpen) return
-    fetchRunningTasks(true)
-    const interval = setInterval(() => fetchRunningTasks(true), 5000)
-    return () => clearInterval(interval)
-  }, [terminalOpen])
-
-  useEffect(() => {
-    if (terminalOpen && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [runningTasks, taskLogs, terminalOpen])
 
   const checkUpdate = () => {
     setChecking(true)
@@ -300,79 +242,11 @@ export default function Layout() {
               {checking ? '↻' : '🔄'}
             </button>
             <span>v{version || '...'}</span>
-            <button
-              onClick={() => setTerminalOpen((v) => !v)}
-              className={`ml-2 px-2 py-0.5 rounded text-xs ${runningTasks.length > 0 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'hover:bg-gray-100 text-gray-400'}`}
-              title="任务状态终端"
-            >
-              {runningTasks.length > 0 ? `⚙ ${runningTasks.length} 任务运行中` : '终端'}
-            </button>
           </div>
           <a href="https://github.com/Callioper/book-downloader" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">
             github.com/Callioper/book-downloader
           </a>
         </div>
-
-        {/* Backend Terminal Panel */}
-        {terminalOpen && (
-          <div className="border-t border-gray-200 bg-gray-900 text-gray-300" style={{ maxHeight: '320px' }}>
-            <div className="flex items-center justify-between px-4 py-1.5 border-b border-gray-700">
-              <span className="text-xs font-medium text-gray-400">任务终端</span>
-              <button
-                onClick={() => setTerminalOpen(false)}
-                className="text-gray-500 hover:text-gray-300 text-lg leading-none"
-              >
-                ×
-              </button>
-            </div>
-            <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
-              {runningTasks.length === 0 ? (
-                <div className="px-4 py-3 text-xs text-gray-500">暂无运行中的任务</div>
-              ) : (
-                runningTasks.map((task) => {
-                  const logs = taskLogs[task.task_id] || []
-                  return (
-                    <div key={task.task_id} className="border-b border-gray-800 last:border-b-0">
-                      <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-800/50">
-                        <span className={`text-xs font-medium ${statusBadge(task.status).replace('px-2 py-0.5 rounded-full text-xs font-medium ', '')}`}>
-                          {statusBadge(task.status)}
-                        </span>
-                        <span className="text-xs font-medium text-gray-300 truncate max-w-[200px]">
-                          {task.title || '(无标题)'}
-                        </span>
-                        <span className="text-xs text-gray-500 ml-auto">{task.progress}%</span>
-                        <span className="text-xs text-gray-600">{task.current_step || '等待中'}</span>
-                      </div>
-                      <div className="px-4 py-1 font-mono text-xs space-y-0.5">
-                        {logs.length === 0 ? (
-                          <div className="text-gray-600">等待日志...</div>
-                        ) : (
-                          logs.map((line, i) => (
-                            <div
-                              key={i}
-                              className={
-                                line.includes('ERROR') || line.includes('error') || line.includes('失败')
-                                  ? 'text-red-400'
-                                  : line.includes('WARN')
-                                  ? 'text-yellow-400'
-                                  : line.includes('成功') || line.includes('completed')
-                                  ? 'text-green-400'
-                                  : 'text-gray-400'
-                              }
-                            >
-                              {line}
-                            </div>
-                          ))
-                        )}
-                        <div ref={logEndRef} />
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        )}
       </footer>
     </div>
   )

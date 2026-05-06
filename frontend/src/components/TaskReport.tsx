@@ -2,12 +2,11 @@ import type { TaskReport } from '../types'
 
 interface TaskReportProps {
   report: TaskReport
-  downloadDir?: string
   finishedDir?: string
   createdAt?: number
 }
 
-export default function TaskReport({ report, downloadDir, finishedDir, createdAt }: TaskReportProps) {
+export default function TaskReport({ report, finishedDir, createdAt }: TaskReportProps) {
   if (!report || Object.keys(report).length === 0) {
     return (
       <div className="text-xs text-gray-400 p-4 text-center">
@@ -76,18 +75,6 @@ export default function TaskReport({ report, downloadDir, finishedDir, createdAt
                   <tr className="border-b border-gray-50">
                     <td className="py-1.5 pr-3 text-xs text-gray-500 w-20 align-top">OCR路径</td>
                     <td className="py-1.5 text-xs text-gray-800 break-all font-mono">{outputFile}</td>
-                  </tr>
-                )}
-                {downloadDir && (
-                  <tr className="border-b border-gray-50">
-                    <td className="py-1.5 pr-3 text-xs text-gray-500 w-20 align-top">下载目录</td>
-                    <td className="py-1.5 text-xs text-gray-500 break-all font-mono">{downloadDir}</td>
-                  </tr>
-                )}
-                {finishedDir && (
-                  <tr className="border-b border-gray-50">
-                    <td className="py-1.5 pr-3 text-xs text-gray-500 w-20 align-top">输出目录</td>
-                    <td className="py-1.5 text-xs text-gray-500 break-all font-mono">{finishedDir}</td>
                   </tr>
                 )}
                 {report.completed_at && (
