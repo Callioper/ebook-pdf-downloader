@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ==== config.py ====
 # 职责：配置文件管理，加载、保存和更新应用配置
 # 入口函数：init_config(), get_config(), update_config(), load_config(), save_config()

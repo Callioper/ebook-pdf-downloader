@@ -133,7 +133,7 @@ export default function TaskListPage() {
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500">{task.source}</td>
                   <td className="px-4 py-3 text-xs text-gray-400">
-                    {new Date(task.created_at * 1000).toLocaleDateString()}
+                    {new Date(task.created_at * 1000).toLocaleString('zh-CN', { hour12: false })}
                   </td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1">

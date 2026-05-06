@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ==== pipeline.py ====
 # 职责：书籍下载处理流水线，协调元数据获取、下载、转换、OCR和书签
 # 入口函数：run_pipeline()

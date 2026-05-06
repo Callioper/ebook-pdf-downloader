@@ -18,6 +18,11 @@ a = Analysis(
         (str(NLC_DIR / "formatting.py"), "nlc/formatting.py"),
         (str(BACKEND_DIR / "engine"), "engine"),
         (str(BACKEND_DIR / "api"), "api"),
+        (str(BACKEND_DIR / "task_store.py"), "."),
+        (str(BACKEND_DIR / "ws_manager.py"), "."),
+        (str(BACKEND_DIR / "config.py"), "."),
+        (str(BACKEND_DIR / "search_engine.py"), "."),
+        (str(BACKEND_DIR / "version.py"), "."),
         (str(BACKEND_DIR.parent / "icon.ico"), "icon.ico"),
     ],
     excludes=[

@@ -63,8 +63,9 @@ class LlmOcrEngine(OcrEngine):
 
     @staticmethod
     def generate_ocr(input_file, options, page_number: int = 0):
-        """Generate OCR output. Uses Tesseract for precise bbox+text (primary text layer),
-        LLM vision model for high-quality side car text (returned as full_text string)."""
+        """Generate OCR output. Uses Tesseract for precise word-level bboxes,
+        LLM vision model for high-quality text. LLM characters are mapped
+        one-to-one to Tesseract bbox positions for correct alignment."""
         from ocrmypdf.models.ocr_element import OcrElement, OcrClass, BoundingBox
 
         # 1. Get image dimensions
@@ -81,13 +82,16 @@ class LlmOcrEngine(OcrEngine):
             page_number=page_number,
         )
 
-        # 3. Get word-level bboxes and text from Tesseract (precise, always aligned)
+        # 3. Get word-level bboxes from Tesseract (layout source)
         ts_lines = _tesseract_word_boxes(input_file)
 
-        # 4. Build OcrElement tree using Tesseract's own text+bbox (guaranteed alignment)
-        tesseract_full_text = _build_tesseract_tree(page_el, ts_lines)
+        # 4. Flatten all Tesseract words into ordered list (top-to-bottom, left-to-right)
+        all_ts_words = []
+        for line_info in ts_lines:
+            for w in line_info['words']:
+                all_ts_words.append(w)
 
-        # 5. Get LLM text for high-quality search (side car only, no bbox needed)
+        # 5. Get LLM text
         endpoint = getattr(options, 'llm_ocr_endpoint', 'http://localhost:11434')
         model = getattr(options, 'llm_ocr_model', '')
         api_key = getattr(options, 'llm_ocr_api_key', '')
@@ -100,10 +104,15 @@ class LlmOcrEngine(OcrEngine):
             img_b64 = base64.b64encode(img_bytes).decode('utf-8')
             llm_text = _call_llm_sync(endpoint, model, api_key, img_b64, lang)
 
-        # Return LLM text as side car (better for search), fall back to Tesseract
-        full_text = (llm_text or tesseract_full_text).strip()
-        if not full_text:
-            full_text = tesseract_full_text
+        # 6. Build OcrElement tree
+        if llm_text and all_ts_words:
+            # Clean LLM text: keep only meaningful characters, join into one string
+            llm_chars = [c for c in llm_text if c.strip() or c == ' ']
+            # Map LLM characters to Tesseract bboxes (1:1)
+            full_text = _build_llm_tree(page_el, ts_lines, llm_chars, all_ts_words)
+        else:
+            # Fallback: Tesseract's own text
+            full_text = _build_tesseract_tree(page_el, ts_lines)
 
         return page_el, full_text
 
@@ -175,6 +184,49 @@ def _build_tesseract_tree(page_el, ts_lines) -> str:
         page_el.children.append(line_el)
         if line_text_parts:
             full_parts.append(''.join(line_text_parts))
+
+    return '\n'.join(full_parts)
+
+
+def _build_llm_tree(page_el, ts_lines, llm_chars, all_ts_words) -> str:
+    """Build OcrElement tree using Tesseract bboxes + LLM text.
+    Maps LLM characters 1:1 to Tesseract word positions (top-to-bottom, left-to-right).
+    Returns full page text string."""
+    from ocrmypdf.models.ocr_element import OcrElement, OcrClass, BoundingBox
+
+    char_idx = 0
+    full_parts = []
+
+    for line_info in ts_lines:
+        words = line_info['words']
+        if not words:
+            continue
+
+        l_min_x = min(w['bbox'].left for w in words)
+        l_min_y = min(w['bbox'].top for w in words)
+        l_max_x = max(w['bbox'].right for w in words)
+        l_max_y = max(w['bbox'].bottom for w in words)
+        line_bbox = BoundingBox(l_min_x, l_min_y, l_max_x, l_max_y)
+        line_el = OcrElement(ocr_class=OcrClass.LINE, bbox=line_bbox)
+
+        line_chars = []
+        for w in words:
+            if char_idx >= len(llm_chars):
+                break
+            # Map one LLM character to this Tesseract bbox
+            word_el = OcrElement(
+                ocr_class=OcrClass.WORD,
+                bbox=w['bbox'],
+                text=llm_chars[char_idx],
+                confidence=0.9,
+            )
+            line_el.children.append(word_el)
+            line_chars.append(llm_chars[char_idx])
+            char_idx += 1
+
+        if line_chars:
+            page_el.children.append(line_el)
+            full_parts.append(''.join(line_chars))
 
     return '\n'.join(full_parts)
 

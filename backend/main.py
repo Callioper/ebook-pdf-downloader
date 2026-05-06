@@ -92,6 +92,11 @@ async def shutdown():
             stop_flaresolverr()
         except Exception:
             pass
+        try:
+            from task_store import task_store
+            task_store.flush()
+        except Exception:
+            pass
         os._exit(0)
 
     threading.Thread(target=_do_shutdown, daemon=True).start()

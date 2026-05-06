@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { API_BASE, PIPELINE_STEPS, STATUS_LABELS } from '../constants'
-import type { TaskItem, WSMessage } from '../types'
+import type { TaskItem, AppConfig, WSMessage } from '../types'
 import { statusBadge } from '../utils/statusBadge'
 import { useTaskWebSocket } from '../hooks/useTaskWebSocket'
 import StepProgressBar from '../components/StepProgressBar'
@@ -17,6 +17,11 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
+  const [cfg, setCfg] = useState<AppConfig | null>(null)
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/config`).then(r => setCfg(r.data)).catch(() => {})
+  }, [])
 
   const fetchTask = useCallback(async () => {
     if (!taskId) return
@@ -32,15 +37,23 @@ export default function TaskDetailPage() {
 
   useEffect(() => {
     fetchTask()
-    const interval = setInterval(fetchTask, 3000)
+    const interval = setInterval(fetchTask, 8000)
     return () => clearInterval(interval)
   }, [fetchTask])
+
+  const lastProgressRef = useRef(0)
 
   const handleWSMessage = useCallback((msg: WSMessage) => {
     if (msg.type === 'task_update' && msg.task) {
       setTask((prev) => prev ? { ...prev, ...msg.task } : (msg.task as TaskItem))
     }
     if (msg.type === 'step_progress') {
+      // Throttle: skip re-renders faster than 500ms for progress updates
+      const now = Date.now()
+      if (now - lastProgressRef.current < 500) {
+        return
+      }
+      lastProgressRef.current = now
       setTask((prev) =>
         prev
           ? {
@@ -61,7 +74,7 @@ export default function TaskDetailPage() {
     }
   }, [fetchTask])
 
-  useTaskWebSocket({ taskId: taskId || null, onUpdate: (t) => setTask(t), onMessage: handleWSMessage })
+  useTaskWebSocket({ taskId: taskId || null, onUpdate: (t) => setTask((prev) => prev ? { ...prev, ...t } : t), onMessage: handleWSMessage })
 
   const handleStart = async () => {
     if (!taskId) return
@@ -218,7 +231,7 @@ export default function TaskDetailPage() {
           <LogStream logs={task.logs || []} />
         </div>
 
-        <TaskReport report={task.report || {}} />
+        <TaskReport report={task.report || {}} downloadDir={cfg?.download_dir} finishedDir={cfg?.finished_dir} />
       </div>
 
       <div className="space-y-4">

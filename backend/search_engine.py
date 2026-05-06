@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ==== search_engine.py ====
 # 职责：SQLite电子书数据库搜索引擎，支持多数据库查询和路径检测
 # 入口函数：SearchEngine.search(), detect_database_paths()

@@ -44,7 +44,7 @@ export default function Layout() {
     return base + 'bg-gray-100 text-gray-600'
   }
 
-  const fetchRunningTasks = async () => {
+  const fetchRunningTasks = async (includeLogs: boolean = false) => {
     try {
       const res = await fetch(`${API_BASE}/tasks`)
       const data = await res.json()
@@ -53,22 +53,32 @@ export default function Layout() {
         (t: TaskItem) => t.status === 'running' || t.status === 'pending'
       )
       setRunningTasks(running)
-      // Collect logs from running tasks
-      const logsMap: Record<string, string[]> = {}
-      for (const t of running) {
-        if (t.logs && t.logs.length > 0) {
-          logsMap[t.task_id] = t.logs.slice(-50)
+      if (includeLogs) {
+        const logsMap: Record<string, string[]> = {}
+        for (const t of running) {
+          if (t.logs && t.logs.length > 0) {
+            logsMap[t.task_id] = t.logs.slice(-20)
+          }
         }
+        setTaskLogs(logsMap)
       }
-      setTaskLogs(logsMap)
     } catch (e) { console.warn('[Layout] fetch running tasks:', e) }
   }
 
+  // Lightweight poll for navbar badge (no logs, slow interval)
   useEffect(() => {
-    fetchRunningTasks()
-    const interval = setInterval(fetchRunningTasks, 3000)
+    fetchRunningTasks(false)
+    const interval = setInterval(() => fetchRunningTasks(false), 8000)
     return () => clearInterval(interval)
   }, [])
+
+  // Heavy poll with logs only when terminal is open
+  useEffect(() => {
+    if (!terminalOpen) return
+    fetchRunningTasks(true)
+    const interval = setInterval(() => fetchRunningTasks(true), 5000)
+    return () => clearInterval(interval)
+  }, [terminalOpen])
 
   useEffect(() => {
     if (terminalOpen && logEndRef.current) {

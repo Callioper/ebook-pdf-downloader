@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ==== tasks.py ====
 # 职责：任务管理API路由，处理任务的创建、查询、删除和控制
 # 入口函数：list_tasks(), create_task(), start_task(), cancel_task(), retry_task()
@@ -33,6 +34,10 @@ class TaskCreateRequest(BaseModel):
 @router.get("")
 async def list_tasks():
     tasks = task_store.list_all()
+    # Strip logs to last 5 for list view (reduces payload ~90%)
+    for t in tasks:
+        if isinstance(t.get("logs"), list) and len(t["logs"]) > 5:
+            t["logs"] = t["logs"][-5:]
     return {"tasks": tasks}
 
 

@@ -1,8 +1,10 @@
 # ==== task_store.py ====
-# 职责：任务存储管理，持久化任务状态到JSON文件
-# 入口函数：TaskStore.create(), get(), list_all(), update(), delete(), cancel()
-# 依赖：config
-# 注意：线程安全，使用Lock保护并发访问
+# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+# ???????????????????????????JSON???
+# ????????askStore.create(), get(), list_all(), update(), delete(), cancel()
+# ?????onfig
+# ???????????????Lock?????????
 
 import json
 import os
@@ -37,7 +39,10 @@ class TaskStore:
     def __init__(self):
         self._lock = Lock()
         self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._dirty = False
+        self._stopping = False
         self._load()
+        self._start_save_worker()
 
     def _load(self):
         if TASKS_FILE.exists():
@@ -47,10 +52,57 @@ class TaskStore:
             except (json.JSONDecodeError, OSError):
                 self._tasks = {}
 
-    def _save(self):
+    def _mark_dirty(self):
+        """Called under self._lock - signals background thread to flush to disk."""
+        self._dirty = True
+
+    def _start_save_worker(self):
+        """Background thread: writes dirty state to disk every 0.5s, outside lock."""
+        import threading as _th
+
+        def _worker():
+            while not self._stopping:
+                _th.Event().wait(0.5)
+                with self._lock:
+                    if not self._dirty:
+                        continue
+                    try:
+                        data = json.dumps(
+                            self._tasks, ensure_ascii=False, indent=2
+                        )
+                    except Exception:
+                        continue
+                    self._dirty = False
+                # Write outside lock
+                try:
+                    TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = str(TASKS_FILE) + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        f.write(data)
+                    os.replace(tmp, str(TASKS_FILE))
+                except (PermissionError, OSError):
+                    pass
+
+        t = _th.Thread(target=_worker, daemon=True, name="taskstore-saver")
+        t.start()
+
+    def flush(self):
+        """Force immediate save (e.g. on shutdown). Blocks until written."""
+        with self._lock:
+            try:
+                data = json.dumps(self._tasks, ensure_ascii=False, indent=2)
+            except Exception:
+                return
         TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(TASKS_FILE, "w", encoding="utf-8") as f:
-            json.dump(self._tasks, f, ensure_ascii=False, indent=2)
+        tmp = str(TASKS_FILE) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp, str(TASKS_FILE))
+
+    def stop(self):
+        """Stop background worker and flush pending writes."""
+        self._stopping = True
+        self.flush()
 
     def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         task_id = uuid.uuid4().hex[:12]
@@ -78,7 +130,7 @@ class TaskStore:
         }
         with self._lock:
             self._tasks[task_id] = task
-            self._save()
+            self._mark_dirty()
         return dict(task)
 
     def get(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -99,7 +151,17 @@ class TaskStore:
                 return None
             task.update(updates)
             task["updated_at"] = time.time()
-            self._save()
+            # Batch saves: skip save for frequent progress updates, save on status/step changes
+            status_changed = "status" in updates or "current_step" in updates
+            if status_changed or not hasattr(self, '_update_counter'):
+                self._update_counter = {}
+            if status_changed:
+                self._mark_dirty()
+            else:
+                cnt = self._update_counter.get(task_id, 0) + 1
+                self._update_counter[task_id] = cnt
+                if cnt % 5 == 0:
+                    self._mark_dirty()
         return dict(task)
 
     def update_progress(self, task_id: str, step: str, progress: int, detail: str = "", eta: str = "") -> Optional[Dict[str, Any]]:
@@ -120,15 +182,23 @@ class TaskStore:
                 task["logs"] = []
             timestamp = time.strftime("%H:%M:%S")
             task["logs"].append(f"[{timestamp}] {log_line}")
+            if len(task["logs"]) > 500:
+                task["logs"] = task["logs"][-500:]
             task["updated_at"] = time.time()
-            self._save()
+            # Only save every 10 log lines or on status changes
+            if not hasattr(self, '_log_counter'):
+                self._log_counter = {}
+            cnt = self._log_counter.get(task_id, 0) + 1
+            self._log_counter[task_id] = cnt
+            if cnt % 10 == 0:
+                self._mark_dirty()
         return dict(task)
 
     def delete(self, task_id: str) -> bool:
         with self._lock:
             if task_id in self._tasks:
                 del self._tasks[task_id]
-                self._save()
+                self._mark_dirty()
                 return True
         return False
 
@@ -136,7 +206,7 @@ class TaskStore:
         with self._lock:
             count = len(self._tasks)
             self._tasks.clear()
-            self._save()
+            self._mark_dirty()
         return count
 
     def clear_completed(self) -> int:
@@ -147,13 +217,16 @@ class TaskStore:
             ]
             for tid in to_remove:
                 del self._tasks[tid]
-            self._save()
+            self._mark_dirty()
         return len(to_remove)
 
     def cancel(self, task_id: str) -> bool:
         task = self.get(task_id)
         if task and task.get("status") in (STATUS_PENDING, STATUS_RUNNING):
-            self.update(task_id, {"status": STATUS_CANCELLED})
+            self.update(task_id, {"status": STATUS_CANCELLED, "_cancelled_at": time.time()})
+            # Force save to persist cancel immediately
+            with self._lock:
+                self._mark_dirty()
             return True
         return False
 
