@@ -1,8 +1,10 @@
 """Inject hierarchical bookmarks into PDF via PyMuPDF."""
 import json
 import os
+import shutil
 import subprocess as _sp
 import sys
+import tempfile
 
 
 def inject_bookmarks(
@@ -48,8 +50,15 @@ def inject_bookmarks(
             toc_entries.append([level, title, page_num])
 
         doc.set_toc(toc_entries)
-        doc.save(output_path)
-        doc.close()
+        if output_path == pdf_path:
+            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd)
+            doc.save(tmp)
+            doc.close()
+            shutil.move(tmp, output_path)
+        else:
+            doc.save(output_path)
+            doc.close()
         return output_path
 
     except ImportError:
@@ -61,8 +70,10 @@ def inject_bookmarks(
 
     items = [[title, shukui_page, level] for title, shukui_page, level in outlines]
 
+    in_place = (output_path == pdf_path)
+
     script = (
-        "import json,sys;"
+        "import json,sys,os,tempfile,shutil;"
         "data=json.loads(sys.stdin.read());"
         "import fitz;"
         "doc=fitz.open(data['pdf']);"
@@ -77,8 +88,12 @@ def inject_bookmarks(
         " pn=max(1,min(p+data['offset'],total));"
         " entries.append([l,t,pn]);"
         "doc.set_toc(entries);"
-        "doc.save(data['out'],incremental=False);"
-        "doc.close();"
+        + (
+            "fd,tmp=tempfile.mkstemp(suffix='.pdf');os.close(fd);"
+            "doc.save(tmp);doc.close();shutil.move(tmp,data['out']);"
+            if in_place else
+            "doc.save(data['out']);doc.close();"
+        ) +
         "print('OK')"
     )
     r = _sp.run(
