@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import tempfile
 import time
 from typing import Callable, List, Optional
@@ -82,6 +83,7 @@ async def run_paddleocr_parallel(
     paddle_python: str,
     ocr_lang: str,
     num_workers: int,
+    total_pages: int = 0,
     timeout_per_chunk: int = 1800,
     oversample: int = 200,
     optimize: str = "0",
@@ -103,7 +105,18 @@ async def run_paddleocr_parallel(
         add_log("PaddleOCR parallel: no pages to process")
         return 1
 
-    add_log(f"PaddleOCR parallel: {len(chunks)} chunks, {num_workers} workers")
+    # Pre-compute page counts per chunk
+    chunk_page_counts = []
+    for c in chunks:
+        import fitz
+        d = fitz.open(c)
+        chunk_page_counts.append(len(d))
+        d.close()
+
+    if total_pages <= 0:
+        total_pages = sum(chunk_page_counts)
+
+    add_log(f"PaddleOCR parallel: {len(chunks)} chunks, {num_workers} workers, {total_pages} total pages")
 
     start_time = time.time()
     _spawned_procs = []
@@ -125,6 +138,9 @@ async def run_paddleocr_parallel(
         env = {**os.environ, "PATH": os.environ.get("PATH", "") + r";C:\Program Files\Tesseract-OCR",
                "PYTHONUNBUFFERED": "1"}
 
+        chunk_pages = chunk_page_counts[i] if i < len(chunk_page_counts) else 0
+        chunk_completed = 0
+
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -134,7 +150,39 @@ async def run_paddleocr_parallel(
                 env=env,
             )
             _spawned_procs.append(proc)
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_per_chunk)
+
+            async for line in proc.stdout:
+                text = line.decode('utf-8', errors='replace').strip()
+                if not text:
+                    continue
+
+                m = re.search(r'\[(\d+)/(\d+)\]', text)
+                if m:
+                    chunk_completed = int(m.group(1))
+                    chunk_pages = max(chunk_pages, int(m.group(2)))
+                else:
+                    m = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', text)
+                    if m:
+                        chunk_completed = int(m.group(1))
+                        chunk_pages = max(chunk_pages, int(m.group(2)))
+
+                if chunk_pages > 0 and chunk_completed > 0:
+                    _pages_before = sum(chunk_page_counts[:i]) if i > 0 else 0
+                    global_cur = _pages_before + chunk_completed
+                    _pct = int(global_cur / total_pages * 100) if total_pages > 0 else 0
+                    _elapsed = time.time() - start_time
+                    _speed = global_cur / _elapsed if _elapsed > 0 else 0
+                    _eta = (total_pages - global_cur) / _speed if _speed > 0 else 0
+                    _eta_str = f"{int(_eta // 60)}分{int(_eta % 60)}秒" if _eta > 0 else ""
+                    await emit_progress(
+                        step="ocr",
+                        progress=_pct,
+                        detail=f"{global_cur}/{total_pages} 页",
+                        eta=_eta_str,
+                    )
+
+            await proc.wait()
+
             if proc.returncode == 0 and os.path.exists(out_path):
                 return out_path
             else:
@@ -189,7 +237,6 @@ async def run_paddleocr_parallel(
     chunk_outputs = [r for r in results if r is not None]
     add_log(f"PaddleOCR parallel: {len(chunk_outputs)}/{len(chunks)} chunks completed")
 
-    # Progress
     if emit_progress:
         await emit_progress(step="ocr", progress=90, detail="合并分块结果...")
 
@@ -205,7 +252,6 @@ async def run_paddleocr_parallel(
     add_log("PaddleOCR parallel: merging chunks...")
     ok = merge_pdfs(chunk_outputs, output_pdf)
 
-    # Clean up temp files
     for c in chunks:
         try:
             os.remove(c)
