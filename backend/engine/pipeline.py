@@ -1865,45 +1865,33 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
     pdf_path = report.get("pdf_path", "")
 
     if not bookmark:
-        task_store.add_log(task_id, "No bookmark provided, trying shukui.net (by ISBN)...")
+        task_store.add_log(task_id, "No bookmark provided, trying addbookmark...")
         try:
-            from backend.nlc.bookmarkget import get_bookmark
+            from addbookmark.bookmarkget import get_bookmark
             isbn = report.get("isbn", "")
             if isbn:
                 bookmark = await get_bookmark(isbn)
                 if bookmark:
-                    task_store.add_log(task_id, "Bookmark fetched from shukui.net")
+                    task_store.add_log(task_id, "Bookmark fetched from addbookmark")
                     report["bookmark"] = bookmark
                 else:
-                    task_store.add_log(task_id, "Bookmark not found on shukui.net")
+                    task_store.add_log(task_id, "Bookmark not found via addbookmark")
             else:
                 task_store.add_log(task_id, "No ISBN available for bookmark lookup")
         except ImportError:
-            task_store.add_log(task_id, "NLC bookmark module not available")
+            task_store.add_log(task_id, "addbookmark module not available")
         except Exception as e:
             task_store.add_log(task_id, f"Bookmark fetch error: {e}")
 
     if bookmark and pdf_path and os.path.exists(pdf_path):
         task_store.add_log(task_id, "Applying bookmark to PDF...")
-        # Detect system Python for fitz subprocess fallback
-        _bp_py = sys.executable
-        if getattr(sys, 'frozen', False):
-            import shutil as _sh
-            for _c in ["python", "python3", "py"]:
-                _f = _sh.which(_c)
-                if _f and _f != _bp_py:
-                    _bp_py = _f
-                    break
         try:
-            from backend.nlc.bookmarkget import apply_bookmark_to_pdf
-            ok = await apply_bookmark_to_pdf(pdf_path, bookmark, python_cmd=_bp_py)
-            if ok:
-                task_store.add_log(task_id, "Bookmark applied to PDF")
-                report["bookmark_applied"] = True
-            else:
-                task_store.add_log(task_id, "Bookmark apply failed (fitz not available?)")
+            from addbookmark.bookmark_injector import inject_bookmarks
+            inject_bookmarks(pdf_path, bookmark, pdf_path, offset=0)
+            task_store.add_log(task_id, "Bookmark applied to PDF")
+            report["bookmark_applied"] = True
         except ImportError:
-            task_store.add_log(task_id, "Bookmark PDF module not available")
+            task_store.add_log(task_id, "Bookmark injector module not available")
         except Exception as e:
             task_store.add_log(task_id, f"Bookmark apply error: {e}")
 
