@@ -129,6 +129,11 @@ async def run_paddleocr_parallel(
             if proc.returncode == 0 and os.path.exists(out_path):
                 return out_path
             else:
+                if os.path.exists(out_path):
+                    try:
+                        os.remove(out_path)
+                    except Exception:
+                        pass
                 add_log(f"PaddleOCR chunk {i+1} failed: exit {proc.returncode}")
                 return None
         except asyncio.TimeoutError:
@@ -137,9 +142,19 @@ async def run_paddleocr_parallel(
                 proc.kill()
             except Exception:
                 pass
+            if os.path.exists(out_path):
+                try:
+                    os.remove(out_path)
+                except Exception:
+                    pass
             return None
         except Exception as e:
             add_log(f"PaddleOCR chunk {i+1} error: {e}")
+            if os.path.exists(out_path):
+                try:
+                    os.remove(out_path)
+                except Exception:
+                    pass
             return None
 
     add_log(f"PaddleOCR parallel: processing {len(chunks)} chunks...")
