@@ -5,6 +5,7 @@ from pathlib import Path
 BACKEND_DIR = Path(SPECPATH)
 FRONTEND_DIST = BACKEND_DIR.parent / "frontend" / "dist"
 NLC_DIR = BACKEND_DIR / "nlc"
+ADD_BOOKMARK_DIR = BACKEND_DIR / "addbookmark"
 
 a = Analysis(
     [str(BACKEND_DIR / "main.py")],
@@ -16,6 +17,7 @@ a = Analysis(
         (str(NLC_DIR / "bookmarkget.py"), "nlc/bookmarkget.py"),
         (str(NLC_DIR / "headers.py"), "nlc/headers.py"),
         (str(NLC_DIR / "formatting.py"), "nlc/formatting.py"),
+        (str(ADD_BOOKMARK_DIR), "addbookmark"),
         (str(BACKEND_DIR / "engine"), "engine"),
         (str(BACKEND_DIR / "api"), "api"),
         (str(BACKEND_DIR / "task_store.py"), "."),
@@ -50,7 +52,6 @@ a = Analysis(
         'engine.llmocr.layout',
         'engine.llmocr.text_pdf',
         'httpx', 'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
-        'fitz', 'pymupdf',
     ],
     hookspath=[],
     hooksconfig={},
