@@ -7,6 +7,44 @@ import sys
 import tempfile
 
 
+def _detect_offset(pdf_path: str, bookmark_text: str) -> int:
+    """Auto-detect page offset between shukui pages and PDF physical pages.
+
+    Formula: offset = (label_000001_physical_page + 1) - first_bookmark_page
+    """
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+
+        anchor_physical = None
+        for i in range(len(doc)):
+            if doc[i].get_label() == '000001.jpg':
+                anchor_physical = i
+                break
+        doc.close()
+
+        if anchor_physical is None:
+            return 0
+
+        lines = bookmark_text.strip().split('\n')
+        anchor_shukui = None
+        for line in lines:
+            parts = line.split('\t')
+            if len(parts) >= 2:
+                try:
+                    anchor_shukui = int(parts[1].strip())
+                    break
+                except ValueError:
+                    continue
+
+        if anchor_shukui is None:
+            return 0
+
+        return (anchor_physical + 1) - anchor_shukui
+    except ImportError:
+        return 0
+
+
 def inject_bookmarks(
     pdf_path: str,
     bookmark_text: str,
@@ -20,7 +58,7 @@ def inject_bookmarks(
         pdf_path: Input PDF path.
         bookmark_text: raw bookmark text.
         output_path: Output PDF path.
-        offset: Page offset (shukui_page + offset = PDF_viewer_page).
+        offset: Page offset, 0 = auto-detect (shukui_page + offset = PDF_viewer_page).
 
     Returns:
         Output file path.
@@ -30,6 +68,9 @@ def inject_bookmarks(
     outlines = parse_bookmark_hierarchy(bookmark_text)
     if not outlines:
         return output_path
+
+    if offset <= 0 and bookmark_text:
+        offset = _detect_offset(pdf_path, bookmark_text)
 
     try:
         import fitz as _f
@@ -69,7 +110,6 @@ def inject_bookmarks(
         raise RuntimeError("bookmark_injector: no system Python available for fitz subprocess")
 
     items = [[title, shukui_page, level] for title, shukui_page, level in outlines]
-
     in_place = (output_path == pdf_path)
 
     script = (
@@ -78,6 +118,14 @@ def inject_bookmarks(
         "import fitz\n"
         "doc=fitz.open(data['pdf'])\n"
         "total=len(doc)\n"
+        "offset=data['offset']\n"
+        "if offset<=0:\n"
+        " ap=None\n"
+        " for i in range(len(doc)):\n"
+        "  if doc[i].get_label()=='000001.jpg':\n"
+        "   ap=i;break\n"
+        " if ap is not None:\n"
+        "  offset=(ap+1)-data['items'][0][1] if data['items'] else 0\n"
         "toc_page=-1\n"
         "for i in range(min(30,total)):\n"
         " if doc[i].get_label()=='!00001.jpg':\n"
@@ -86,7 +134,7 @@ def inject_bookmarks(
         "if toc_page>=0:\n"
         " entries.append([1,chr(0x76ee)+' '+chr(0x5f55),toc_page+1])\n"
         "for t,p,l in data['items']:\n"
-        " pn=max(1,min(p+data['offset'],total))\n"
+        " pn=max(1,min(p+offset,total))\n"
         " entries.append([l,t,pn])\n"
         "doc.set_toc(entries)\n" +
         (

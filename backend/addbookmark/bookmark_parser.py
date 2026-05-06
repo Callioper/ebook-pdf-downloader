@@ -100,16 +100,20 @@ def parse_bookmark_hierarchy(bookmark_text: str) -> List[Tuple[str, int, int]]:
         raw_lv = entry['raw_level']
         is_cont = entry['is_container']
 
-        # Pop: current raw_level >= stack top → pop
-        while stack and raw_lv <= stack[-1]['raw_level']:
-            stack.pop()
+        if is_cont:
+            # Pop containers at same or higher raw_level
+            while stack and raw_lv <= stack[-1]['raw_level']:
+                stack.pop()
+            stack.append({'raw_level': raw_lv})
+            effective_level = len(stack)
+        else:
+            # Non-container: only pop when strictly outside parent container
+            while stack and raw_lv < stack[-1]['raw_level']:
+                stack.pop()
+            effective_level = len(stack) + 1
 
-        # Effective level = stack depth + 1
-        effective_level = min(len(stack) + 1, 4)
+        effective_level = min(effective_level, 4)
 
         result.append((entry['title'], entry['shukui_page'], effective_level))
-
-        if is_cont:
-            stack.append({'raw_level': raw_lv})
 
     return result
