@@ -1822,9 +1822,17 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     output_pdf=output_pdf,
                 )
                 if _exit == 0:
-                    os.replace(output_pdf, pdf_path)
-                    task_store.add_log(task_id, "LLM OCR completed successfully")
-                    report["ocr_done"] = True
+                    task_store.add_log(task_id, "LLM OCR completed, validating quality...")
+                    if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
+                        os.replace(output_pdf, pdf_path)
+                        task_store.add_log(task_id, "LLM OCR quality check passed")
+                        report["ocr_done"] = True
+                    else:
+                        task_store.add_log(task_id, "LLM OCR quality check failed (possible garbled text), keeping original PDF")
+                        try:
+                            os.remove(output_pdf)
+                        except Exception:
+                            pass
                 else:
                     task_store.add_log(task_id, f"LLM OCR failed with exit code {_exit}")
             except asyncio.TimeoutError:
