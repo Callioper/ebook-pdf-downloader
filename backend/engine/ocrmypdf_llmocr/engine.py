@@ -226,7 +226,7 @@ def _tesseract_word_boxes(image_path) -> list[dict]:
                 top = int(cols[7])
                 w = int(cols[8])
                 h = int(cols[9])
-                conf = int(cols[10])
+                conf = int(float(cols[10]))
                 text = cols[11].strip()
                 line_num = int(cols[4])
                 raw_words.append({
