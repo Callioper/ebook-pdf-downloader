@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import pikepdf
+from fpdf import FPDF
 from PIL import Image
 
 
@@ -17,10 +17,7 @@ def create_text_only_pdf(
     This PDF is later grafted onto the original page image by ocrmypdf's
     sandwich renderer, giving each text line approximate position matching.
 
-    Args:
-        output_pdf: Path to write the text-only PDF
-        page_text: Recognized text (lines separated by newlines)
-        image_path: Original page image (for dimensions and DPI)
+    Uses fpdf2 which supports CJK fonts natively via built-in Unicode font.
     """
     if not page_text or not page_text.strip():
         _write_empty_pdf(output_pdf)
@@ -43,59 +40,28 @@ def create_text_only_pdf(
     margin_pt = page_h_pt * 0.05
     usable_h = page_h_pt - 2 * margin_pt
     line_h_pt = usable_h / max(len(lines), 1)
-
-    pdf = pikepdf.Pdf.new()
-    page = pdf.add_blank_page(page_size=(page_w_pt, page_h_pt))
-
-    content = pikepdf.Stream(pdf, b'')
-    content.write(b'3 Tr\n')
-    content.write(b'BT\n')
-
     font_size = line_h_pt * 0.7
-    content.write(f'{font_size:.2f} Tf\n'.encode('ascii'))
+
+    pdf = FPDF(unit='pt', format=(page_w_pt, page_h_pt))
+    pdf.set_auto_page_break(auto=False)
+    pdf.add_page()
+    # Use built-in Unicode font (supports CJK)
+    pdf.add_font('Noto', '', r'C:\Windows\Fonts\msyh.ttc', uni=True)
+    pdf.set_font('Noto', '', font_size)
+    pdf.set_text_color(0, 0, 0)
+    # Invisible text: stored in PDF but not painted on screen
+    pdf._out('3 Tr')
 
     for i, line_text in enumerate(lines):
-        y_pt = page_h_pt - margin_pt - (i + 0.3) * line_h_pt
+        y_pt = margin_pt + i * line_h_pt
         x_pt = margin_pt * 0.5
-        content.write(f'1 0 0 1 {x_pt:.2f} {y_pt:.2f} Tm\n'.encode('ascii'))
-        hex_str = line_text.encode('utf-16-be').hex()
-        content.write(f'<{hex_str}> Tj\n'.encode('ascii'))
+        pdf.set_xy(x_pt, y_pt)
+        pdf.cell(w=page_w_pt - margin_pt, h=line_h_pt, text=line_text)
 
-    content.write(b'ET\n')
-
-    page.contents_add(content)
-    font_ref = pikepdf.Name('/F1')
-    resources = pikepdf.Dictionary({
-        '/Font': pikepdf.Dictionary({
-            '/F1': pikepdf.Dictionary({
-                '/Type': '/Font',
-                '/Subtype': '/Type0',
-                '/BaseFont': '/Courier',
-                '/Encoding': '/Identity-H',
-                '/DescendantFonts': pikepdf.Array([
-                    pikepdf.Dictionary({
-                        '/Type': '/Font',
-                        '/Subtype': '/CIDFontType2',
-                        '/BaseFont': '/Courier',
-                        '/CIDSystemInfo': pikepdf.Dictionary({
-                            '/Registry': '(Adobe)',
-                            '/Ordering': '(Identity)',
-                            '/Supplement': 0,
-                        }),
-                        '/DW': int(font_size * 0.6),
-                    }),
-                ]),
-            }),
-        }),
-    })
-    page.Resources = resources
-
-    pdf.save(output_pdf)
-    pdf.close()
+    pdf.output(str(output_pdf))
 
 
 def _write_empty_pdf(output_pdf: Path) -> None:
-    pdf = pikepdf.Pdf.new()
-    pdf.add_blank_page()
-    pdf.save(output_pdf)
-    pdf.close()
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.output(str(output_pdf))
