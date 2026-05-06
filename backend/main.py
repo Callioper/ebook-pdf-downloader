@@ -107,7 +107,7 @@ async def shutdown():
             pass
         try:
             from task_store import task_store
-            task_store.flush()
+            task_store.stop()
         except Exception:
             pass
         os._exit(0)

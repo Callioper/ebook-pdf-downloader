@@ -1757,11 +1757,11 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
             cmd = [
                 _py_for_ocr, "-m", "ocrmypdf",
-                "--plugin", "llmocr",
+                "--plugin", "llmocr.plugin",
                 "--llm-ocr-endpoint", llm_endpoint,
                 "--llm-ocr-model", llm_model,
                 "--llm-ocr-lang", ocr_lang or "chi_sim+eng",
-                "--llm-ocr-timeout", "300",
+                "--llm-ocr-timeout", str(ocr_timeout),
                 "--optimize", _opt_level,
                 "--oversample", ocr_oversample,
                 "-j", str(ocr_jobs),
@@ -1771,8 +1771,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 output_pdf,
             ]
             if llm_api_key:
-                cmd.insert(cmd.index("--llm-ocr-lang") + 2, "--llm-ocr-api-key")
-                cmd.insert(cmd.index("--llm-ocr-api-key") + 1, llm_api_key)
+                cmd.extend(["--llm-ocr-api-key", llm_api_key])
 
             _engine_dir = os.path.dirname(__file__)
             _ocr_env = {

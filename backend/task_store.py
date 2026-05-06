@@ -41,8 +41,11 @@ class TaskStore:
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._dirty = False
         self._stopping = False
+        self._update_counter: Dict[str, int] = {}
+        self._log_counter: Dict[str, int] = {}
         self._load()
         self._start_save_worker()
+        self._start_purge_worker()
 
     def _load(self):
         if TASKS_FILE.exists():
@@ -85,6 +88,40 @@ class TaskStore:
 
         t = _th.Thread(target=_worker, daemon=True, name="taskstore-saver")
         t.start()
+
+    def _start_purge_worker(self):
+        """Background thread: purges completed tasks from memory every 10 min."""
+        import threading as _th
+
+        def _worker():
+            while not self._stopping:
+                _th.Event().wait(600)
+                self._purge_stale_completed()
+
+        t = _th.Thread(target=_worker, daemon=True, name="taskstore-purger")
+        t.start()
+
+    def _purge_stale_completed(self):
+        """Remove completed/failed/cancelled tasks >1h old from memory, keep in JSON."""
+        cutoff = time.time() - 3600
+        with self._lock:
+            to_remove = []
+            for tid, t in self._tasks.items():
+                status = t.get("status")
+                if status in (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED):
+                    if t.get("updated_at", 0) < cutoff:
+                        to_remove.append(tid)
+            for tid in to_remove:
+                del self._tasks[tid]
+                self._update_counter.pop(tid, None)
+                self._log_counter.pop(tid, None)
+            if to_remove:
+                self._mark_dirty()
+
+    def _cleanup_counters(self, task_id: str):
+        """Remove all counter entries for a task."""
+        self._update_counter.pop(task_id, None)
+        self._log_counter.pop(task_id, None)
 
     def flush(self):
         """Force immediate save (e.g. on shutdown). Blocks until written."""
@@ -148,13 +185,11 @@ class TaskStore:
         with self._lock:
             task = self._tasks.get(task_id)
             if not task:
+                self._cleanup_counters(task_id)
                 return None
             task.update(updates)
             task["updated_at"] = time.time()
-            # Batch saves: skip save for frequent progress updates, save on status/step changes
             status_changed = "status" in updates or "current_step" in updates
-            if status_changed or not hasattr(self, '_update_counter'):
-                self._update_counter = {}
             if status_changed:
                 self._mark_dirty()
             else:
@@ -177,17 +212,19 @@ class TaskStore:
         with self._lock:
             task = self._tasks.get(task_id)
             if not task:
+                self._cleanup_counters(task_id)
                 return None
             if "logs" not in task:
                 task["logs"] = []
             timestamp = time.strftime("%H:%M:%S")
             task["logs"].append(f"[{timestamp}] {log_line}")
-            if len(task["logs"]) > 500:
-                task["logs"] = task["logs"][-500:]
             task["updated_at"] = time.time()
-            # Only save every 10 log lines or on status changes
-            if not hasattr(self, '_log_counter'):
-                self._log_counter = {}
+            status = task.get("status")
+            if status in (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED):
+                if len(task["logs"]) > 20:
+                    task["logs"] = task["logs"][-20:]
+            elif len(task["logs"]) > 500:
+                task["logs"] = task["logs"][-500:]
             cnt = self._log_counter.get(task_id, 0) + 1
             self._log_counter[task_id] = cnt
             if cnt % 10 == 0:
@@ -198,6 +235,7 @@ class TaskStore:
         with self._lock:
             if task_id in self._tasks:
                 del self._tasks[task_id]
+                self._cleanup_counters(task_id)
                 self._mark_dirty()
                 return True
         return False
@@ -206,6 +244,8 @@ class TaskStore:
         with self._lock:
             count = len(self._tasks)
             self._tasks.clear()
+            self._update_counter.clear()
+            self._log_counter.clear()
             self._mark_dirty()
         return count
 
@@ -217,6 +257,7 @@ class TaskStore:
             ]
             for tid in to_remove:
                 del self._tasks[tid]
+                self._cleanup_counters(tid)
             self._mark_dirty()
         return len(to_remove)
 
