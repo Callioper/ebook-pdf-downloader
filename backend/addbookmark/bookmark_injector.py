@@ -73,39 +73,45 @@ def inject_bookmarks(
     in_place = (output_path == pdf_path)
 
     script = (
-        "import json,sys,os,tempfile,shutil;"
-        "data=json.loads(sys.stdin.read());"
-        "import fitz;"
-        "doc=fitz.open(data['pdf']);"
-        "total=len(doc);"
-        "toc_page=-1;"
-        "for i in range(min(30,total)):"
-        " if doc[i].get_label()=='!00001.jpg':"
-        "  toc_page=i;break;"
-        "entries=[];"
-        "if toc_page>=0: entries.append([1,'\u76ee \u5f55',toc_page+1]);"
-        "for t,p,l in data['items']:"
-        " pn=max(1,min(p+data['offset'],total));"
-        " entries.append([l,t,pn]);"
-        "doc.set_toc(entries);"
-        + (
-            "fd,tmp=tempfile.mkstemp(suffix='.pdf');os.close(fd);"
-            "doc.save(tmp);doc.close();shutil.move(tmp,data['out']);"
+        "import json,sys,os,tempfile,shutil\n"
+        "data=json.loads(sys.stdin.buffer)\n"
+        "import fitz\n"
+        "doc=fitz.open(data['pdf'])\n"
+        "total=len(doc)\n"
+        "toc_page=-1\n"
+        "for i in range(min(30,total)):\n"
+        " if doc[i].get_label()=='!00001.jpg':\n"
+        "  toc_page=i;break\n"
+        "entries=[]\n"
+        "if toc_page>=0:\n"
+        " entries.append([1,chr(0x76ee)+' '+chr(0x5f55),toc_page+1])\n"
+        "for t,p,l in data['items']:\n"
+        " pn=max(1,min(p+data['offset'],total))\n"
+        " entries.append([l,t,pn])\n"
+        "doc.set_toc(entries)\n" +
+        (
+            "fd,tmp=tempfile.mkstemp(suffix='.pdf')\n"
+            "os.close(fd)\n"
+            "doc.save(tmp)\n"
+            "doc.close()\n"
+            "shutil.move(tmp,data['out'])\n"
             if in_place else
-            "doc.save(data['out']);doc.close();"
+            "doc.save(data['out'])\n"
+            "doc.close()\n"
         ) +
-        "print('OK')"
+        "print('OK')\n"
     )
     r = _sp.run(
-        [python_cmd, "-c", script],
+        [python_cmd],
         input=json.dumps({
             "pdf": pdf_path, "items": items,
             "offset": offset, "out": output_path,
-        }),
-        capture_output=True, text=True, timeout=60,
+        }).encode('utf-8'),
+        capture_output=True, timeout=60,
     )
     if r.returncode != 0:
-        raise RuntimeError(f"bookmark inject subprocess failed (rc={r.returncode}): {r.stderr[:300]}")
+        stderr = r.stderr.decode('utf-8', errors='replace') if r.stderr else ''
+        raise RuntimeError(f"bookmark inject subprocess failed (rc={r.returncode}): {stderr[:300]}")
     return output_path
 
 
