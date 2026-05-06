@@ -550,7 +550,7 @@ class TestNumPyFunctions:
 
 
 class TestArrayLike:
-    def _create_MyArray(self):
+    def setup_method(self):
         class MyArray:
             def __init__(self, function=None):
                 self.function = function
@@ -563,22 +563,20 @@ class TestArrayLike:
                     return NotImplemented
                 return my_func(*args, **kwargs)
 
-        return MyArray
+        self.MyArray = MyArray
 
-    def _create_MyNoArrayFunctionArray(self):
         class MyNoArrayFunctionArray:
             def __init__(self, function=None):
                 self.function = function
 
-        return MyNoArrayFunctionArray
+        self.MyNoArrayFunctionArray = MyNoArrayFunctionArray
 
-    def _create_MySubclass(self):
         class MySubclass(np.ndarray):
             def __array_function__(self, func, types, args, kwargs):
                 result = super().__array_function__(func, types, args, kwargs)
                 return result.view(self.__class__)
 
-        return MySubclass
+        self.MySubclass = MySubclass
 
     def add_method(self, name, arr_class, enable_value_error=False):
         def _definition(*args, **kwargs):
@@ -595,10 +593,9 @@ class TestArrayLike:
         return args, kwargs
 
     def test_array_like_not_implemented(self):
-        MyArray = self._create_MyArray()
-        self.add_method('array', MyArray)
+        self.add_method('array', self.MyArray)
 
-        ref = MyArray.array()
+        ref = self.MyArray.array()
 
         with assert_raises_regex(TypeError, 'no implementation found'):
             array_like = np.asarray(1, like=ref)
@@ -649,16 +646,15 @@ class TestArrayLike:
     @pytest.mark.parametrize('function, args, kwargs', _array_tests)
     @pytest.mark.parametrize('numpy_ref', [True, False])
     def test_array_like(self, function, args, kwargs, numpy_ref):
-        MyArray = self._create_MyArray()
-        self.add_method('array', MyArray)
-        self.add_method(function, MyArray)
+        self.add_method('array', self.MyArray)
+        self.add_method(function, self.MyArray)
         np_func = getattr(np, function)
-        my_func = getattr(MyArray, function)
+        my_func = getattr(self.MyArray, function)
 
         if numpy_ref is True:
             ref = np.array(1)
         else:
-            ref = MyArray.array()
+            ref = self.MyArray.array()
 
         like_args = tuple(a() if callable(a) else a for a in args)
         array_like = np_func(*like_args, **kwargs, like=ref)
@@ -676,20 +672,19 @@ class TestArrayLike:
 
             assert_equal(array_like, np_arr)
         else:
-            assert type(array_like) is MyArray
+            assert type(array_like) is self.MyArray
             assert array_like.function is my_func
 
     @pytest.mark.parametrize('function, args, kwargs', _array_tests)
     @pytest.mark.parametrize('ref', [1, [1], "MyNoArrayFunctionArray"])
     def test_no_array_function_like(self, function, args, kwargs, ref):
-        MyNoArrayFunctionArray = self._create_MyNoArrayFunctionArray()
-        self.add_method('array', MyNoArrayFunctionArray)
-        self.add_method(function, MyNoArrayFunctionArray)
+        self.add_method('array', self.MyNoArrayFunctionArray)
+        self.add_method(function, self.MyNoArrayFunctionArray)
         np_func = getattr(np, function)
 
         # Instantiate ref if it's the MyNoArrayFunctionArray class
         if ref == "MyNoArrayFunctionArray":
-            ref = MyNoArrayFunctionArray.array()
+            ref = self.MyNoArrayFunctionArray.array()
 
         like_args = tuple(a() if callable(a) else a for a in args)
 
@@ -699,12 +694,11 @@ class TestArrayLike:
 
     @pytest.mark.parametrize('function, args, kwargs', _array_tests)
     def test_subclass(self, function, args, kwargs):
-        MySubclass = self._create_MySubclass()
-        ref = np.array(1).view(MySubclass)
+        ref = np.array(1).view(self.MySubclass)
         np_func = getattr(np, function)
         like_args = tuple(a() if callable(a) else a for a in args)
         array_like = np_func(*like_args, **kwargs, like=ref)
-        assert type(array_like) is MySubclass
+        assert type(array_like) is self.MySubclass
         if np_func is np.empty:
             return
         np_args = tuple(a() if callable(a) else a for a in args)
@@ -713,14 +707,13 @@ class TestArrayLike:
 
     @pytest.mark.parametrize('numpy_ref', [True, False])
     def test_array_like_fromfile(self, numpy_ref):
-        MyArray = self._create_MyArray()
-        self.add_method('array', MyArray)
-        self.add_method("fromfile", MyArray)
+        self.add_method('array', self.MyArray)
+        self.add_method("fromfile", self.MyArray)
 
         if numpy_ref is True:
             ref = np.array(1)
         else:
-            ref = MyArray.array()
+            ref = self.MyArray.array()
 
         data = np.random.random(5)
 
@@ -735,14 +728,13 @@ class TestArrayLike:
                 assert_equal(np_res, data)
                 assert_equal(array_like, np_res)
             else:
-                assert type(array_like) is MyArray
-                assert array_like.function is MyArray.fromfile
+                assert type(array_like) is self.MyArray
+                assert array_like.function is self.MyArray.fromfile
 
     def test_exception_handling(self):
-        MyArray = self._create_MyArray()
-        self.add_method('array', MyArray, enable_value_error=True)
+        self.add_method('array', self.MyArray, enable_value_error=True)
 
-        ref = MyArray.array()
+        ref = self.MyArray.array()
 
         with assert_raises(TypeError):
             # Raises the error about `value_error` being invalid first
@@ -750,9 +742,8 @@ class TestArrayLike:
 
     @pytest.mark.parametrize('function, args, kwargs', _array_tests)
     def test_like_as_none(self, function, args, kwargs):
-        MyArray = self._create_MyArray()
-        self.add_method('array', MyArray)
-        self.add_method(function, MyArray)
+        self.add_method('array', self.MyArray)
+        self.add_method(function, self.MyArray)
         np_func = getattr(np, function)
 
         like_args = tuple(a() if callable(a) else a for a in args)

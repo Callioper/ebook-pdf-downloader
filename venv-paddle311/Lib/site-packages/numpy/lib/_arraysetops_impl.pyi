@@ -1,13 +1,7 @@
-from typing import (
-    Any,
-    Generic,
-    Literal as L,
-    NamedTuple,
-    SupportsIndex,
-    TypeAlias,
-    overload,
-)
-from typing_extensions import TypeVar
+from typing import Any, Generic, NamedTuple, SupportsIndex, TypeAlias, overload
+from typing import Literal as L
+
+from typing_extensions import TypeVar, deprecated
 
 import numpy as np
 from numpy._typing import (
@@ -20,6 +14,7 @@ from numpy._typing import (
 
 __all__ = [
     "ediff1d",
+    "in1d",
     "intersect1d",
     "isin",
     "setdiff1d",
@@ -453,6 +448,17 @@ def setdiff1d(ar1: ArrayLike, ar2: ArrayLike, assume_unique: bool = False) -> _A
 
 #
 def isin(
+    element: ArrayLike,
+    test_elements: ArrayLike,
+    assume_unique: bool = False,
+    invert: bool = False,
+    *,
+    kind: L["sort", "table"] | None = None,
+) -> NDArray[np.bool]: ...
+
+#
+@deprecated("Use 'isin' instead")
+def in1d(
     element: ArrayLike,
     test_elements: ArrayLike,
     assume_unique: bool = False,

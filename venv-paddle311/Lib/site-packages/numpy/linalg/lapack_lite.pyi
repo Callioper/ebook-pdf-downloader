@@ -57,8 +57,6 @@ class _ZUNGQR(TypedDict):
 
 _ilp64: Final[bool] = ...
 
-class LapackError(Exception): ...
-
 def dgelsd(
     m: int,
     n: int,

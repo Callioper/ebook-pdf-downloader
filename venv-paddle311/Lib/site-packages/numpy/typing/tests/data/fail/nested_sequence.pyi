@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-
 from numpy._typing import _NestedSequence
 
 a: Sequence[float]

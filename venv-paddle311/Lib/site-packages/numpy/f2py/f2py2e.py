@@ -378,8 +378,6 @@ def callcrackfortran(files, options):
             mod['gil_used'] = 'Py_MOD_GIL_USED'
         else:
             mod['gil_used'] = 'Py_MOD_GIL_NOT_USED'
-    # gh-26718 Reset global
-    crackfortran.f77modulename = ''
     return postlist
 
 

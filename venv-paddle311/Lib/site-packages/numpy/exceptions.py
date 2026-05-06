@@ -7,7 +7,8 @@ specific, such as linear algebra errors.
 
 .. versionadded:: NumPy 1.25
 
-    The exceptions module is new in NumPy 1.25.
+    The exceptions module is new in NumPy 1.25.  Older exceptions remain
+    available through the main NumPy namespace for compatibility.
 
 .. currentmodule:: numpy.exceptions
 

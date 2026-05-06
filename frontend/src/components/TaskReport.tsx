@@ -4,15 +4,21 @@ interface TaskReportProps {
   report: TaskReport
   downloadDir?: string
   finishedDir?: string
+  createdAt?: number
 }
 
-export default function TaskReport({ report, downloadDir, finishedDir }: TaskReportProps) {
+export default function TaskReport({ report, downloadDir, finishedDir, createdAt }: TaskReportProps) {
   if (!report || Object.keys(report).length === 0) {
     return (
       <div className="text-xs text-gray-400 p-4 text-center">
         暂无报告数据
       </div>
     )
+  }
+
+  const formatTime = (ts: number) => {
+    const d = new Date(ts * 1000)
+    return d.toLocaleString('zh-CN', { hour12: false })
   }
 
   const fields = [
@@ -46,6 +52,12 @@ export default function TaskReport({ report, downloadDir, finishedDir }: TaskRep
           <div>
             <table className="w-full text-sm">
               <tbody>
+                {createdAt && (
+                  <tr className="border-b border-gray-50">
+                    <td className="py-1.5 pr-3 text-xs text-gray-500 w-20 align-top">创建时间</td>
+                    <td className="py-1.5 text-xs text-gray-800">{formatTime(createdAt)}</td>
+                  </tr>
+                )}
                 {visibleFields.map((f) => (
                   <tr key={f.key} className="border-b border-gray-50 last:border-0">
                     <td className="py-1.5 pr-3 text-xs text-gray-500 w-20 align-top">{f.label}</td>

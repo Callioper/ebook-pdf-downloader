@@ -1,4 +1,5 @@
-from .f2py2e import main as main, run_main
+from .f2py2e import main as main
+from .f2py2e import run_main
 
 __all__ = ["get_include", "run_main"]
 

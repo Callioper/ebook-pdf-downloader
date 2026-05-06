@@ -1,7 +1,8 @@
 from collections.abc import Sequence
 from decimal import Decimal
 from fractions import Fraction
-from typing import Literal as L, TypeAlias, assert_type
+from typing import Any, TypeAlias, assert_type
+from typing import Literal as L
 
 import numpy as np
 import numpy.polynomial.polyutils as pu

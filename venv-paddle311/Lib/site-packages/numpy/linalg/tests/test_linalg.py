@@ -8,7 +8,6 @@ import sys
 import textwrap
 import threading
 import traceback
-import warnings
 
 import pytest
 
@@ -43,6 +42,7 @@ from numpy.testing import (
     assert_equal,
     assert_raises,
     assert_raises_regex,
+    suppress_warnings,
 )
 
 try:
@@ -1331,9 +1331,8 @@ class _TestNormGeneral(_TestNormBase):
             self.check_dtype(at, an)
             assert_almost_equal(an, 0.0)
 
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    'ignore', "divide by zero encountered", RuntimeWarning)
+            with suppress_warnings() as sup:
+                sup.filter(RuntimeWarning, "divide by zero encountered")
                 an = norm(at, -1)
                 self.check_dtype(at, an)
                 assert_almost_equal(an, 0.0)
@@ -1495,9 +1494,8 @@ class _TestNorm2D(_TestNormBase):
             self.check_dtype(at, an)
             assert_almost_equal(an, 2.0)
 
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    'ignore', "divide by zero encountered", RuntimeWarning)
+            with suppress_warnings() as sup:
+                sup.filter(RuntimeWarning, "divide by zero encountered")
                 an = norm(at, -1)
                 self.check_dtype(at, an)
                 assert_almost_equal(an, 1.0)
@@ -2218,7 +2216,8 @@ class TestTensorinv:
         ((24, 8, 3), 1),
         ])
     def test_tensorinv_shape(self, shape, ind):
-        a = np.eye(24).reshape(shape)
+        a = np.eye(24)
+        a.shape = shape
         ainv = linalg.tensorinv(a=a, ind=ind)
         expected = a.shape[ind:] + a.shape[:ind]
         actual = ainv.shape
@@ -2228,13 +2227,15 @@ class TestTensorinv:
         0, -2,
         ])
     def test_tensorinv_ind_limit(self, ind):
-        a = np.eye(24).reshape((4, 6, 8, 3))
+        a = np.eye(24)
+        a.shape = (4, 6, 8, 3)
         with assert_raises(ValueError):
             linalg.tensorinv(a=a, ind=ind)
 
     def test_tensorinv_result(self):
         # mimic a docstring example
-        a = np.eye(24).reshape((24, 8, 3))
+        a = np.eye(24)
+        a.shape = (24, 8, 3)
         ainv = linalg.tensorinv(a, ind=1)
         b = np.ones(24)
         assert_allclose(np.tensordot(ainv, b, 1), np.linalg.tensorsolve(a, b))

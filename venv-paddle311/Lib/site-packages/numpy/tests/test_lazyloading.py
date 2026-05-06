@@ -1,23 +1,23 @@
-import subprocess
 import sys
-import textwrap
+from importlib.util import LazyLoader, find_spec, module_from_spec
 
 import pytest
 
-from numpy.testing import IS_WASM
 
-
-@pytest.mark.skipif(IS_WASM, reason="can't start subprocess")
+# Warning raised by _reload_guard() in numpy/__init__.py
+@pytest.mark.filterwarnings("ignore:The NumPy module was reloaded")
 def test_lazy_load():
     # gh-22045. lazyload doesn't import submodule names into the namespace
+    # muck with sys.modules to test the importing system
+    old_numpy = sys.modules.pop("numpy")
 
-    # Test within a new process, to ensure that we do not mess with the
-    # global state during the test run (could lead to cryptic test failures).
-    # This is generally unsafe, especially, since we also reload the C-modules.
-    code = textwrap.dedent(r"""
-        import sys
-        from importlib.util import LazyLoader, find_spec, module_from_spec
+    numpy_modules = {}
+    for mod_name, mod in list(sys.modules.items()):
+        if mod_name[:6] == "numpy.":
+            numpy_modules[mod_name] = mod
+            sys.modules.pop(mod_name)
 
+    try:
         # create lazy load of numpy as np
         spec = find_spec("numpy")
         module = module_from_spec(spec)
@@ -31,12 +31,8 @@ def test_lazy_load():
 
         # test triggering the import of the package
         np.ndarray
-        """)
-    p = subprocess.run(
-        (sys.executable, '-c', code),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        encoding='utf-8',
-        check=False,
-    )
-    assert p.returncode == 0, p.stdout
+
+    finally:
+        if old_numpy:
+            sys.modules["numpy"] = old_numpy
+            sys.modules.update(numpy_modules)

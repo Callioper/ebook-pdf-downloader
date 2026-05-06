@@ -31,10 +31,5 @@ cdef class SeedSequence():
                      np.ndarray[np.npy_uint32, ndim=1] entropy_array)
     cdef get_assembled_entropy(self)
 
-cdef class SeedlessSeedSequence:
-    pass
-
-# NOTE: This has no implementation and should not be used. It purely exists for
-# backwards compatibility, see https://github.com/scipy/scipy/issues/24215.
-cdef class SeedlessSequence:
+cdef class SeedlessSequence():
     pass

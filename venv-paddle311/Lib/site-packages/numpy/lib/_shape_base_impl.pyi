@@ -9,6 +9,7 @@ from typing import (
     overload,
     type_check_only,
 )
+
 from typing_extensions import deprecated
 
 import numpy as np
@@ -79,7 +80,7 @@ class _SupportsArrayWrap(Protocol):
 def take_along_axis(
     arr: _ScalarT | NDArray[_ScalarT],
     indices: NDArray[integer],
-    axis: int | None = -1,
+    axis: int | None = ...,
 ) -> NDArray[_ScalarT]: ...
 
 def put_along_axis(
@@ -132,13 +133,12 @@ def row_stack(
     casting: _CastingKind = "same_kind",
 ) -> NDArray[Any]: ...
 
-# keep in sync with `numpy.ma.extras.column_stack`
+#
 @overload
 def column_stack(tup: Sequence[_ArrayLike[_ScalarT]]) -> NDArray[_ScalarT]: ...
 @overload
 def column_stack(tup: Sequence[ArrayLike]) -> NDArray[Any]: ...
 
-# keep in sync with `numpy.ma.extras.dstack`
 @overload
 def dstack(tup: Sequence[_ArrayLike[_ScalarT]]) -> NDArray[_ScalarT]: ...
 @overload
@@ -148,29 +148,28 @@ def dstack(tup: Sequence[ArrayLike]) -> NDArray[Any]: ...
 def array_split(
     ary: _ArrayLike[_ScalarT],
     indices_or_sections: _ShapeLike,
-    axis: SupportsIndex = 0,
+    axis: SupportsIndex = ...,
 ) -> list[NDArray[_ScalarT]]: ...
 @overload
 def array_split(
     ary: ArrayLike,
     indices_or_sections: _ShapeLike,
-    axis: SupportsIndex = 0,
+    axis: SupportsIndex = ...,
 ) -> list[NDArray[Any]]: ...
 
 @overload
 def split(
     ary: _ArrayLike[_ScalarT],
     indices_or_sections: _ShapeLike,
-    axis: SupportsIndex = 0,
+    axis: SupportsIndex = ...,
 ) -> list[NDArray[_ScalarT]]: ...
 @overload
 def split(
     ary: ArrayLike,
     indices_or_sections: _ShapeLike,
-    axis: SupportsIndex = 0,
+    axis: SupportsIndex = ...,
 ) -> list[NDArray[Any]]: ...
 
-# keep in sync with `numpy.ma.extras.hsplit`
 @overload
 def hsplit(
     ary: _ArrayLike[_ScalarT],

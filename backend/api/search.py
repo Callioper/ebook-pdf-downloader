@@ -763,20 +763,6 @@ async def check_ocr(engine: str = Query(default="")):
             except Exception:
                 pass
             return {"ok": False, "engine": "appleocr", "message": "AppleOCR 未安装"}
-        elif engine == "llm_ocr":
-            from config import get_config as _get_config_llm
-            cfg = _get_config_llm()
-            endpoint = cfg.get("llm_ocr_endpoint", "")
-            model = cfg.get("llm_ocr_model", "")
-            api_key = cfg.get("llm_ocr_api_key", "")
-            if not endpoint or not model:
-                return {"ok": False, "engine": "llm_ocr", "message": "未配置端点或模型名"}
-            try:
-                from engine.llm_ocr import verify_llm_model
-                ok, msg = await verify_llm_model(endpoint, model, api_key)
-                return {"ok": ok, "engine": "llm_ocr", "message": msg, "endpoint": endpoint}
-            except Exception as e:
-                return {"ok": False, "engine": "llm_ocr", "message": f"验证失败: {str(e)[:100]}"}
         return {"ok": False, "engine": engine, "message": f"{engine} not found"}
     except FileNotFoundError:
         return {"ok": False, "engine": engine, "message": f"{engine} 未安装或不在 PATH 中"}

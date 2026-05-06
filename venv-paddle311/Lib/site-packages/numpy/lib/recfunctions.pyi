@@ -1,6 +1,7 @@
-from _typeshed import Incomplete
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeAlias, overload
+
+from _typeshed import Incomplete
 from typing_extensions import TypeVar
 
 import numpy as np
@@ -263,16 +264,6 @@ def unstructured_to_structured(
 def unstructured_to_structured(
     arr: npt.NDArray[Any],
     dtype: None,
-    names: _OneOrMany[str],
-    align: bool = False,
-    copy: bool = False,
-    casting: str = "unsafe",
-) -> npt.NDArray[np.void]: ...
-@overload
-def unstructured_to_structured(
-    arr: npt.NDArray[Any],
-    dtype: None = None,
-    *,
     names: _OneOrMany[str],
     align: bool = False,
     copy: bool = False,

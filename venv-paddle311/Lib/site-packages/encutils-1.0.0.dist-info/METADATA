@@ -1,0 +1,27 @@
+Metadata-Version: 2.4
+Name: encutils
+Version: 1.0.0
+Summary: 
+Author-email: "Jason R. Coombs" <jaraco@jaraco.com>
+Requires-Python: >= 3.10
+Description-Content-Type: text/markdown
+License-Expression: LGPL-3.0-or-later
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+License-File: LICENSE
+Requires-Dist: chardet
+Project-URL: Source, https://github.com/coherent-oss/encutils
+
+[![](https://img.shields.io/pypi/v/encutils)](https://pypi.org/project/encutils)
+
+![](https://img.shields.io/pypi/pyversions/encutils)
+
+[![](https://github.com/coherent-oss/encutils/actions/workflows/main.yml/badge.svg)](https://github.com/coherent-oss/encutils/actions?query=workflow%3A%22tests%22)
+
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+[![Coherent Software Development System](https://img.shields.io/badge/coherent%20system-informational)](https://github.com/coherent-oss/system)
+
+

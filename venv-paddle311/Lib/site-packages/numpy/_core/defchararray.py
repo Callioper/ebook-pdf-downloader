@@ -22,19 +22,31 @@ from numpy._core import overrides
 from numpy._core.multiarray import compare_chararrays
 from numpy._core.strings import (
     _join as join,
+)
+from numpy._core.strings import (
     _rsplit as rsplit,
+)
+from numpy._core.strings import (
     _split as split,
+)
+from numpy._core.strings import (
     _splitlines as splitlines,
 )
 from numpy._utils import set_module
 from numpy.strings import *
 from numpy.strings import (
     multiply as strings_multiply,
+)
+from numpy.strings import (
     partition as strings_partition,
+)
+from numpy.strings import (
     rpartition as strings_rpartition,
 )
 
-from .numeric import array as narray, asarray as asnarray, ndarray
+from .numeric import array as narray
+from .numeric import asarray as asnarray
+from .numeric import ndarray
 from .numerictypes import bytes_, character, str_
 
 __all__ = [
@@ -496,6 +508,7 @@ class chararray(ndarray):
     title
     tofile
     tolist
+    tostring
     translate
     transpose
     upper
@@ -718,7 +731,7 @@ class chararray(ndarray):
     def __rmod__(self, other):
         return NotImplemented
 
-    def argsort(self, axis=-1, kind=None, order=None, *, stable=None):
+    def argsort(self, axis=-1, kind=None, order=None):
         """
         Return the indices that sort the array lexicographically.
 
@@ -736,7 +749,7 @@ class chararray(ndarray):
               dtype='|S5')
 
         """
-        return self.__array__().argsort(axis, kind, order, stable=stable)
+        return self.__array__().argsort(axis, kind, order)
     argsort.__doc__ = ndarray.argsort.__doc__
 
     def capitalize(self):

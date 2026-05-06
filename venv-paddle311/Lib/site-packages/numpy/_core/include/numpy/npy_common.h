@@ -98,23 +98,11 @@
 #endif
 
 #ifdef _MSC_VER
-    #ifdef __cplusplus
-        #define NPY_FINLINE __forceinline
-    #else
-        #define NPY_FINLINE static __forceinline
-    #endif
+    #define NPY_FINLINE static __forceinline
 #elif defined(__GNUC__)
-    #ifdef __cplusplus
-        #define NPY_FINLINE inline __attribute__((always_inline))
-    #else
-        #define NPY_FINLINE static inline __attribute__((always_inline))
-    #endif
+    #define NPY_FINLINE static inline __attribute__((always_inline))
 #else
-    #ifdef __cplusplus
-        #define NPY_FINLINE inline
-    #else
-        #define NPY_FINLINE static NPY_INLINE
-    #endif
+    #define NPY_FINLINE static
 #endif
 
 #if defined(_MSC_VER)

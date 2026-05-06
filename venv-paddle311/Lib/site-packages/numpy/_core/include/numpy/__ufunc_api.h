@@ -87,8 +87,6 @@ NPY_NO_EXPORT  int PyUFunc_AddWrappingLoop \
        (PyObject *, PyArray_DTypeMeta *new_dtypes[], PyArray_DTypeMeta *wrapped_dtypes[], PyArrayMethod_TranslateGivenDescriptors *, PyArrayMethod_TranslateLoopDescriptors *);
 NPY_NO_EXPORT  int PyUFunc_GiveFloatingpointErrors \
        (const char *, int);
-NPY_NO_EXPORT  int PyUFunc_AddLoopsFromSpecs \
-       (PyUFunc_LoopSlot *);
 
 #else
 
@@ -249,12 +247,6 @@ static void **PyUFunc_API=NULL;
 #define PyUFunc_GiveFloatingpointErrors \
         (*(int (*)(const char *, int)) \
     PyUFunc_API[46])
-#endif
-
-#if NPY_FEATURE_VERSION >= NPY_2_4_API_VERSION
-#define PyUFunc_AddLoopsFromSpecs \
-        (*(int (*)(PyUFunc_LoopSlot *)) \
-    PyUFunc_API[47])
 #endif
 
 static inline int

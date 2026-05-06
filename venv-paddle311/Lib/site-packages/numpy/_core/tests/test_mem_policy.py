@@ -9,7 +9,7 @@ import pytest
 
 import numpy as np
 from numpy._core.multiarray import get_handler_name
-from numpy.testing import IS_EDITABLE, IS_WASM, extbuild
+from numpy.testing import IS_EDITABLE, IS_WASM, assert_warns, extbuild
 
 
 @pytest.fixture
@@ -415,7 +415,6 @@ def test_new_policy(get_module):
                    reason=("bad interaction between getenv and "
                            "os.environ inside pytest"))
 @pytest.mark.parametrize("policy", ["0", "1", None])
-@pytest.mark.thread_unsafe(reason="modifies environment variables")
 def test_switch_owner(get_module, policy):
     a = get_module.get_array()
     assert np._core.multiarray.get_handler_name(a) is None
@@ -433,7 +432,7 @@ def test_switch_owner(get_module, policy):
         # The policy should be NULL, so we have to assume we can call
         # "free".  A warning is given if the policy == "1"
         if policy:
-            with pytest.warns(RuntimeWarning) as w:
+            with assert_warns(RuntimeWarning) as w:
                 del a
                 gc.collect()
         else:

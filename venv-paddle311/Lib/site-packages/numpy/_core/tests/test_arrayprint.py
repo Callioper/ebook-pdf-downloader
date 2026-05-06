@@ -15,6 +15,7 @@ from numpy.testing import (
     assert_equal,
     assert_raises,
     assert_raises_regex,
+    assert_warns,
 )
 from numpy.testing._private.utils import run_threaded
 
@@ -546,7 +547,6 @@ class TestArray2String:
         assert_equal(result, expected_repr)
 
     @pytest.mark.skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
-    @pytest.mark.thread_unsafe(reason="garbage collector is global state")
     def test_refcount(self):
         # make sure we do not hold references to the array due to a recursive
         # closure (gh-10620)
@@ -735,7 +735,12 @@ class TestPrintOptions:
         # str is unaffected
         assert_equal(str(x), "1")
 
-        # check it works
+        # check `style` arg raises
+        assert_warns(DeprecationWarning, np.array2string,
+                                         np.array(1.), style=repr)
+        # but not in legacy mode
+        np.array2string(np.array(1.), style=repr, legacy='1.13')
+        # gh-10934 style was broken in legacy mode, check it works
         np.array2string(np.array(1.), legacy='1.13')
 
     def test_float_spacing(self):
@@ -1316,7 +1321,6 @@ def test_printoptions_asyncio_safe():
     loop.close()
 
 @pytest.mark.skipif(IS_WASM, reason="wasm doesn't support threads")
-@pytest.mark.thread_unsafe(reason="test is already explicitly multi-threaded")
 def test_multithreaded_array_printing():
     # the dragon4 implementation uses a static scratch space for performance
     # reasons this test makes sure it is set up in a thread-safe manner

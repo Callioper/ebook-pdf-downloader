@@ -1,4 +1,5 @@
 from typing import (
+    ClassVar,
     Literal,
     Never,
     TypeAlias,
@@ -117,14 +118,14 @@ _EmptyDict: TypeAlias = dict[Never, Never]
 
 @final
 class __array_namespace_info__:
-    __module__: Literal["numpy"] = "numpy"
+    __module__: ClassVar[Literal['numpy']]
 
     def capabilities(self) -> _Capabilities: ...
     def default_device(self) -> _Device: ...
     def default_dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
     ) -> _DefaultDTypes: ...
     def devices(self) -> list[_Device]: ...
 
@@ -132,49 +133,49 @@ class __array_namespace_info__:
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
-        kind: None = None,
+        device: _DeviceLike = ...,
+        kind: None = ...,
     ) -> _DTypes: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: _Permute1[_KindBool],
     ) -> _DTypesBool: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: _Permute1[_KindInt],
     ) -> _DTypesInt: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: _Permute1[_KindUInt],
     ) -> _DTypesUInt: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: _Permute1[_KindFloat],
     ) -> _DTypesFloat: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: _Permute1[_KindComplex],
     ) -> _DTypesComplex: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: (
             _Permute1[_KindInteger]
             | _Permute2[_KindInt, _KindUInt]
@@ -184,7 +185,7 @@ class __array_namespace_info__:
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: (
             _Permute1[_KindNumber]
             | _Permute3[_KindInteger, _KindFloat, _KindComplex]
@@ -194,13 +195,13 @@ class __array_namespace_info__:
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: tuple[()],
     ) -> _EmptyDict: ...
     @overload
     def dtypes(
         self,
         *,
-        device: _DeviceLike = None,
+        device: _DeviceLike = ...,
         kind: tuple[_Kind, ...],
     ) -> _DTypesUnion: ...

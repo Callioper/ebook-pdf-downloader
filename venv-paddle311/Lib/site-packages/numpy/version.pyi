@@ -1,9 +1,18 @@
 from typing import Final, LiteralString
 
-version: Final[LiteralString] = ...
-__version__: Final[LiteralString] = ...
-full_version: Final[LiteralString] = ...
+__all__ = (
+    '__version__',
+    'full_version',
+    'git_revision',
+    'release',
+    'short_version',
+    'version',
+)
 
-git_revision: Final[LiteralString] = ...
-release: Final[bool] = ...
-short_version: Final[LiteralString] = ...
+version: Final[LiteralString]
+__version__: Final[LiteralString]
+full_version: Final[LiteralString]
+
+git_revision: Final[LiteralString]
+release: Final[bool]
+short_version: Final[LiteralString]

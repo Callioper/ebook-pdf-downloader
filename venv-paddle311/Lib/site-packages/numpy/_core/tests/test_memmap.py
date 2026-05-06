@@ -1,7 +1,6 @@
 import mmap
 import os
 import sys
-import warnings
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
 
@@ -27,10 +26,10 @@ from numpy.testing import (
     assert_array_equal,
     assert_equal,
     break_cycles,
+    suppress_warnings,
 )
 
 
-@pytest.mark.thread_unsafe(reason="setup & memmap is thread-unsafe (gh-29126)")
 class TestMemmap:
     def setup_method(self):
         self.tmpfp = NamedTemporaryFile(prefix='mmap')
@@ -168,9 +167,8 @@ class TestMemmap:
         fp = memmap(self.tmpfp, dtype=self.dtype, shape=self.shape)
         fp[:] = self.data
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                'ignore', "np.average currently does not preserve", FutureWarning)
+        with suppress_warnings() as sup:
+            sup.filter(FutureWarning, "np.average currently does not preserve")
             for unary_op in [sum, average, prod]:
                 result = unary_op(fp)
                 assert_(isscalar(result))

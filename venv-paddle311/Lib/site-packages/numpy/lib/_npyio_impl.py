@@ -497,12 +497,12 @@ def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True,
                     f"Failed to interpret file {file!r} as a pickle") from e
 
 
-def _save_dispatcher(file, arr, allow_pickle=None):
+def _save_dispatcher(file, arr, allow_pickle=None, fix_imports=None):
     return (arr,)
 
 
 @array_function_dispatch(_save_dispatcher)
-def save(file, arr, allow_pickle=True):
+def save(file, arr, allow_pickle=True, fix_imports=np._NoValue):
     """
     Save an array to a binary file in NumPy ``.npy`` format.
 
@@ -523,6 +523,12 @@ def save(file, arr, allow_pickle=True):
         require libraries that are not available, and not all pickled data is
         compatible between different versions of Python).
         Default: True
+    fix_imports : bool, optional
+        The `fix_imports` flag is deprecated and has no effect.
+
+        .. deprecated:: 2.1
+            This flag is ignored since NumPy 1.17 and was only needed to
+            support loading in Python 2 some files written in Python 3.
 
     See Also
     --------
@@ -559,6 +565,12 @@ def save(file, arr, allow_pickle=True):
     >>> print(a, b)
     # [1 2] [1 3]
     """
+    if fix_imports is not np._NoValue:
+        # Deprecated 2024-05-16, NumPy 2.1
+        warnings.warn(
+            "The 'fix_imports' flag is deprecated and has no effect. "
+            "(Deprecated in NumPy 2.1)",
+            DeprecationWarning, stacklevel=2)
     if hasattr(file, 'write'):
         file_ctx = contextlib.nullcontext(file)
     else:
@@ -569,7 +581,8 @@ def save(file, arr, allow_pickle=True):
 
     with file_ctx as fid:
         arr = np.asanyarray(arr)
-        format.write_array(fid, arr, allow_pickle=allow_pickle)
+        format.write_array(fid, arr, allow_pickle=allow_pickle,
+                           pickle_kwargs={'fix_imports': fix_imports})
 
 
 def _savez_dispatcher(file, *args, allow_pickle=True, **kwds):
@@ -1717,7 +1730,7 @@ def fromregex(file, regexp, dtype, encoding=None):
             #   re-interpret as a single-field structured array.
             newdtype = np.dtype(dtype[dtype.names[0]])
             output = np.array(seq, dtype=newdtype)
-            output = output.view(dtype)
+            output.dtype = dtype
         else:
             output = np.array(seq, dtype=dtype)
 

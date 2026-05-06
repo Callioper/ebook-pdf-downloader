@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from typing import ClassVar, Generic, Self
+
 from typing_extensions import TypeVar
 
 import numpy as np

@@ -35,9 +35,7 @@ from numpy._core import (
     cdouble,
     complexfloating,
     count_nonzero,
-    cross as _core_cross,
     csingle,
-    diagonal as _core_diagonal,
     divide,
     dot,
     double,
@@ -51,13 +49,10 @@ from numpy._core import (
     intp,
     isfinite,
     isnan,
-    matmul as _core_matmul,
-    matrix_transpose as _core_matrix_transpose,
     moveaxis,
     multiply,
     newaxis,
     object_,
-    outer as _core_outer,
     overrides,
     prod,
     reciprocal,
@@ -67,11 +62,34 @@ from numpy._core import (
     sqrt,
     sum,
     swapaxes,
-    tensordot as _core_tensordot,
-    trace as _core_trace,
-    transpose as _core_transpose,
-    vecdot as _core_vecdot,
     zeros,
+)
+from numpy._core import (
+    cross as _core_cross,
+)
+from numpy._core import (
+    diagonal as _core_diagonal,
+)
+from numpy._core import (
+    matmul as _core_matmul,
+)
+from numpy._core import (
+    matrix_transpose as _core_matrix_transpose,
+)
+from numpy._core import (
+    outer as _core_outer,
+)
+from numpy._core import (
+    tensordot as _core_tensordot,
+)
+from numpy._core import (
+    trace as _core_trace,
+)
+from numpy._core import (
+    transpose as _core_transpose,
+)
+from numpy._core import (
+    vecdot as _core_vecdot,
 )
 from numpy._globals import _NoValue
 from numpy._typing import NDArray
@@ -317,7 +335,8 @@ def tensorsolve(a, b, axes=None):
     Examples
     --------
     >>> import numpy as np
-    >>> a = np.eye(2*3*4).reshape((2*3, 4, 2, 3, 4))
+    >>> a = np.eye(2*3*4)
+    >>> a.shape = (2*3, 4, 2, 3, 4)
     >>> rng = np.random.default_rng()
     >>> b = rng.normal(size=(2*3, 4))
     >>> x = np.linalg.tensorsolve(a, b)
@@ -494,7 +513,8 @@ def tensorinv(a, ind=2):
     Examples
     --------
     >>> import numpy as np
-    >>> a = np.eye(4*6).reshape((4, 6, 8, 3))
+    >>> a = np.eye(4*6)
+    >>> a.shape = (4, 6, 8, 3)
     >>> ainv = np.linalg.tensorinv(a, ind=2)
     >>> ainv.shape
     (8, 3, 4, 6)
@@ -503,7 +523,8 @@ def tensorinv(a, ind=2):
     >>> np.allclose(np.tensordot(ainv, b), np.linalg.tensorsolve(a, b))
     True
 
-    >>> a = np.eye(4*6).reshape((24, 8, 3))
+    >>> a = np.eye(4*6)
+    >>> a.shape = (24, 8, 3)
     >>> ainv = np.linalg.tensorinv(a, ind=1)
     >>> ainv.shape
     (8, 3, 24)
@@ -995,6 +1016,9 @@ def qr(a, mode='reduced'):
 
     Returns
     -------
+    When mode is 'reduced' or 'complete', the result will be a namedtuple with
+    the attributes `Q` and `R`.
+
     Q : ndarray of float or complex, optional
         A matrix with orthonormal columns. When mode = 'complete' the
         result is an orthogonal/unitary matrix depending on whether or not
@@ -1023,9 +1047,6 @@ def qr(a, mode='reduced'):
 
     Notes
     -----
-    When mode is 'reduced' or 'complete', the result will be a namedtuple with
-    the attributes ``Q`` and ``R``.
-
     This is an interface to the LAPACK routines ``dgeqrf``, ``zgeqrf``,
     ``dorgqr``, and ``zungqr``.
 
@@ -1696,6 +1717,9 @@ def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
 
     Returns
     -------
+    When `compute_uv` is True, the result is a namedtuple with the following
+    attribute names:
+
     U : { (..., M, M), (..., M, K) } array
         Unitary array(s). The first ``a.ndim - 2`` dimensions have the same
         size as those of the input `a`. The size of the last two dimensions
@@ -1723,9 +1747,6 @@ def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
 
     Notes
     -----
-    When `compute_uv` is True, the result is a namedtuple with the following
-    attribute names: `U`, `S`, and `Vh`.
-
     The decomposition is performed using LAPACK routine ``_gesdd``.
 
     SVD is usually described for the factorization of a 2D matrix :math:`A`.
@@ -2016,14 +2037,18 @@ def cond(x, p=None):
         r = r.astype(result_t, copy=False)
 
     # Convert nans to infs unless the original array had nan entries
+    r = asarray(r)
     nan_mask = isnan(r)
     if nan_mask.any():
         nan_mask &= ~isnan(x).any(axis=(-2, -1))
         if r.ndim > 0:
             r[nan_mask] = inf
         elif nan_mask:
-            # Convention is to return scalars instead of 0d arrays.
-            r = r.dtype.type(inf)
+            r[()] = inf
+
+    # Convention is to return scalars instead of 0d arrays
+    if r.ndim == 0:
+        r = r[()]
 
     return r
 
@@ -2069,9 +2094,9 @@ def matrix_rank(A, tol=None, hermitian=False, *, rtol=None):
     The default threshold to detect rank deficiency is a test on the magnitude
     of the singular values of `A`.  By default, we identify singular values
     less than ``S.max() * max(M, N) * eps`` as indicating rank deficiency
-    (with the symbols defined above). This is the algorithm MATLAB uses [1]_.
+    (with the symbols defined above). This is the algorithm MATLAB uses [1].
     It also appears in *Numerical recipes* in the discussion of SVD solutions
-    for linear least squares [2]_.
+    for linear least squares [2].
 
     This default threshold is designed to detect rank deficiency accounting
     for the numerical errors of the SVD computation. Imagine that there
@@ -2938,7 +2963,7 @@ def multi_dot(arrays, *, out=None):
             return A.shape[0] * A.shape[1] * B.shape[1]
 
     Assume we have three matrices
-    :math:`A_{10 \\times 100}, B_{100 \\times 5}, C_{5 \\times 50}`.
+    :math:`A_{10 \times 100}, B_{100 \times 5}, C_{5 \times 50}`.
 
     The costs for the two different parenthesizations are as follows::
 

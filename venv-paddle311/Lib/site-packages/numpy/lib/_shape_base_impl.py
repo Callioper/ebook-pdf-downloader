@@ -1,7 +1,6 @@
 import functools
 import warnings
 
-import numpy as np
 import numpy._core.numeric as _nx
 from numpy._core import atleast_3d, overrides, vstack
 from numpy._core._multiarray_umath import _array_converter
@@ -172,13 +171,15 @@ def take_along_axis(arr, indices, axis=-1):
         if indices.ndim != 1:
             raise ValueError(
                 'when axis=None, `indices` must have a single dimension.')
-        arr = np.array(arr.flat)
+        arr = arr.flat
+        arr_shape = (len(arr),)  # flatiter has no .shape
         axis = 0
     else:
         axis = normalize_axis_index(axis, arr.ndim)
+        arr_shape = arr.shape
 
     # use the fancy index
-    return arr[_make_along_axis_idx(arr.shape, indices, axis)]
+    return arr[_make_along_axis_idx(arr_shape, indices, axis)]
 
 
 def _put_along_axis_dispatcher(arr, indices, values, axis):
@@ -262,13 +263,15 @@ def put_along_axis(arr, indices, values, axis):
         if indices.ndim != 1:
             raise ValueError(
                 'when axis=None, `indices` must have a single dimension.')
-        arr = np.array(arr.flat)
+        arr = arr.flat
         axis = 0
+        arr_shape = (len(arr),)  # flatiter has no .shape
     else:
         axis = normalize_axis_index(axis, arr.ndim)
+        arr_shape = arr.shape
 
     # use the fancy index
-    arr[_make_along_axis_idx(arr.shape, indices, axis)] = values
+    arr[_make_along_axis_idx(arr_shape, indices, axis)] = values
 
 
 def _apply_along_axis_dispatcher(func1d, axis, arr, *args, **kwargs):
@@ -650,11 +653,11 @@ def column_stack(tup):
     --------
     >>> import numpy as np
     >>> a = np.array((1,2,3))
-    >>> b = np.array((4,5,6))
+    >>> b = np.array((2,3,4))
     >>> np.column_stack((a,b))
-    array([[1, 4],
-           [2, 5],
-           [3, 6]])
+    array([[1, 2],
+           [2, 3],
+           [3, 4]])
 
     """
     arrays = []
@@ -710,24 +713,33 @@ def dstack(tup):
     --------
     >>> import numpy as np
     >>> a = np.array((1,2,3))
-    >>> b = np.array((4,5,6))
+    >>> b = np.array((2,3,4))
     >>> np.dstack((a,b))
-    array([[[1, 4],
-            [2, 5],
-            [3, 6]]])
+    array([[[1, 2],
+            [2, 3],
+            [3, 4]]])
 
     >>> a = np.array([[1],[2],[3]])
-    >>> b = np.array([[4],[5],[6]])
+    >>> b = np.array([[2],[3],[4]])
     >>> np.dstack((a,b))
-    array([[[1, 4]],
-           [[2, 5]],
-           [[3, 6]]])
+    array([[[1, 2]],
+           [[2, 3]],
+           [[3, 4]]])
 
     """
     arrs = atleast_3d(*tup)
     if not isinstance(arrs, tuple):
         arrs = (arrs,)
     return _nx.concatenate(arrs, 2)
+
+
+def _replace_zero_by_x_arrays(sub_arys):
+    for i in range(len(sub_arys)):
+        if _nx.ndim(sub_arys[i]) == 0:
+            sub_arys[i] = _nx.empty(0, dtype=sub_arys[i].dtype)
+        elif _nx.sometrue(_nx.equal(_nx.shape(sub_arys[i]), 0)):
+            sub_arys[i] = _nx.empty(0, dtype=sub_arys[i].dtype)
+    return sub_arys
 
 
 def _array_split_dispatcher(ary, indices_or_sections, axis=None):
@@ -1101,7 +1113,7 @@ def kron(a, b):
     -----
     The function assumes that the number of dimensions of `a` and `b`
     are the same, if necessary prepending the smallest with ones.
-    If ``a.shape = (r0,r1,...,rN)`` and ``b.shape = (s0,s1,...,sN)``,
+    If ``a.shape = (r0,r1,..,rN)`` and ``b.shape = (s0,s1,...,sN)``,
     the Kronecker product has shape ``(r0*s0, r1*s1, ..., rN*SN)``.
     The elements are products of elements from `a` and `b`, organized
     explicitly by::

@@ -188,10 +188,10 @@ class WrappedArray(NDArrayOperatorsMixin):
 class TestSubclassing:
     # Test suite for masked subclasses of ndarray.
 
-    def _create_data(self):
+    def setup_method(self):
         x = np.arange(5, dtype='float')
         mx = msubarray(x, mask=[0, 1, 0, 0, 0])
-        return x, mx
+        self.data = (x, mx)
 
     def test_data_subclassing(self):
         # Tests whether the subclass is kept.
@@ -205,19 +205,19 @@ class TestSubclassing:
 
     def test_maskedarray_subclassing(self):
         # Tests subclassing MaskedArray
-        mx = self._create_data()[1]
+        (x, mx) = self.data
         assert_(isinstance(mx._data, subarray))
 
     def test_masked_unary_operations(self):
         # Tests masked_unary_operation
-        x, mx = self._create_data()
+        (x, mx) = self.data
         with np.errstate(divide='ignore'):
             assert_(isinstance(log(mx), msubarray))
             assert_equal(log(x), np.log(x))
 
     def test_masked_binary_operations(self):
         # Tests masked_binary_operation
-        x, mx = self._create_data()
+        (x, mx) = self.data
         # Result should be a msubarray
         assert_(isinstance(add(mx, mx), msubarray))
         assert_(isinstance(add(mx, x), msubarray))
@@ -230,7 +230,7 @@ class TestSubclassing:
 
     def test_masked_binary_operations2(self):
         # Tests domained_masked_binary_operation
-        x, mx = self._create_data()
+        (x, mx) = self.data
         xmx = masked_array(mx.data.__array__(), mask=mx.mask)
         assert_(isinstance(divide(mx, mx), msubarray))
         assert_(isinstance(divide(mx, x), msubarray))
@@ -427,20 +427,20 @@ def test_array_no_inheritance():
 class TestClassWrapping:
     # Test suite for classes that wrap MaskedArrays
 
-    def _create_data(self):
+    def setup_method(self):
         m = np.ma.masked_array([1, 3, 5], mask=[False, True, False])
         wm = WrappedArray(m)
-        return m, wm
+        self.data = (m, wm)
 
     def test_masked_unary_operations(self):
         # Tests masked_unary_operation
-        wm = self._create_data()[1]
+        (m, wm) = self.data
         with np.errstate(divide='ignore'):
             assert_(isinstance(np.log(wm), WrappedArray))
 
     def test_masked_binary_operations(self):
         # Tests masked_binary_operation
-        m, wm = self._create_data()
+        (m, wm) = self.data
         # Result should be a WrappedArray
         assert_(isinstance(np.add(wm, wm), WrappedArray))
         assert_(isinstance(np.add(m, wm), WrappedArray))

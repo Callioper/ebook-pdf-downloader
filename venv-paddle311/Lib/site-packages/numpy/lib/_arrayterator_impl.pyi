@@ -3,6 +3,7 @@
 from collections.abc import Generator
 from types import EllipsisType
 from typing import Any, Final, TypeAlias, overload
+
 from typing_extensions import TypeVar
 
 import numpy as np

@@ -15,6 +15,7 @@ from numpy.testing import (
     assert_equal,
     assert_raises,
     assert_raises_regex,
+    suppress_warnings,
 )
 
 # Test data
@@ -280,9 +281,8 @@ class TestNanFunctions_ArgminArgmax:
     def test_result_values(self):
         for f, fcmp in zip(self.nanfuncs, [np.greater, np.less]):
             for row in _ndat:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        'ignore', "invalid value encountered in", RuntimeWarning)
+                with suppress_warnings() as sup:
+                    sup.filter(RuntimeWarning, "invalid value encountered in")
                     ind = f(row)
                     val = row[ind]
                     # comparing with NaN is tricky as the result
@@ -491,10 +491,10 @@ class SharedNanFunctionsTestsMixin:
         codes = 'efdgFDG'
         for nf, rf in zip(self.nanfuncs, self.stdfuncs):
             for c in codes:
-                with warnings.catch_warnings():
+                with suppress_warnings() as sup:
                     if nf in {np.nanstd, np.nanvar} and c in 'FDG':
                         # Giving the warning is a small bug, see gh-8000
-                        warnings.simplefilter('ignore', ComplexWarning)
+                        sup.filter(ComplexWarning)
                     tgt = rf(mat, dtype=np.dtype(c), axis=1).dtype.type
                     res = nf(mat, dtype=np.dtype(c), axis=1).dtype.type
                     assert_(res is tgt)
@@ -508,10 +508,10 @@ class SharedNanFunctionsTestsMixin:
         codes = 'efdgFDG'
         for nf, rf in zip(self.nanfuncs, self.stdfuncs):
             for c in codes:
-                with warnings.catch_warnings():
+                with suppress_warnings() as sup:
                     if nf in {np.nanstd, np.nanvar} and c in 'FDG':
                         # Giving the warning is a small bug, see gh-8000
-                        warnings.simplefilter('ignore', ComplexWarning)
+                        sup.filter(ComplexWarning)
                     tgt = rf(mat, dtype=c, axis=1).dtype.type
                     res = nf(mat, dtype=c, axis=1).dtype.type
                     assert_(res is tgt)
@@ -729,16 +729,16 @@ class TestNanFunctions_MeanVarStd(SharedNanFunctionsTestsMixin):
         dsize = [len(d) for d in _rdat]
         for nf, rf in zip(nanfuncs, stdfuncs):
             for ddof in range(5):
-                with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter('always')
-                    warnings.simplefilter('ignore', ComplexWarning)
+                with suppress_warnings() as sup:
+                    sup.record(RuntimeWarning)
+                    sup.filter(ComplexWarning)
                     tgt = [ddof >= d for d in dsize]
                     res = nf(_ndat, axis=1, ddof=ddof)
                     assert_equal(np.isnan(res), tgt)
-                if any(tgt):
-                    assert_(len(w) == 1)
-                else:
-                    assert_(len(w) == 0)
+                    if any(tgt):
+                        assert_(len(sup.log) == 1)
+                    else:
+                        assert_(len(sup.log) == 0)
 
     @pytest.mark.parametrize("axis", [None, 0, 1])
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
@@ -860,8 +860,8 @@ class TestNanFunctions_Median:
         w = np.random.random((4, 200)) * np.array(d.shape)[:, None]
         w = w.astype(np.intp)
         d[tuple(w)] = np.nan
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
+        with suppress_warnings() as sup:
+            sup.filter(RuntimeWarning)
             res = np.nanmedian(d, axis=None, keepdims=True)
             assert_equal(res.shape, (1, 1, 1, 1))
             res = np.nanmedian(d, axis=(0, 1), keepdims=True)
@@ -946,15 +946,17 @@ class TestNanFunctions_Median:
     @pytest.mark.parametrize("dtype", _TYPE_CODES)
     def test_allnans(self, dtype, axis):
         mat = np.full((3, 3), np.nan).astype(dtype)
-        with pytest.warns(RuntimeWarning) as r:
+        with suppress_warnings() as sup:
+            sup.record(RuntimeWarning)
+
             output = np.nanmedian(mat, axis=axis)
             assert output.dtype == mat.dtype
             assert np.isnan(output).all()
 
             if axis is None:
-                assert_(len(r) == 1)
+                assert_(len(sup.log) == 1)
             else:
-                assert_(len(r) == 3)
+                assert_(len(sup.log) == 3)
 
             # Check scalar
             scalar = np.array(np.nan).astype(dtype)[()]
@@ -963,9 +965,9 @@ class TestNanFunctions_Median:
             assert np.isnan(output_scalar)
 
             if axis is None:
-                assert_(len(r) == 2)
+                assert_(len(sup.log) == 2)
             else:
-                assert_(len(r) == 4)
+                assert_(len(sup.log) == 4)
 
     def test_empty(self):
         mat = np.zeros((0, 3))
@@ -993,8 +995,8 @@ class TestNanFunctions_Median:
         assert_raises(ValueError, np.nanmedian, d, axis=(1, 1))
 
     def test_float_special(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
+        with suppress_warnings() as sup:
+            sup.filter(RuntimeWarning)
             for inf in [np.inf, -np.inf]:
                 a = np.array([[inf,  np.nan], [np.nan, np.nan]])
                 assert_equal(np.nanmedian(a, axis=0), [inf,  np.nan])
@@ -1061,8 +1063,8 @@ class TestNanFunctions_Percentile:
         w = np.random.random((4, 200)) * np.array(d.shape)[:, None]
         w = w.astype(np.intp)
         d[tuple(w)] = np.nan
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
+        with suppress_warnings() as sup:
+            sup.filter(RuntimeWarning)
             res = np.nanpercentile(d, 90, axis=None, keepdims=True)
             assert_equal(res.shape, (1, 1, 1, 1))
             res = np.nanpercentile(d, 90, axis=(0, 1), keepdims=True)
@@ -1231,9 +1233,8 @@ class TestNanFunctions_Percentile:
         large_mat[:, :, 3:] *= 2
         for axis in [None, 0, 1]:
             for keepdim in [False, True]:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        'ignore', "All-NaN slice encountered", RuntimeWarning)
+                with suppress_warnings() as sup:
+                    sup.filter(RuntimeWarning, "All-NaN slice encountered")
                     val = np.percentile(mat, perc, axis=axis, keepdims=keepdim)
                     nan_val = np.nanpercentile(nan_mat, perc, axis=axis,
                                                keepdims=keepdim)
@@ -1422,7 +1423,6 @@ def test__replace_nan():
         assert np.isnan(arr_nan[-1])
 
 
-@pytest.mark.thread_unsafe(reason="memmap is thread-unsafe (gh-29126)")
 def test_memmap_takes_fast_route(tmpdir):
     # We want memory mapped arrays to take the fast route through nanmax,
     # which avoids creating a mask by using fmax.reduce (see gh-28721). So we

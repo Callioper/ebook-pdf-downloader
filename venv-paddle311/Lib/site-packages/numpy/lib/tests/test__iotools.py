@@ -1,8 +1,6 @@
 import time
 from datetime import date
 
-import pytest
-
 import numpy as np
 from numpy.lib._iotools import (
     LineSplitter,
@@ -12,7 +10,12 @@ from numpy.lib._iotools import (
     flatten_dtype,
     has_nested_fields,
 )
-from numpy.testing import assert_, assert_allclose, assert_equal, assert_raises
+from numpy.testing import (
+    assert_,
+    assert_allclose,
+    assert_equal,
+    assert_raises,
+)
 
 
 class TestLineSplitter:
@@ -202,7 +205,6 @@ class TestStringConverter:
         except ValueError:
             pass
 
-    @pytest.mark.thread_unsafe(reason="monkeypatches StringConverter")
     def test_upgrademapper(self):
         "Tests updatemapper"
         dateparser = _bytes_to_date

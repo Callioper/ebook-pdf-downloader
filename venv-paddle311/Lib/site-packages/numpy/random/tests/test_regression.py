@@ -1,11 +1,12 @@
-import inspect
 import sys
-
-import pytest
 
 import numpy as np
 from numpy import random
-from numpy.testing import IS_PYPY, assert_, assert_array_equal, assert_raises
+from numpy.testing import (
+    assert_,
+    assert_array_equal,
+    assert_raises,
+)
 
 
 class TestRegression:
@@ -55,9 +56,9 @@ class TestRegression:
                   [(1, 1), (2, 2), (3, 3), None],
                   [1, (2, 2), (3, 3), None],
                   [(1, 1), 2, 3, None]]:
-            rng = np.random.RandomState(12345)
+            np.random.seed(12345)
             shuffled = list(t)
-            rng.shuffle(shuffled)
+            random.shuffle(shuffled)
             expected = np.array([t[0], t[3], t[1], t[2]], dtype=object)
             assert_array_equal(np.array(shuffled, dtype=object), expected)
 
@@ -132,9 +133,9 @@ class TestRegression:
         class N(np.ndarray):
             pass
 
-        rng = np.random.RandomState(1)
+        np.random.seed(1)
         orig = np.arange(3).view(N)
-        perm = rng.permutation(orig)
+        perm = np.random.permutation(orig)
         assert_array_equal(perm, np.array([0, 2, 1]))
         assert_array_equal(orig, np.arange(3).view(N))
 
@@ -144,32 +145,8 @@ class TestRegression:
             def __array__(self, dtype=None, copy=None):
                 return self.a
 
-        rng = np.random.RandomState(1)
+        np.random.seed(1)
         m = M()
-        perm = rng.permutation(m)
+        perm = np.random.permutation(m)
         assert_array_equal(perm, np.array([2, 1, 4, 0, 3]))
         assert_array_equal(m.__array__(), np.arange(5))
-
-    @pytest.mark.skipif(sys.flags.optimize == 2, reason="Python running -OO")
-    @pytest.mark.skipif(IS_PYPY, reason="PyPy does not modify tp_doc")
-    @pytest.mark.parametrize(
-        "cls",
-        [
-            random.Generator,
-            random.MT19937,
-            random.PCG64,
-            random.PCG64DXSM,
-            random.Philox,
-            random.RandomState,
-            random.SFC64,
-            random.BitGenerator,
-            random.SeedSequence,
-            random.bit_generator.SeedlessSeedSequence,
-        ],
-    )
-    def test_inspect_signature(self, cls: type) -> None:
-        assert hasattr(cls, "__text_signature__")
-        try:
-            inspect.signature(cls)
-        except ValueError:
-            pytest.fail(f"invalid signature: {cls.__module__}.{cls.__qualname__}")

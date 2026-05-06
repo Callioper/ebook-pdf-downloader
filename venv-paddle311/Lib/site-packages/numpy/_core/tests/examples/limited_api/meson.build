@@ -1,8 +1,4 @@
-project(
-  'checks',
-  'c', 'cython',
-  meson_version: '>=1.8.3',
-)
+project('checks', 'c', 'cython')
 
 py = import('python').find_installation(pure: false)
 
@@ -35,7 +31,7 @@ py.extension_module(
       '-DNPY_NO_DEPRECATED_API=NPY_1_21_API_VERSION',
     ],
     include_directories: [npy_include_path],
-    limited_api: '3.9',
+    limited_api: '3.6',
 )
 
 py.extension_module(
@@ -59,5 +55,5 @@ py.extension_module(
       '-DCYTHON_LIMITED_API=1',
     ],
     include_directories: [npy_include_path],
-    limited_api: '3.9',
+    limited_api: '3.7',
 )

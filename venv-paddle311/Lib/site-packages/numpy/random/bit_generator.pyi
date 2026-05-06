@@ -1,5 +1,4 @@
 import abc
-from _typeshed import Incomplete
 from collections.abc import Callable, Mapping, Sequence
 from threading import Lock
 from typing import (
@@ -13,6 +12,8 @@ from typing import (
     overload,
     type_check_only,
 )
+
+from _typeshed import Incomplete
 from typing_extensions import CapsuleType
 
 import numpy as np

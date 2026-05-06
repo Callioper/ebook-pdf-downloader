@@ -114,20 +114,11 @@ array_function_from_c_func_and_dispatcher = functools.partial(
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.empty_like)
 def empty_like(
-    prototype, dtype=None, order="K", subok=True, shape=None, *, device=None
+    prototype, dtype=None, order=None, subok=None, shape=None, *, device=None
 ):
     """
-    empty_like(
-        prototype,
-        /,
-        dtype=None,
-        order='K',
-        subok=True,
-        shape=None,
-        *,
-        device=None,
-    )
-    --
+    empty_like(prototype, dtype=None, order='K', subok=True, shape=None, *,
+               device=None)
 
     Return a new array with the same shape and type as a given array.
 
@@ -195,18 +186,15 @@ def empty_like(
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.concatenate)
-def concatenate(arrays, axis=0, out=None, *, dtype=None, casting="same_kind"):
+def concatenate(arrays, axis=None, out=None, *, dtype=None, casting=None):
     """
     concatenate(
-        arrays,
-        /,
+        (a1, a2, ...),
         axis=0,
         out=None,
-        *,
         dtype=None,
-        casting="same_kind",
+        casting="same_kind"
     )
-    --
 
     Join a sequence of arrays along an existing axis.
 
@@ -307,7 +295,7 @@ def concatenate(arrays, axis=0, out=None, *, dtype=None, casting="same_kind"):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.inner)
-def inner(a, b, /):
+def inner(a, b):
     """
     inner(a, b, /)
 
@@ -401,7 +389,7 @@ def inner(a, b, /):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.where)
-def where(condition, x=None, y=None, /):
+def where(condition, x=None, y=None):
     """
     where(condition, [x, y], /)
 
@@ -477,7 +465,7 @@ def where(condition, x=None, y=None, /):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.lexsort)
-def lexsort(keys, axis=-1):
+def lexsort(keys, axis=None):
     """
     lexsort(keys, axis=-1)
 
@@ -598,7 +586,7 @@ def lexsort(keys, axis=-1):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.can_cast)
-def can_cast(from_, to, casting="safe"):
+def can_cast(from_, to, casting=None):
     """
     can_cast(from_, to, casting='safe')
 
@@ -660,7 +648,7 @@ def can_cast(from_, to, casting="safe"):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.min_scalar_type)
-def min_scalar_type(a, /):
+def min_scalar_type(a):
     """
     min_scalar_type(a, /)
 
@@ -713,7 +701,19 @@ def result_type(*arrays_and_dtypes):
     result_type(*arrays_and_dtypes)
 
     Returns the type that results from applying the NumPy
-    :ref:`type promotion <arrays.promotion>` rules to the arguments.
+    type promotion rules to the arguments.
+
+    Type promotion in NumPy works similarly to the rules in languages
+    like C++, with some slight differences.  When both scalars and
+    arrays are used, the array's type takes precedence and the actual value
+    of the scalar is taken into account.
+
+    For example, calculating 3*a, where a is an array of 32-bit floats,
+    intuitively should result in a 32-bit float output.  If the 3 is a
+    32-bit integer, the NumPy rules indicate it can't convert losslessly
+    into a 32-bit float, so a 64-bit float should be the result type.
+    By examining the value of the constant, '3', we see that it fits in
+    an 8-bit integer, which can be cast losslessly into the 32-bit float.
 
     Parameters
     ----------
@@ -728,6 +728,27 @@ def result_type(*arrays_and_dtypes):
     See also
     --------
     dtype, promote_types, min_scalar_type, can_cast
+
+    Notes
+    -----
+    The specific algorithm used is as follows.
+
+    Categories are determined by first checking which of boolean,
+    integer (int/uint), or floating point (float/complex) the maximum
+    kind of all the arrays and the scalars are.
+
+    If there are only scalars or the maximum category of the scalars
+    is higher than the maximum category of the arrays,
+    the data types are combined with :func:`promote_types`
+    to produce the return value.
+
+    Otherwise, `min_scalar_type` is called on each scalar, and
+    the resulting data types are all combined with :func:`promote_types`
+    to produce the return value.
+
+    The set of int values is not a subset of the uint values for types
+    with the same number of bits, something not reflected in
+    :func:`min_scalar_type`, but handled as a special case in `result_type`.
 
     Examples
     --------
@@ -841,7 +862,7 @@ def dot(a, b, out=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.vdot)
-def vdot(a, b, /):
+def vdot(a, b):
     r"""
     vdot(a, b, /)
 
@@ -904,7 +925,7 @@ def vdot(a, b, /):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.bincount)
-def bincount(x, /, weights=None, minlength=0):
+def bincount(x, weights=None, minlength=None):
     """
     bincount(x, /, weights=None, minlength=0)
 
@@ -980,7 +1001,7 @@ def bincount(x, /, weights=None, minlength=0):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.ravel_multi_index)
-def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
+def ravel_multi_index(multi_index, dims, mode=None, order=None):
     """
     ravel_multi_index(multi_index, dims, mode='raise', order='C')
 
@@ -1038,7 +1059,7 @@ def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.unravel_index)
-def unravel_index(indices, shape, order="C"):
+def unravel_index(indices, shape=None, order=None):
     """
     unravel_index(indices, shape, order='C')
 
@@ -1083,7 +1104,7 @@ def unravel_index(indices, shape, order="C"):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.copyto)
-def copyto(dst, src, casting="same_kind", where=True):
+def copyto(dst, src, casting=None, where=None):
     """
     copyto(dst, src, casting='same_kind', where=True)
 
@@ -1135,7 +1156,7 @@ def copyto(dst, src, casting="same_kind", where=True):
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.putmask)
 def putmask(a, /, mask, values):
     """
-    putmask(a, /, mask, values)
+    putmask(a, mask, values)
 
     Changes elements of an array based on conditional and input values.
 
@@ -1179,7 +1200,7 @@ def putmask(a, /, mask, values):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.packbits)
-def packbits(a, /, axis=None, bitorder="big"):
+def packbits(a, axis=None, bitorder='big'):
     """
     packbits(a, /, axis=None, bitorder='big')
 
@@ -1236,7 +1257,7 @@ def packbits(a, /, axis=None, bitorder="big"):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.unpackbits)
-def unpackbits(a, /, axis=None, count=None, bitorder="big"):
+def unpackbits(a, axis=None, count=None, bitorder='big'):
     """
     unpackbits(a, /, axis=None, count=None, bitorder='big')
 
@@ -1316,9 +1337,9 @@ def unpackbits(a, /, axis=None, count=None, bitorder="big"):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.shares_memory)
-def shares_memory(a, b, /, max_work=-1):
+def shares_memory(a, b, max_work=None):
     """
-    shares_memory(a, b, /, max_work=-1)
+    shares_memory(a, b, /, max_work=None)
 
     Determine if two arrays share memory.
 
@@ -1395,9 +1416,9 @@ def shares_memory(a, b, /, max_work=-1):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.may_share_memory)
-def may_share_memory(a, b, /, max_work=0):
+def may_share_memory(a, b, max_work=None):
     """
-    may_share_memory(a, b, /, max_work=0)
+    may_share_memory(a, b, /, max_work=None)
 
     Determine if two arrays might share memory
 
@@ -1437,14 +1458,14 @@ def may_share_memory(a, b, /, max_work=0):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.is_busday)
-def is_busday(dates, weekmask="1111100", holidays=None, busdaycal=None, out=None):
+def is_busday(dates, weekmask=None, holidays=None, busdaycal=None, out=None):
     """
     is_busday(
         dates,
         weekmask='1111100',
         holidays=None,
         busdaycal=None,
-        out=None,
+        out=None
     )
 
     Calculates which of the given dates are valid days, and which are not.
@@ -1496,7 +1517,7 @@ def is_busday(dates, weekmask="1111100", holidays=None, busdaycal=None, out=None
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.busday_offset)
-def busday_offset(dates, offsets, roll="raise", weekmask="1111100", holidays=None,
+def busday_offset(dates, offsets, roll=None, weekmask=None, holidays=None,
                   busdaycal=None, out=None):
     """
     busday_offset(
@@ -1506,7 +1527,7 @@ def busday_offset(dates, offsets, roll="raise", weekmask="1111100", holidays=Non
         weekmask='1111100',
         holidays=None,
         busdaycal=None,
-        out=None,
+        out=None
     )
 
     First adjusts the date to fall on a valid day according to
@@ -1598,7 +1619,7 @@ def busday_offset(dates, offsets, roll="raise", weekmask="1111100", holidays=Non
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.busday_count)
-def busday_count(begindates, enddates, weekmask="1111100", holidays=(),
+def busday_count(begindates, enddates, weekmask=None, holidays=None,
                  busdaycal=None, out=None):
     """
     busday_count(
@@ -1671,8 +1692,9 @@ def busday_count(begindates, enddates, weekmask="1111100", holidays=(),
     return (begindates, enddates, weekmask, holidays, out)
 
 
-@array_function_from_c_func_and_dispatcher(_multiarray_umath.datetime_as_string)
-def datetime_as_string(arr, unit=None, timezone="naive", casting="same_kind"):
+@array_function_from_c_func_and_dispatcher(
+    _multiarray_umath.datetime_as_string)
+def datetime_as_string(arr, unit=None, timezone=None, casting=None):
     """
     datetime_as_string(arr, unit=None, timezone='naive', casting='same_kind')
 
@@ -1701,7 +1723,7 @@ def datetime_as_string(arr, unit=None, timezone="naive", casting="same_kind"):
     Examples
     --------
     >>> import numpy as np
-    >>> from zoneinfo import ZoneInfo
+    >>> import pytz
     >>> d = np.arange('2002-10-27T04:30', 4*60, 60, dtype='M8[m]')
     >>> d
     array(['2002-10-27T04:30', '2002-10-27T05:30', '2002-10-27T06:30',
@@ -1714,9 +1736,9 @@ def datetime_as_string(arr, unit=None, timezone="naive", casting="same_kind"):
            '2002-10-27T07:30Z'], dtype='<U35')
 
     Note that we picked datetimes that cross a DST boundary. Passing in a
-    ``ZoneInfo`` object will print the appropriate offset
+    ``pytz`` timezone object will print the appropriate offset
 
-    >>> np.datetime_as_string(d, timezone=ZoneInfo('US/Eastern'))
+    >>> np.datetime_as_string(d, timezone=pytz.timezone('US/Eastern'))
     array(['2002-10-27T00:30-0400', '2002-10-27T01:30-0400',
            '2002-10-27T01:30-0500', '2002-10-27T02:30-0500'], dtype='<U39')
 

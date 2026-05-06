@@ -1,5 +1,6 @@
 from collections.abc import Callable, Hashable
 from typing import Any
+
 from typing_extensions import TypeIs
 
 import numpy as np

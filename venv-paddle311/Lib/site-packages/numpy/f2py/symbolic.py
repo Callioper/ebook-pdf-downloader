@@ -155,14 +155,14 @@ def ewarn(message):
 
 
 class Expr:
-    """Represents a Fortran expression as an op-data pair.
+    """Represents a Fortran expression as a op-data pair.
 
     Expr instances are hashable and sortable.
     """
 
     @staticmethod
     def parse(s, language=Language.C):
-        """Parse a Fortran expression to an Expr.
+        """Parse a Fortran expression to a Expr.
         """
         return fromstring(s, language=language)
 
@@ -1236,8 +1236,6 @@ def replace_parenthesis(s):
 
     i = mn_i
     j = s.find(right, i)
-    if j == -1:
-        raise ValueError(f'Mismatch of {left + right} parenthesis in {s!r}')
 
     while s.count(left, i + 1, j) != s.count(right, i + 1, j):
         j = s.find(right, j + 1)
@@ -1480,7 +1478,7 @@ class _FromStringWorker:
                 if isinstance(items, Expr):
                     return items
             if paren in ['ROUNDDIV', 'SQUARE']:
-                # Expression is an array constructor
+                # Expression is a array constructor
                 if isinstance(items, Expr):
                     items = (items,)
                 return as_array(items)

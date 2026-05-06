@@ -56,7 +56,15 @@ def fix(x, out=None):
     array([ 2.,  2., -2., -2.])
 
     """
-    return nx.trunc(x, out=out)
+    # promote back to an array if flattened
+    res = nx.asanyarray(nx.ceil(x, out=out))
+    res = nx.floor(x, out=res, where=nx.greater_equal(x, 0))
+
+    # when no out argument is passed and no subclasses are involved, flatten
+    # scalars
+    if out is None and type(res) is nx.ndarray:
+        res = res[()]
+    return res
 
 
 @array_function_dispatch(_dispatcher, verify=False, module='numpy')

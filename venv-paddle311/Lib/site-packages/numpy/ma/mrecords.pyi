@@ -1,10 +1,8 @@
-from typing import Any, Generic
-from typing_extensions import TypeVar
+from typing import Any, TypeVar
 
-import numpy as np
-from numpy._typing import _AnyShape
+from numpy import dtype
 
-from .core import MaskedArray
+from . import MaskedArray
 
 __all__ = [
     "MaskedRecords",
@@ -15,10 +13,10 @@ __all__ = [
     "addfield",
 ]
 
-_ShapeT_co = TypeVar("_ShapeT_co", bound=tuple[int, ...], default=_AnyShape, covariant=True)
-_DTypeT_co = TypeVar("_DTypeT_co", bound=np.dtype, default=np.dtype, covariant=True)
+_ShapeT_co = TypeVar("_ShapeT_co", covariant=True, bound=tuple[int, ...])
+_DTypeT_co = TypeVar("_DTypeT_co", bound=dtype, covariant=True)
 
-class MaskedRecords(MaskedArray[_ShapeT_co, _DTypeT_co], Generic[_ShapeT_co, _DTypeT_co]):
+class MaskedRecords(MaskedArray[_ShapeT_co, _DTypeT_co]):
     def __new__(
         cls,
         shape,
@@ -50,47 +48,49 @@ class MaskedRecords(MaskedArray[_ShapeT_co, _DTypeT_co], Generic[_ShapeT_co, _DT
     def __setattr__(self, attr, val): ...
     def __getitem__(self, indx): ...
     def __setitem__(self, indx, value): ...
-    def view(self, dtype=None, type=None): ...
+    def view(self, dtype=..., type=...): ...
     def harden_mask(self): ...
     def soften_mask(self): ...
     def copy(self): ...
-    def tolist(self, fill_value=None): ...
+    def tolist(self, fill_value=...): ...
     def __reduce__(self): ...
 
 mrecarray = MaskedRecords
 
 def fromarrays(
     arraylist,
-    dtype=None,
-    shape=None,
-    formats=None,
-    names=None,
-    titles=None,
-    aligned=False,
-    byteorder=None,
-    fill_value=None,
+    dtype=...,
+    shape=...,
+    formats=...,
+    names=...,
+    titles=...,
+    aligned=...,
+    byteorder=...,
+    fill_value=...,
 ): ...
 
 def fromrecords(
     reclist,
-    dtype=None,
-    shape=None,
-    formats=None,
-    names=None,
-    titles=None,
-    aligned=False,
-    byteorder=None,
-    fill_value=None,
+    dtype=...,
+    shape=...,
+    formats=...,
+    names=...,
+    titles=...,
+    aligned=...,
+    byteorder=...,
+    fill_value=...,
     mask=...,
 ): ...
 
 def fromtextfile(
     fname,
-    delimiter=None,
-    commentchar="#",
-    missingchar="",
-    varnames=None,
-    vartypes=None,
+    delimiter=...,
+    commentchar=...,
+    missingchar=...,
+    varnames=...,
+    vartypes=...,
+    # NOTE: deprecated: NumPy 1.22.0, 2021-09-23
+    # delimitor=...,
 ): ...
 
-def addfield(mrecord, newfield, newfieldname=None): ...
+def addfield(mrecord, newfield, newfieldname=...): ...

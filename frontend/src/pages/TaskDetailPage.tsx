@@ -231,7 +231,7 @@ export default function TaskDetailPage() {
           <LogStream logs={task.logs || []} />
         </div>
 
-        <TaskReport report={task.report || {}} downloadDir={cfg?.download_dir} finishedDir={cfg?.finished_dir} />
+        <TaskReport report={task.report || {}} downloadDir={cfg?.download_dir} finishedDir={cfg?.finished_dir} createdAt={task.created_at} />
       </div>
 
       <div className="space-y-4">
