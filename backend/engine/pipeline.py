@@ -306,6 +306,69 @@ async def _run_ocrmypdf_with_progress(
         _monitor_task.cancel()
 
 
+async def _enrich_external_metadata(task_id: str, report: Dict[str, Any], config: Dict[str, Any]) -> None:
+    """Re-fetch metadata from AA/Z-Lib to fill gaps (author, publisher, year, isbn).
+    Called from _step_fetch_metadata for books with empty book_id or missing ISBN."""
+    source = report.get("source", "")
+    md5 = report.get("book_id", "")
+    proxy = config.get("http_proxy", "")
+
+    if source == "annas_archive" and md5 and len(md5) == 32:
+        from api.search import _fetch_md5_page_info
+        try:
+            info = _fetch_md5_page_info(md5, proxy)
+            if info.get("title") and not report.get("title"):
+                report["title"] = info["title"]
+            for field in ("author", "isbn", "publisher", "year", "language"):
+                val = info.get(field, "")
+                if val and not report.get(field):
+                    report[field] = val
+            if isinstance(report.get("authors"), list) and not report["authors"]:
+                author_val = info.get("author", "")
+                if author_val:
+                    report["authors"] = [author_val]
+            if report.get("isbn"):
+                task_store.add_log(task_id, f"AA metadata enriched: isbn={report['isbn']}, author={report.get('authors')}")
+            else:
+                task_store.add_log(task_id, "AA metadata enriched (no ISBN found on MD5 page)")
+        except ImportError:
+            task_store.add_log(task_id, "AA enrichment skipped (search module not available)")
+        except Exception as e:
+            task_store.add_log(task_id, f"AA enrichment failed: {str(e)[:100]}")
+
+    elif source == "zlibrary" and md5:
+        try:
+            title = report.get("title", "")
+            isbn_val = report.get("isbn", "")
+            query = isbn_val or title
+            if query:
+                import asyncio as _aio
+                def _do_zlib_search():
+                    from engine.zlib_downloader import ZLibDownloader
+                    zl = ZLibDownloader(config)
+                    loop = _aio.new_event_loop()
+                    _aio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(zl.zlib_search(query, page=1, limit=3))
+                    finally:
+                        loop.close()
+                result = await _aio.to_thread(_do_zlib_search)
+                books = result.get("books") or result.get("results") or []
+                if isinstance(books, list) and books:
+                    best = books[0]
+                    for field in ("isbn", "author", "publisher", "year", "language"):
+                        val = best.get(field, "")
+                        if val and not report.get(field):
+                            report[field] = str(val) if field == "year" else val
+                    if not report.get("authors") and best.get("author"):
+                        report["authors"] = [str(best["author"])]
+                    task_store.add_log(task_id, f"Z-Lib metadata enriched: isbn={report.get('isbn')}")
+        except ImportError:
+            task_store.add_log(task_id, "Z-Lib enrichment skipped (zlib module not available)")
+        except Exception as e:
+            task_store.add_log(task_id, f"Z-Lib enrichment failed: {str(e)[:100]}")
+
+
 async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     task_store.add_log(task_id, "Step 1/7: Fetching metadata from database...")
     await _emit(task_id, "step_progress", {"step": "fetch_metadata", "progress": 50})
@@ -344,6 +407,12 @@ async def _step_fetch_metadata(task_id: str, task: Dict[str, Any], config: Dict[
         "authors": task.get("authors", []),
         "publisher": task.get("publisher", ""),
     }
+
+    # For external-source books, re-fetch metadata from AA/Z-Lib to fill gaps
+    if source in ("annas_archive", "zlibrary") and (not isbn or not report.get("authors")):
+        await _enrich_external_metadata(task_id, report, config)
+        isbn = report.get("isbn", isbn)
+        title = report.get("title", title)
 
     task_store.add_log(task_id, f"Book: {title} (ID: {book_id})")
     await _emit(task_id, "step_progress", {"step": "fetch_metadata", "progress": 100})
