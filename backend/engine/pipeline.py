@@ -592,6 +592,61 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
                 pass
             except Exception as e:
                 task_store.add_log(task_id, f"Bookmark merge error: {e}")
+    else:
+        # No ISBN — try title-based fallbacks for Douban and NLC TOC
+        title_val = report.get("title", "")
+        if title_val:
+            try:
+                from book_sources.douban import fetch_douban_by_title
+                loop = asyncio.get_running_loop()
+                douban_data = await loop.run_in_executor(None, fetch_douban_by_title, title_val)
+                if douban_data:
+                    if douban_data.get("description"):
+                        report["description"] = douban_data["description"]
+                    if douban_data.get("rating"):
+                        report["rating"] = douban_data["rating"]
+                    if douban_data.get("tags"):
+                        report["tags"] = douban_data["tags"]
+                    if douban_data.get("toc"):
+                        report["douban_toc"] = douban_data["toc"]
+                    task_store.add_log(task_id, f"Douban(title): metadata enriched (rating={douban_data.get('rating', 'N/A')})")
+            except ImportError:
+                pass
+            except Exception as e:
+                task_store.add_log(task_id, f"Douban(title) error: {e}")
+
+            try:
+                from nlc.nlc_isbn import crawl_toc_by_title
+                nlc_toc = await crawl_toc_by_title(title_val)
+                if nlc_toc:
+                    report["nlc_toc"] = nlc_toc
+                    task_store.add_log(task_id, f"NLC(title): TOC extracted ({len(nlc_toc)} chars)")
+            except ImportError:
+                pass
+            except Exception as e:
+                task_store.add_log(task_id, f"NLC(title) TOC error: {e}")
+
+            # Merge if any TOC found
+            if report.get("douban_toc") or report.get("nlc_toc"):
+                try:
+                    from addbookmark.bookmark_merger import merge_bookmarks
+                    merged = merge_bookmarks(
+                        shukui="",
+                        douban_toc=report.get("douban_toc") or "",
+                        nlc_toc=report.get("nlc_toc") or "",
+                    )
+                    if merged:
+                        report["raw_sources"] = {
+                            "shukui": False,
+                            "douban": bool(report.get("douban_toc")),
+                            "nlc": bool(report.get("nlc_toc")),
+                        }
+                        report["bookmark"] = merged
+                        task_store.add_log(task_id, "Bookmark merger: unified TOC from title-based sources")
+                except ImportError:
+                    pass
+                except Exception as e:
+                    task_store.add_log(task_id, f"Bookmark merge error: {e}")
 
     return report
 

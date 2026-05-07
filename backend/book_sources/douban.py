@@ -159,3 +159,38 @@ def fetch_douban(isbn: str) -> Optional[Dict[str, Any]]:
         return data if data.get("title") else None
     except Exception:
         return None
+
+
+def fetch_douban_by_title(title: str) -> Optional[Dict[str, Any]]:
+    """Fetch Douban book metadata by title (fallback when ISBN unavailable)."""
+    if not title or len(title.strip()) < 2:
+        return None
+    try:
+        # Search Douban by title
+        params = {"cat": "1001", "q": title.strip()}
+        r = requests.get(DOUBAN_SEARCH, params=params, headers=HEADERS, timeout=10)
+        if r.status_code != 200:
+            return None
+        soup = BeautifulSoup(r.text, "html.parser")
+        url = None
+        for a in soup.select("a.nbg"):
+            href = a.get("href", "")
+            if "book.douban.com/subject/" in href:
+                url = href
+                break
+        if not url:
+            for a in soup.select("div.result-list a[href*='subject']"):
+                href = a.get("href", "")
+                if "/subject/" in href:
+                    url = href
+                    break
+        if not url:
+            return None
+        r2 = requests.get(url, headers=HEADERS, timeout=15)
+        if r2.status_code != 200:
+            return None
+        data = _parse_douban_book(r2.text)
+        data["url"] = url
+        return data if data.get("title") else None
+    except Exception:
+        return None

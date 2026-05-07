@@ -203,3 +203,52 @@ async def crawl_toc(isbn: str) -> Optional[str]:
         return await loop.run_in_executor(None, crawl_toc_sync, isbn)
     except Exception:
         return None
+
+
+def _crawl_toc_by_title_sync(title: str) -> Optional[str]:
+    """Search NLC OPAC by title, then extract TOC from detail page."""
+    if not title or len(title.strip()) < 2:
+        return None
+    try:
+        clean_title = re.sub(r'[（(][^)）]*[)）]', '', title).strip()
+        params = {
+            "func": "find-b",
+            "find_code": "WRD",
+            "request": clean_title,
+            "local_base": "NLC01",
+        }
+        r = requests.get(NLC_SEARCH_URL, params=params, headers=HEADERS, timeout=15)
+        if r.status_code != 200:
+            return None
+        soup = BeautifulSoup(r.text, "html.parser")
+        detail_link = soup.select_one('a[href*="find_code=ISB"]')
+        if not detail_link:
+            return None
+        href = detail_link.get("href", "")
+        detail_url = f"http://opac.nlc.cn{href}" if href.startswith("/") else href
+        dr = requests.get(detail_url, headers=HEADERS, timeout=10)
+        if dr.status_code != 200:
+            return None
+        dsoup = BeautifulSoup(dr.text, "html.parser")
+        for td in dsoup.select("td.td1"):
+            text = td.get_text(strip=True)
+            if text.startswith("330") or text.startswith("327"):
+                toc_td = td.find_next_sibling("td")
+                if toc_td:
+                    toc_text = toc_td.get_text(strip=True)
+                    if toc_text and len(toc_text) > 20:
+                        return toc_text
+        return None
+    except Exception:
+        return None
+
+
+async def crawl_toc_by_title(title: str) -> Optional[str]:
+    """Get NLC TOC by book title (fallback when ISBN unavailable)."""
+    if not title:
+        return None
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _crawl_toc_by_title_sync, title)
+    except Exception:
+        return None
