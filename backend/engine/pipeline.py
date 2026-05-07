@@ -2409,6 +2409,24 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         except Exception as e:
             task_store.add_log(task_id, f"Bookmark fetch error: {e}")
 
+    # 两阶段 TOC 提取：OCR 文字层 → AI Vision 兜底
+    if not bookmark and pdf_path and os.path.exists(pdf_path):
+        task_store.add_log(task_id, "尝试智能 TOC 提取...")
+        await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 30, "detail": "智能目录提取中..."})
+        try:
+            from addbookmark.ai_vision_toc import generate_toc
+            bookmark, source = await generate_toc(pdf_path, config)
+            if bookmark:
+                task_store.add_log(task_id, f"智能 TOC 提取成功（来源: {source}，{len(bookmark)} 字符）")
+                report["bookmark"] = bookmark
+                report["bookmark_source"] = source
+            else:
+                task_store.add_log(task_id, "智能 TOC 提取: 未找到目录")
+        except ImportError:
+            task_store.add_log(task_id, "ai_vision_toc 模块不可用")
+        except Exception as e:
+            task_store.add_log(task_id, f"智能 TOC 提取错误: {e}")
+
     if bookmark and pdf_path and os.path.exists(pdf_path):
         task_store.add_log(task_id, "Applying bookmark to PDF...")
         try:
