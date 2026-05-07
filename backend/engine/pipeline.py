@@ -253,8 +253,8 @@ async def _run_ocrmypdf_with_progress(
                 if _cur > 1 and _elapsed > 5:
                     _sec_pp = _elapsed / _cur
                     _rem = (_tot - _cur) * _sec_pp
-                    _eta = f"约{int(_rem//60)}分{int(_rem%60)}秒" if _rem > 60 else f"约{int(_rem)}秒"
-                if _pct != _last or _now - _start - _last > 10:
+                    _eta = _format_eta(_rem)
+                if _pct != _last or (_now - _start - max(_last if isinstance(_last, float) else 0, 0)) > 10:
                     _last = _pct if _pct > 0 else _now
                     await _emit_progress(task_id, "ocr", _pct, f"{_cur}/{_tot} 页", _eta)
         return await p.wait()
