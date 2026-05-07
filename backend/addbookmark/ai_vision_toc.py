@@ -163,6 +163,59 @@ def _parse_toc_line(line: str) -> Tuple[Optional[str], Optional[int]]:
         return None, None
     if line in ('目录', '目  录', '目 录', 'Table of Contents', 'Contents'):
         return None, None
+    # 跳过 markdown 分隔行和表头
+    if '---' in line or '章节' in line or '标题' in line:
+        return None, None
+
+    # 格式1: tab 分隔 "title\tpage"
+    if '\t' in line:
+        parts = line.split('\t', 1)
+        title = parts[0].strip().lstrip('- ').strip()
+        page = _parse_page_number(parts[1])
+        if title and page is not None:
+            title = _clean_title(title)
+            return title, page
+
+    # 格式2: 管道分隔 "title | subtitle | page"
+    if '|' in line:
+        pipe_parts = [p.strip() for p in line.split('|')]
+        pipe_parts = [p for p in pipe_parts if p]
+        if len(pipe_parts) >= 2:
+            page = _parse_page_number(pipe_parts[-1])
+            if page is not None:
+                title = pipe_parts[0].strip()
+                title = _clean_title(title)
+                if title:
+                    return title, page
+
+    # 格式3: 点线引导 "- title ..... page" 或 "title ..... page"
+    m = re.match(r'^[-*]?\s*(.+?)\s*[.…·]{2,}\s*(\S+)\s*$', line)
+    if m:
+        title = _clean_title(m.group(1).strip())
+        page = _parse_page_number(m.group(2))
+        if title and page is not None:
+            return title, page
+
+    # 格式4: 空格分隔，最后是数字
+    m = re.match(r'^(.+?)\s+(\d+)\s*$', line)
+    if m:
+        title = _clean_title(m.group(1).strip().lstrip('- ').strip())
+        page = _parse_page_number(m.group(2))
+        if title and page is not None and page > 0:
+            return title, page
+
+    return None, None
+
+
+def _clean_title(title: str) -> str:
+    """清理标题：去除 markdown 标记和英文翻译。"""
+    # 去除 markdown headers: ### title -> title
+    title = re.sub(r'^#+\s*', '', title)
+    # 去除英文翻译: "中文 | English" -> "中文"
+    title = re.split(r'\s*\|\s*[A-Za-z]', title)[0]
+    return title.strip()
+    if line in ('目录', '目  录', '目 录', 'Table of Contents', 'Contents'):
+        return None, None
 
     # 格式1: tab 分隔 "title\tpage"
     if '\t' in line:
@@ -337,13 +390,14 @@ def build_vision_prompt() -> str:
         "请从这些PDF页面图片中提取目录（Table of Contents）。\n"
         "这些可能是书籍的目录页。\n\n"
         "输出格式（严格遵守）：\n"
-        "1. 每个条目一行：标题\\t页码（Tab 分隔）\n"
-        "2. 最后一行必须是以下之一：\n"
-        "   TOC_COMPLETE          — 目录已完整\n"
-        "   TOC_CONTINUES: X-Y    — 目录未完，请继续查看第X到Y页\n"
-        "   NO_TOC                — 这些页面中没有目录\n\n"
-        "保留层级关系（如章节、小节），不要添加额外缩进。\n"
-        "不要输出任何其他解释文字。\n"
+        "每个条目一行：标题<Tab>页码\n"
+        "其中页码是目录中对应的数字，必须包含。\n\n"
+        "示例：\n"
+        "第一章 概论\t1\n"
+        "背景与动机\t3\n"
+        "第二章 方法\t15\n\n"
+        "如果页面中没有目录，请输出 NO_TOC。\n"
+        "不要输出表格头、分隔线、编号前缀或任何解释文字。\n"
     )
 
 
@@ -351,6 +405,10 @@ def parse_vision_response(
     response: str,
 ) -> Tuple[List[Tuple[str, int]], str, Optional[Tuple[int, int]]]:
     """解析 Vision LLM 响应。
+
+    支持两种格式：
+    1. Tab 分隔：标题\\t页码
+    2. 层级格式：带缩进的章节列表（页码在行尾或子节点行尾）
 
     Returns:
         (entries, status, next_page_range)
@@ -371,6 +429,18 @@ def parse_vision_response(
         status = "TOC_CONTINUES"
         next_range = (int(m.group(1)), int(m.group(2)))
 
+    # 先尝试 Tab 分隔格式
+    entries = _parse_tab_entries(response)
+    if len(entries) >= 3:
+        return entries, status, next_range
+
+    # 回退：层级格式解析
+    entries = _parse_hierarchical_entries(response)
+    return entries, status, next_range
+
+
+def _parse_tab_entries(response: str) -> List[Tuple[str, int]]:
+    """解析 Tab 分隔格式的条目。"""
     lines = response.strip().split('\n')
     entries: List[Tuple[str, int]] = []
     for line in lines:
@@ -382,8 +452,118 @@ def parse_vision_response(
         title, page = _parse_toc_line(line)
         if title and page is not None:
             entries.append((title, page))
+    return entries
 
-    return entries, status, next_range
+
+def _parse_hierarchical_entries(response: str) -> List[Tuple[str, int]]:
+    """解析层级格式的目录条目。
+
+    支持：
+    1. 层级缩进格式
+    2. Markdown 表格格式（| 章节 | 标题 | 页码 |）
+    """
+    # 先尝试 Markdown 表格
+    entries = _parse_markdown_table(response)
+    if entries:
+        return entries
+
+    # 回退：层级格式
+    lines = response.strip().split('\n')
+    raw_entries: List[Tuple[str, Optional[int]]] = []
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('TOC_') or line == 'NO_TOC':
+            continue
+        if len(line) > 60 and not re.search(r'[.…·]{2,}|\t', line):
+            continue
+
+        title, page = _parse_toc_line(line)
+        if title:
+            raw_entries.append((title, page))
+            continue
+
+        clean = line.lstrip('·•- \t').strip()
+        if clean and len(clean) >= 2:
+            if re.search(r'第[一二三四五六七八九十百千\d]+[章节篇回卷]', clean) or \
+               re.match(r'^\d+(\.\d+)*\s+', clean) or \
+               re.search(r'[一二三四五六七八九十]+、', clean):
+                raw_entries.append((clean, None))
+
+    entries_out: List[Tuple[str, int]] = []
+    pending: List[str] = []
+    for title, page in raw_entries:
+        if page is not None:
+            for t in pending:
+                entries_out.append((t, page))
+            pending.clear()
+            entries_out.append((title, page))
+        else:
+            pending.append(title)
+
+    return entries_out
+
+
+def _parse_markdown_table(response: str) -> List[Tuple[str, int]]:
+    """解析 Markdown 表格格式的目录。
+
+    格式：
+    | 第一章 | 概论 | 1 |
+    |   | 背景 | 3 |
+    | 第二章 | 基础 | 15 |
+    """
+    entries: List[Tuple[str, int]] = []
+    current_chapter = ""
+
+    for line in response.strip().split('\n'):
+        line = line.strip()
+        if not line.startswith('|'):
+            continue
+        if '---' in line or '章节' in line or '标题' in line:
+            continue
+
+        # 保留空 cell，不去重
+        cells = [c.strip() for c in line.split('|')]
+        # 去掉首尾的空字符串（| 分隔产生的）
+        if cells and cells[0] == '':
+            cells = cells[1:]
+        if cells and cells[-1] == '':
+            cells = cells[:-1]
+
+        if len(cells) < 2:
+            continue
+
+        # 最后一个 cell 是页码
+        page_str = cells[-1].strip()
+        page = _parse_page_number(page_str)
+        if page is None:
+            continue
+
+        # 前面的 cell 是标题部分
+        title_parts = [c for c in cells[:-1] if c]
+
+        if not title_parts:
+            continue
+
+        # 判断是否是新章节（第一个非空 cell 包含"第X章"）
+        first = title_parts[0]
+        if re.search(r'第[一二三四五六七八九十百千\d]+[章节篇回卷]', first):
+            current_chapter = first
+            if len(title_parts) > 1:
+                title = f"{first} {title_parts[1]}"
+            else:
+                title = first
+        else:
+            # 子标题：加上当前章节名
+            subtitle = ' '.join(title_parts)
+            if current_chapter:
+                title = f"{current_chapter} {subtitle}"
+            else:
+                title = subtitle
+
+        entries.append((title, page))
+
+    return entries
 
 
 async def call_vision_llm(

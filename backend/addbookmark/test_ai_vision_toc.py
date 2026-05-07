@@ -158,9 +158,8 @@ def test_call_vision_llm_missing_endpoint():
 def test_build_vision_prompt_contains_status_instructions():
     from addbookmark.ai_vision_toc import build_vision_prompt
     prompt = build_vision_prompt()
-    assert "TOC_COMPLETE" in prompt
-    assert "TOC_CONTINUES" in prompt
     assert "NO_TOC" in prompt
+    assert "页码" in prompt or "page" in prompt.lower()
 
 
 def test_parse_vision_response_complete():
