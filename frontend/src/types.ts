@@ -73,7 +73,7 @@ export interface TaskReport {
   [key: string]: unknown
 }
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
 
 export interface SearchParams {
   field?: string

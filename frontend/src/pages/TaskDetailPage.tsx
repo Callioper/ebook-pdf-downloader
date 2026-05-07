@@ -111,6 +111,26 @@ export default function TaskDetailPage() {
     }
   }
 
+  const handlePause = async () => {
+    if (!taskId) return
+    try {
+      await axios.post(`${API_BASE}/tasks/${taskId}/pause`)
+      await fetchTask()
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  const handleResume = async () => {
+    if (!taskId) return
+    try {
+      await axios.post(`${API_BASE}/tasks/${taskId}/resume`)
+      await fetchTask()
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
   const handleRetry = async () => {
     if (!taskId) return
     try {
@@ -202,12 +222,36 @@ export default function TaskDetailPage() {
               </button>
             )}
             {(task.status === 'running') && (
-              <button
-                onClick={handleCancel}
-                className="px-4 py-1.5 bg-yellow-600 text-white text-sm rounded-md hover:bg-yellow-700"
-              >
-                取消任务
-              </button>
+              <>
+                <button
+                  onClick={handlePause}
+                  className="px-4 py-1.5 bg-yellow-600 text-white text-sm rounded-md hover:bg-yellow-700"
+                >
+                  暂停
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"
+                >
+                  取消任务
+                </button>
+              </>
+            )}
+            {task.status === 'paused' && (
+              <>
+                <button
+                  onClick={handleResume}
+                  className="px-4 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
+                >
+                  继续
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"
+                >
+                  取消任务
+                </button>
+              </>
             )}
             {task.status === 'failed' && (
               <button

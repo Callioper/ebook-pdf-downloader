@@ -13,6 +13,7 @@ export const PIPELINE_STEPS = [
 export const STATUS_LABELS: Record<string, string> = {
   pending: '等待中',
   running: '运行中',
+  paused: '已暂停',
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
@@ -21,6 +22,7 @@ export const STATUS_LABELS: Record<string, string> = {
 export const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-gray-200 text-gray-700',
   running: 'bg-blue-100 text-blue-700',
+  paused: 'bg-yellow-100 text-yellow-700',
   completed: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
   cancelled: 'bg-yellow-100 text-yellow-700',

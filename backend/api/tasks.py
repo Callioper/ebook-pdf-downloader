@@ -103,6 +103,32 @@ async def cancel_task(task_id: str):
     return {"ok": True}
 
 
+@router.post("/{task_id}/pause")
+async def pause_task(task_id: str):
+    ok = task_store.pause(task_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Task cannot be paused")
+    await ws_manager.broadcast_task(task_id, {
+        "type": "task_update",
+        "task_id": task_id,
+        "status": STATUS_PAUSED,
+    })
+    return {"ok": True}
+
+
+@router.post("/{task_id}/resume")
+async def resume_task(task_id: str):
+    ok = task_store.resume(task_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Task cannot be resumed")
+    await ws_manager.broadcast_task(task_id, {
+        "type": "task_update",
+        "task_id": task_id,
+        "status": STATUS_RUNNING,
+    })
+    return {"ok": True}
+
+
 @router.post("/{task_id}/retry")
 async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     task = task_store.get(task_id)

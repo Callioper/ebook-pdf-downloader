@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 from config import get_config
-from task_store import task_store, STATUS_COMPLETED, STATUS_RUNNING, STATUS_CANCELLED, STATUS_FAILED
+from task_store import task_store, STATUS_COMPLETED, STATUS_RUNNING, STATUS_PAUSED, STATUS_CANCELLED, STATUS_FAILED
 from ws_manager import ws_manager
 
 PIPELINE_STEPS = [
@@ -53,6 +53,55 @@ async def _emit_progress(task_id: str, step: str, progress: int, detail: str = "
         "step_detail": detail,
         "step_eta": eta,
     })
+
+
+async def _check_paused(task_id: str):
+    """Block while task is paused. Returns True if task was cancelled during pause."""
+    import asyncio as _asyncio
+    was_paused = False
+    while True:
+        t = task_store.get(task_id)
+        if not t:
+            return True
+        status = t.get("status")
+        if status == STATUS_CANCELLED:
+            return True
+        if status != STATUS_PAUSED:
+            return False
+        was_paused = True
+        await _asyncio.sleep(1)
+
+
+def _suspend_process(pid: int):
+    """Suspend a Windows process by PID."""
+    if os.name != "nt":
+        return
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    PROCESS_SUSPEND_RESUME = 0x0800
+    handle = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+    if handle:
+        try:
+            kernel32.DebugActiveProcess(pid)
+        except Exception:
+            pass
+        kernel32.CloseHandle(handle)
+
+
+def _resume_process(pid: int):
+    """Resume a suspended Windows process by PID."""
+    if os.name != "nt":
+        return
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    PROCESS_SUSPEND_RESUME = 0x0800
+    handle = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+    if handle:
+        try:
+            kernel32.DebugActiveProcessStop(pid)
+        except Exception:
+            pass
+        kernel32.CloseHandle(handle)
 
 
 def _format_eta(remaining_seconds: float) -> str:
@@ -115,7 +164,7 @@ async def _run_ocrmypdf_with_progress(
             await asyncio.sleep(5)
             if p.returncode is not None:
                 break
-            # Check if task was cancelled
+            # Check if task was cancelled or paused
             _t = task_store.get(task_id)
             if _t and _t.get("status") == "cancelled":
                 try:
@@ -123,6 +172,10 @@ async def _run_ocrmypdf_with_progress(
                 except Exception:
                     pass
                 break
+            if _t and _t.get("status") == "paused":
+                _suspend_process(p.pid)
+                await asyncio.sleep(2)
+                continue
 
             # Try file-based page counting (mtime-gated for performance)
             _file_pages = 0
@@ -1785,7 +1838,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 "-l", ocr_lang or "chi_sim+eng",
                 "-j", "1",
                 "--output-type", "pdf",
-                "--pdf-renderer", "sandwich",
                 "--max-image-mpixels", "0",
                 "--mode", "force",
                 pdf_path,
@@ -2063,6 +2115,12 @@ async def run_pipeline(task_id: str):
                     "status": STATUS_CANCELLED,
                 })
                 return
+
+            # Wait if paused
+            if task.get("status") == STATUS_PAUSED:
+                cancelled = await _check_paused(task_id)
+                if cancelled:
+                    return
 
             task_store.update(task_id, {"current_step": step_name, "progress": int((step_idx / 7) * 100)})
 

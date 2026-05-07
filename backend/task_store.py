@@ -27,6 +27,7 @@ TASKS_FILE = _get_tasks_path()
 
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
+STATUS_PAUSED = "paused"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_CANCELLED = "cancelled"
@@ -270,9 +271,26 @@ class TaskStore:
 
     def cancel(self, task_id: str) -> bool:
         task = self.get(task_id)
-        if task and task.get("status") in (STATUS_PENDING, STATUS_RUNNING):
+        if task and task.get("status") in (STATUS_PENDING, STATUS_RUNNING, STATUS_PAUSED):
             self.update(task_id, {"status": STATUS_CANCELLED, "_cancelled_at": time.time()})
-            # Force save to persist cancel immediately
+            with self._lock:
+                self._mark_dirty()
+            return True
+        return False
+
+    def pause(self, task_id: str) -> bool:
+        task = self.get(task_id)
+        if task and task.get("status") == STATUS_RUNNING:
+            self.update(task_id, {"status": STATUS_PAUSED, "_paused_at": time.time()})
+            with self._lock:
+                self._mark_dirty()
+            return True
+        return False
+
+    def resume(self, task_id: str) -> bool:
+        task = self.get(task_id)
+        if task and task.get("status") == STATUS_PAUSED:
+            self.update(task_id, {"status": STATUS_RUNNING, "_resumed_at": time.time()})
             with self._lock:
                 self._mark_dirty()
             return True
