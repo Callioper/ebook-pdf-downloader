@@ -1,13 +1,12 @@
-# ==== task_store.py ====
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
-# ???????????????????????????JSON???
-# ????????askStore.create(), get(), list_all(), update(), delete(), cancel()
-# ?????onfig
-# ???????????????Lock?????????
+# 职责：任务存储管理，内存字典 + JSON 文件持久化
+# 入口函数：TaskStore.create(), get(), list_all(), update(), delete(), cancel()
+# 依赖：config
+# 注意：线程安全，使用 Lock 保护并发访问
 
 import json
 import os
+import sys as _sys
 import time
 import uuid
 from pathlib import Path
@@ -16,7 +15,15 @@ from typing import Any, Dict, List, Optional
 
 from config import get_config
 
-TASKS_FILE = Path(__file__).resolve().parent.parent / "tasks.json"
+def _get_tasks_path() -> Path:
+    if getattr(_sys, 'frozen', False):
+        app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
+        conf_dir = app_data / 'BookDownloader'
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        return conf_dir / "tasks.json"
+    return Path(__file__).resolve().parent.parent / "tasks.json"
+
+TASKS_FILE = _get_tasks_path()
 
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
