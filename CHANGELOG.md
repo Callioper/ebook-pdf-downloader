@@ -1,5 +1,17 @@
 # 变更记录
 
+## v1.5.0 — 2026-05-07 — 首次公开发布
+- 后端：修复 main.py 重复 import 和硬编码版本号
+- 后端：将 os._exit() 替换为优雅的 sys.exit() 关闭流程
+- 后端：修复 frozen 模式下 config/tasks 路径解析
+- 后端：限制 CORS 为 localhost，隐藏生产环境 API 文档
+- 后端：添加 RotatingFileHandler 文件日志（生产模式）
+- 构建：隐藏 PyInstaller 控制台窗口 (console=False)
+- 构建：修正 .gitignore spec 文件追踪
+- 前端：新增 ErrorBoundary 全局崩溃恢复组件
+- 前端：修复 FolderPicker 按钮文案，footer emoji 替换为纯文本
+- 文档：CHANGELOG 和 AI_CONTEXT 版本号对齐到 v1.5.0
+
 ## v1.4.0 — 2026-05-04 — OCR 修复 + 状态持久化
 - 新增 backend/api/search.py : appleocr 检测和安装支持
 - 新增 backend/api/search.py : check-zlib / check-proxy-status 状态持久化端点
