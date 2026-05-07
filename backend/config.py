@@ -63,6 +63,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "libgen_enabled": True,
     "download_timeout": 600,
     "pdf_compress": False,
+    "ai_vision_enabled": True,
+    "ai_vision_endpoint": "",
+    "ai_vision_model": "",
+    "ai_vision_api_key": "",
+    "ai_vision_provider": "openai_compatible",
+    "ai_vision_max_pages": 5,
+    "ai_vision_dpi": 150,
 }
 
 
