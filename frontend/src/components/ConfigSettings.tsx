@@ -67,7 +67,7 @@ function FolderPicker({ value, onChange, placeholder }: { value: string; onChang
         className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         title="打开文件夹选择对话框"
       >
-        {picking ? '...' : '...'}
+        {picking ? '选择中...' : '浏览...'}
       </button>
     </div>
   )

@@ -80,7 +80,7 @@ export default function Layout() {
 
   const handleDownload = async () => {
     setDownloading(true)
-    setDownloadingPct(0)
+      setDownloadingPct(0)
     try {
       const res = await fetch(`${API_BASE}/download-update`)
       if (!res.ok) {
@@ -88,6 +88,7 @@ export default function Layout() {
         setDownloading(false)
         return
       }
+      if (pollRef.current) clearInterval(pollRef.current)
       pollRef.current = setInterval(async () => {
         try {
           const r = await fetch(`${API_BASE}/download-progress`)
@@ -239,7 +240,7 @@ export default function Layout() {
               className="hover:text-gray-600 disabled:opacity-50"
               title="检查更新"
             >
-              {checking ? '↻' : '🔄'}
+              {checking ? '(checking)' : '(re-check)'}
             </button>
             <span>v{version || '...'}</span>
           </div>
