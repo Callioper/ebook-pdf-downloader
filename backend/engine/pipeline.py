@@ -52,6 +52,7 @@ async def _emit_progress(task_id: str, step: str, progress: int, detail: str = "
     task_store.update(task_id, {
         "step_detail": detail,
         "step_eta": eta,
+        "progress": progress,
     })
 
 
@@ -2163,10 +2164,11 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
                 ss_code = report.get("ss_code", "")
                 title = report.get("title", "book")
                 safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
+                ocr_suffix = "_ocr" if report.get("ocr_done") else ""
                 if ss_code:
-                    new_name = f"{ss_code}_{safe_title}{ext}"
+                    new_name = f"{ss_code}_{safe_title}{ocr_suffix}{ext}"
                 else:
-                    new_name = f"{safe_title}{ext}"
+                    new_name = f"{safe_title}{ocr_suffix}{ext}"
                 dest_pdf = os.path.join(target_dir, new_name)
                 moved = False
                 if os.path.abspath(pdf_path) != os.path.abspath(dest_pdf):
