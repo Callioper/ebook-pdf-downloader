@@ -42,13 +42,19 @@ export default function TaskDetailPage() {
   }, [fetchTask])
 
   const lastProgressRef = useRef(0)
+  const onUpdateRef = useRef<(t: TaskItem) => void>()
 
   const handleWSMessage = useCallback((msg: WSMessage) => {
     if (msg.type === 'task_update' && msg.task) {
-      setTask((prev) => prev ? { ...prev, ...msg.task } : (msg.task as TaskItem))
+      setTask((prev) => {
+        const merged = prev ? { ...prev, ...msg.task } : (msg.task as TaskItem)
+        if (merged.logs && merged.logs.length > 1000) {
+          merged.logs = merged.logs.slice(-1000)
+        }
+        return merged
+      })
     }
     if (msg.type === 'step_progress') {
-      // Throttle: skip re-renders faster than 500ms for progress updates
       const now = Date.now()
       if (now - lastProgressRef.current < 500) {
         return
@@ -74,7 +80,13 @@ export default function TaskDetailPage() {
     }
   }, [fetchTask])
 
-  useTaskWebSocket({ taskId: taskId || null, onUpdate: (t) => setTask((prev) => prev ? { ...prev, ...t } : t), onMessage: handleWSMessage })
+  onUpdateRef.current = (t) => setTask((prev) => prev ? { ...prev, ...t } : t)
+
+  const stableOnUpdate = useCallback((t: TaskItem) => {
+    onUpdateRef.current?.(t)
+  }, [])
+
+  useTaskWebSocket({ taskId: taskId || null, onUpdate: stableOnUpdate, onMessage: handleWSMessage })
 
   const handleStart = async () => {
     if (!taskId) return

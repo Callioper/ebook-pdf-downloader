@@ -10,9 +10,20 @@ interface UseTaskWebSocketOptions {
 export function useTaskWebSocket({ taskId, onUpdate, onMessage }: UseTaskWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval>>()
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const connect = useCallback(() => {
     if (!taskId) return
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${window.location.host}/api/v1/ws`
@@ -24,15 +35,11 @@ export function useTaskWebSocket({ taskId, onUpdate, onMessage }: UseTaskWebSock
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'subscribe', task_id: taskId }))
 
-        const pingInterval = setInterval(() => {
+        pingIntervalRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }))
           }
         }, 30000)
-
-        ws.addEventListener('close', () => {
-          clearInterval(pingInterval)
-        })
       }
 
       ws.onmessage = (event) => {
@@ -62,21 +69,29 @@ export function useTaskWebSocket({ taskId, onUpdate, onMessage }: UseTaskWebSock
       }
 
       ws.onerror = () => {
-        reconnectTimer.current = setTimeout(connect, 3000)
+        if (mountedRef.current) {
+          reconnectTimer.current = setTimeout(connect, 3000)
+        }
       }
 
       ws.onclose = () => {
-        reconnectTimer.current = setTimeout(connect, 3000)
+        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current)
+        if (mountedRef.current) {
+          reconnectTimer.current = setTimeout(connect, 3000)
+        }
       }
     } catch {
-      reconnectTimer.current = setTimeout(connect, 3000)
+      if (mountedRef.current) {
+        reconnectTimer.current = setTimeout(connect, 3000)
+      }
     }
   }, [taskId, onUpdate, onMessage])
 
   useEffect(() => {
     connect()
     return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      clearTimeout(reconnectTimer.current)
+      clearInterval(pingIntervalRef.current)
       if (wsRef.current) {
         wsRef.current.close()
         wsRef.current = null

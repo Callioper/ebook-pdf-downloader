@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=Book Downloader
-AppVersion=1.4.0
+AppVersion=1.5.0
 AppPublisher=Book Downloader
 DefaultDirName={autopf}\BookDownloader
 DefaultGroupName=Book Downloader

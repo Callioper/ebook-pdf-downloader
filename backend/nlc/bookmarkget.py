@@ -11,7 +11,6 @@ import re
 import sys
 from typing import Any, Dict, List, Optional
 
-import fitz
 import requests
 from bs4 import BeautifulSoup
 
