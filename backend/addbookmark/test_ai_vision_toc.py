@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import pytest
@@ -142,6 +143,144 @@ def test_find_toc_pages_density_with_page_refs():
 
         start, end = find_toc_pages(pdf_path)
         assert start == 1
+    finally:
+        os.unlink(pdf_path)
+
+
+def test_call_vision_llm_missing_endpoint():
+    from addbookmark.ai_vision_toc import call_vision_llm
+    with pytest.raises(ValueError, match="endpoint"):
+        asyncio.run(
+            call_vision_llm(images=["fake"], prompt="test", endpoint="", model="m", api_key="k")
+        )
+
+
+def test_build_vision_prompt_contains_status_instructions():
+    from addbookmark.ai_vision_toc import build_vision_prompt
+    prompt = build_vision_prompt()
+    assert "TOC_COMPLETE" in prompt
+    assert "TOC_CONTINUES" in prompt
+    assert "NO_TOC" in prompt
+
+
+def test_parse_vision_response_complete():
+    from addbookmark.ai_vision_toc import parse_vision_response
+    response = "第一章\t1\n第二章\t15\n第三章\t30\nTOC_COMPLETE"
+    entries, status, next_range = parse_vision_response(response)
+    assert len(entries) == 3
+    assert status == "TOC_COMPLETE"
+    assert next_range is None
+
+
+def test_parse_vision_response_continues():
+    from addbookmark.ai_vision_toc import parse_vision_response
+    response = "第一章\t1\n第二章\t15\nTOC_CONTINUES: 6-10"
+    entries, status, next_range = parse_vision_response(response)
+    assert len(entries) == 2
+    assert status == "TOC_CONTINUES"
+    assert next_range == (6, 10)
+
+
+def test_parse_vision_response_no_toc():
+    from addbookmark.ai_vision_toc import parse_vision_response
+    entries, status, _ = parse_vision_response("NO_TOC")
+    assert entries == []
+    assert status == "NO_TOC"
+
+
+def test_parse_vision_response_dot_leaders():
+    from addbookmark.ai_vision_toc import parse_vision_response
+    response = "- 第一章 概论 ..... 1\n- 第二章 ..... 15\nTOC_COMPLETE"
+    entries, status, _ = parse_vision_response(response)
+    assert len(entries) == 2
+    assert entries[0] == ("第一章 概论", 1)
+
+
+def test_extract_toc_images_page_range():
+    from addbookmark.ai_vision_toc import extract_toc_images
+    try:
+        import fitz
+    except ImportError:
+        pytest.skip("PyMuPDF not installed")
+
+    fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        doc = fitz.open()
+        for i in range(10):
+            doc.new_page().insert_text((72, 72), f"Page {i}")
+        doc.save(pdf_path)
+        doc.close()
+
+        images = extract_toc_images(pdf_path, page_start=2, page_end=4)
+        assert len(images) == 3
+    finally:
+        os.unlink(pdf_path)
+
+
+def test_extract_toc_from_vision_no_config():
+    from addbookmark.ai_vision_toc import extract_toc_from_vision
+    fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        try:
+            import fitz
+        except ImportError:
+            pytest.skip("PyMuPDF not installed")
+        doc = fitz.open()
+        doc.new_page()
+        doc.save(pdf_path)
+        doc.close()
+
+        result = asyncio.run(
+            extract_toc_from_vision(pdf_path, config={})
+        )
+        assert result == ""
+    finally:
+        os.unlink(pdf_path)
+
+
+def test_cross_validate_entries():
+    from addbookmark.ai_vision_toc import _cross_validate_entries
+    ocr_text = "第一章 概论的内容很多。\n第二章 基础理论很重要。"
+    vision_entries = [
+        ("第一章 概论", 1),
+        ("第二章 基础理论", 15),
+        ("第九章 幻觉内容", 99),
+    ]
+    validated = _cross_validate_entries(vision_entries, ocr_text)
+    assert len(validated) == 2
+    assert validated[0] == ("第一章 概论", 1)
+
+
+def test_generate_toc_uses_ocr_text_when_available():
+    from addbookmark.ai_vision_toc import generate_toc
+    try:
+        import fitz
+    except ImportError:
+        pytest.skip("PyMuPDF not installed")
+    if not _has_chinese_font():
+        pytest.skip("SimHei font not found")
+
+    fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        doc = fitz.open()
+        for _ in range(40):
+            doc.new_page()
+        _insert_cn(doc[0], 72, 72, "书名")
+        _insert_cn(doc[1], 72, 72, "目 录")
+        _insert_cn(doc[1], 72, 100, "第一章 概论 ..... 1")
+        _insert_cn(doc[1], 72, 120, "第二章 基础 ..... 15")
+        _insert_cn(doc[1], 72, 140, "第三章 实验 ..... 30")
+        doc.save(pdf_path)
+        doc.close()
+
+        result, source = asyncio.run(
+            generate_toc(pdf_path, config={})
+        )
+        assert result
+        assert source == "ocr_text"
     finally:
         os.unlink(pdf_path)
 

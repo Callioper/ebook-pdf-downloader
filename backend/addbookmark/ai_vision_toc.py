@@ -8,6 +8,8 @@ import logging
 import re
 from typing import List, Optional, Tuple
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 
@@ -289,3 +291,332 @@ def extract_toc_from_ocr_text(
     bookmark_text = format_entries_to_bookmark(entries)
     logger.info(f"OCR TOC: 成功提取 {len(entries)} 条目录")
     return (bookmark_text, toc_start, toc_end)
+
+
+def build_vision_prompt() -> str:
+    """构建 Vision LLM 的 TOC 提取提示词。"""
+    return (
+        "请从这些PDF页面图片中提取目录（Table of Contents）。\n"
+        "这些可能是书籍的目录页。\n\n"
+        "输出格式（严格遵守）：\n"
+        "1. 每个条目一行：标题\\t页码（Tab 分隔）\n"
+        "2. 最后一行必须是以下之一：\n"
+        "   TOC_COMPLETE          — 目录已完整\n"
+        "   TOC_CONTINUES: X-Y    — 目录未完，请继续查看第X到Y页\n"
+        "   NO_TOC                — 这些页面中没有目录\n\n"
+        "保留层级关系（如章节、小节），不要添加额外缩进。\n"
+        "不要输出任何其他解释文字。\n"
+    )
+
+
+def parse_vision_response(
+    response: str,
+) -> Tuple[List[Tuple[str, int]], str, Optional[Tuple[int, int]]]:
+    """解析 Vision LLM 响应。
+
+    Returns:
+        (entries, status, next_page_range)
+        status: "TOC_COMPLETE" | "TOC_CONTINUES" | "NO_TOC"
+    """
+    if not response:
+        return [], "NO_TOC", None
+
+    response = response.strip()
+
+    if "NO_TOC" in response.upper():
+        return [], "NO_TOC", None
+
+    status = "TOC_COMPLETE"
+    next_range = None
+    m = re.search(r'TOC_CONTINUES:\s*(\d+)\s*-\s*(\d+)', response)
+    if m:
+        status = "TOC_CONTINUES"
+        next_range = (int(m.group(1)), int(m.group(2)))
+
+    lines = response.strip().split('\n')
+    entries: List[Tuple[str, int]] = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('TOC_') or line == 'NO_TOC':
+            continue
+        if line in ('目录', '目  录', '目 录', 'Table of Contents', 'Contents'):
+            continue
+        title, page = _parse_toc_line(line)
+        if title and page is not None:
+            entries.append((title, page))
+
+    return entries, status, next_range
+
+
+async def call_vision_llm(
+    images: List[str],
+    prompt: str,
+    endpoint: str,
+    model: str,
+    api_key: str = "",
+    timeout: int = 120,
+    provider: str = "openai_compatible",
+) -> str:
+    """调用 Vision LLM API。"""
+    if not endpoint:
+        raise ValueError("AI Vision: endpoint is required")
+    if not model:
+        raise ValueError("AI Vision: model is required")
+
+    if provider == "gemini":
+        return await _call_gemini(images, prompt, endpoint, model, api_key, timeout)
+    else:
+        return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
+
+
+async def _call_openai_compatible(
+    images: List[str], prompt: str, endpoint: str, model: str,
+    api_key: str, timeout: int,
+) -> str:
+    url = f"{endpoint.rstrip('/')}/chat/completions"
+    content = [{"type": "text", "text": prompt}]
+    for img_b64 in images:
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}})
+    payload = {"model": model, "messages": [{"role": "user", "content": content}],
+               "max_tokens": 4096, "temperature": 0.1}
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+
+async def _call_gemini(
+    images: List[str], prompt: str, endpoint: str, model: str,
+    api_key: str, timeout: int,
+) -> str:
+    url = f"{endpoint.rstrip('/')}/models/{model}:generateContent?key={api_key}"
+    parts = [{"text": prompt}]
+    for img_b64 in images:
+        parts.append({"inline_data": {"mime_type": "image/png", "data": img_b64}})
+    payload = {"contents": [{"parts": parts}]}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def extract_toc_images(
+    pdf_path: str,
+    page_start: int = 0,
+    page_end: int = -1,
+    max_pages: int = 10,
+    dpi: int = 150,
+) -> List[str]:
+    """提取 PDF 指定页码范围为 base64 PNG 图片。"""
+    import fitz
+
+    doc = fitz.open(pdf_path)
+    total = len(doc)
+    if page_end < 0:
+        page_end = total - 1
+    page_end = min(page_end, total - 1)
+    page_start = max(0, page_start)
+    if page_end - page_start + 1 > max_pages:
+        page_end = page_start + max_pages - 1
+
+    images = []
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    for i in range(page_start, page_end + 1):
+        pix = doc[i].get_pixmap(matrix=mat)
+        images.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
+    doc.close()
+    return images
+
+
+def _cross_validate_entries(
+    vision_entries: List[Tuple[str, int]],
+    ocr_text: str,
+    min_match_ratio: float = 0.3,
+) -> List[Tuple[str, int]]:
+    """交叉验证：Vision 返回的标题是否在 OCR 文字中出现过。"""
+    if not ocr_text or not vision_entries:
+        return vision_entries
+
+    def _normalize(s: str) -> str:
+        return re.sub(r'[\s\.\-—·…·\t]', '', s)
+
+    ocr_clean = _normalize(ocr_text)
+    validated = []
+    matched = 0
+
+    for title, page in vision_entries:
+        title_clean = _normalize(title)
+        if len(title_clean) >= 4:
+            snippet = title_clean[:4]
+            if snippet in ocr_clean:
+                validated.append((title, page))
+                matched += 1
+            else:
+                logger.debug(f"幻觉检测: '{title[:20]}' 未在 OCR 文字中找到，丢弃")
+        else:
+            validated.append((title, page))
+
+    match_ratio = matched / len(vision_entries) if vision_entries else 0
+    if match_ratio < min_match_ratio and len(vision_entries) >= 3:
+        logger.warning(f"幻觉检测: 匹配率 {match_ratio:.2f} < {min_match_ratio}，整体结果不可信")
+        return []
+
+    return validated
+
+
+async def extract_toc_from_vision(
+    pdf_path: str,
+    config: dict,
+    toc_page_hint: Tuple[int, int] = (-1, -1),
+    ocr_text_for_validation: str = "",
+    max_rounds: int = 3,
+    dpi: int = 150,
+) -> str:
+    """阶段2: 用 AI Vision 从 PDF 图片提取目录（付费 API）。"""
+    endpoint = config.get("ai_vision_endpoint", "")
+    model = config.get("ai_vision_model", "")
+    api_key = config.get("ai_vision_api_key", "")
+    provider = config.get("ai_vision_provider", "openai_compatible")
+    max_pages_per_round = config.get("ai_vision_max_pages", 5)
+
+    if not endpoint or not model:
+        logger.info("AI Vision: 未配置 endpoint/model")
+        return ""
+
+    import fitz
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+    doc.close()
+
+    if toc_page_hint[0] >= 0:
+        page_start = toc_page_hint[0]
+        page_end = toc_page_hint[1]
+        logger.info(f"AI Vision: 使用 OCR 定位的目录页范围 {page_start}-{page_end}")
+    else:
+        page_start = 0
+        page_end = min(4, total_pages - 1)
+        logger.info(f"AI Vision: OCR 未定位目录，从第0页开始")
+
+    all_entries: List[Tuple[str, int]] = []
+    seen_titles = set()
+
+    for round_num in range(max_rounds):
+        images = extract_toc_images(
+            pdf_path, page_start=page_start, page_end=page_end,
+            max_pages=max_pages_per_round, dpi=dpi,
+        )
+        if not images:
+            break
+
+        logger.info(f"AI Vision: 第{round_num+1}轮，页 {page_start}-{page_end}，{len(images)} 张图")
+
+        prompt = build_vision_prompt()
+        try:
+            response = await call_vision_llm(
+                images=images, prompt=prompt,
+                endpoint=endpoint, model=model,
+                api_key=api_key, provider=provider,
+            )
+        except Exception as e:
+            logger.warning(f"AI Vision: 第{round_num+1}轮失败: {e}")
+            break
+
+        entries, status, next_range = parse_vision_response(response)
+        logger.info(f"AI Vision: 第{round_num+1}轮返回 {len(entries)} 条，状态={status}")
+
+        for title, page in entries:
+            norm = re.sub(r'\s+', '', title).lower()
+            if norm not in seen_titles:
+                seen_titles.add(norm)
+                all_entries.append((title, page))
+
+        if status in ("NO_TOC", "TOC_COMPLETE") or not next_range:
+            break
+        if status == "TOC_CONTINUES" and next_range:
+            page_start = next_range[0] - 1
+            page_end = next_range[1] - 1
+            if page_start >= total_pages:
+                break
+
+    if not all_entries:
+        logger.info("AI Vision: 未提取到任何目录条目")
+        return ""
+
+    if ocr_text_for_validation:
+        all_entries = _cross_validate_entries(all_entries, ocr_text_for_validation)
+        if not all_entries:
+            logger.info("AI Vision: 交叉验证后无有效条目（可能全是幻觉）")
+            return ""
+
+    if not validate_entries(all_entries, total_pages=total_pages, min_entries=3):
+        logger.info("AI Vision: 质量检查失败")
+        return ""
+
+    bookmark_text = format_entries_to_bookmark(all_entries)
+    logger.info(f"AI Vision: 共提取 {len(all_entries)} 条目录（已验证）")
+    return bookmark_text
+
+
+async def generate_toc(
+    pdf_path: str,
+    config: dict,
+) -> Tuple[str, str]:
+    """两阶段 TOC 提取主入口。
+
+    阶段1: OCR 文字层解析（免费）
+    阶段2: AI Vision 提取（付费，仅在阶段1失败时触发）
+
+    Returns:
+        (bookmark_text, source) — source: "ocr_text" | "ai_vision" | ""
+    """
+    ai_vision_enabled = config.get("ai_vision_enabled", True)
+
+    logger.info("TOC 提取: 阶段1 — OCR 文字层解析")
+    bookmark, toc_start, toc_end = extract_toc_from_ocr_text(pdf_path)
+
+    if bookmark:
+        logger.info("TOC 提取: 阶段1 成功")
+        return (bookmark, "ocr_text")
+
+    if not ai_vision_enabled:
+        logger.info("TOC 提取: 阶段1 失败，AI Vision 已禁用")
+        return ("", "")
+
+    ai_endpoint = config.get("ai_vision_endpoint", "")
+    ai_model = config.get("ai_vision_model", "")
+    if not ai_endpoint or not ai_model:
+        logger.info("TOC 提取: 阶段1 失败，AI Vision 未配置")
+        return ("", "")
+
+    logger.info("TOC 提取: 阶段2 — AI Vision 提取")
+    hint = (toc_start, toc_end) if toc_start >= 0 else (-1, -1)
+
+    ocr_text = ""
+    if toc_start >= 0:
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            parts = []
+            for i in range(toc_start, min(toc_end + 1, len(doc))):
+                parts.append(doc[i].get_text())
+            doc.close()
+            ocr_text = "\n".join(parts)
+        except Exception:
+            pass
+
+    bookmark = await extract_toc_from_vision(
+        pdf_path, config,
+        toc_page_hint=hint,
+        ocr_text_for_validation=ocr_text,
+    )
+
+    if bookmark:
+        logger.info("TOC 提取: 阶段2 成功")
+        return (bookmark, "ai_vision")
+
+    logger.info("TOC 提取: 两阶段均未提取到目录")
+    return ("", "")
