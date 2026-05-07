@@ -20,8 +20,8 @@ def _get_surya_bboxes(pdf_path: str, dpi: int = 200) -> List[List[dict]]:
         result = predictor([img])[0]
 
         bboxes = []
+        iw, ih = img.size
         for bbox in result.bboxes:
-            iw, ih = bbox.image_size
             x0, y0, x1, y1 = bbox.bbox
             bboxes.append({
                 "nx0": x0 / iw, "ny0": y0 / ih,
