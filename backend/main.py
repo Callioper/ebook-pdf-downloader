@@ -59,16 +59,22 @@ def get_frontend_dir() -> Optional[str]:
     return None
 
 
+is_dev = not getattr(sys, 'frozen', False)
+
 app = FastAPI(
     title="Book Downloader",
     version=VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if is_dev else None,
+    redoc_url="/redoc" if is_dev else None,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
