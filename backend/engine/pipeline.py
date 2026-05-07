@@ -436,7 +436,29 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
         except Exception as e:
             task_store.add_log(task_id, f"NLC TOC error: {e}")
 
-    task_store.add_log(task_id, "Step 2/7: metadata & bookmark fetch complete")
+        # Merge all TOC sources into unified bookmark
+        if any([report.get("bookmark"), report.get("douban_toc"), report.get("nlc_toc")]):
+            try:
+                from addbookmark.bookmark_merger import merge_bookmarks
+                merged = merge_bookmarks(
+                    shukui=report.get("bookmark") or "",
+                    douban_toc=report.get("douban_toc") or "",
+                    nlc_toc=report.get("nlc_toc") or "",
+                )
+                if merged:
+                    # Keep original for reference
+                    report["raw_sources"] = {
+                        "shukui": bool(report.get("bookmark")),
+                        "douban": bool(report.get("douban_toc")),
+                        "nlc": bool(report.get("nlc_toc")),
+                    }
+                    report["bookmark"] = merged
+                    task_store.add_log(task_id, "Bookmark merger: unified TOC from all sources")
+            except ImportError:
+                pass
+            except Exception as e:
+                task_store.add_log(task_id, f"Bookmark merge error: {e}")
+
     return report
 
 

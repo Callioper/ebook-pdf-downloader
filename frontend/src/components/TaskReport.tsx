@@ -96,6 +96,13 @@ export default function TaskReport({ report, finishedDir, createdAt }: TaskRepor
           {hasBookmark && (
             <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: 16 }}>
               <div className="text-xs font-semibold text-gray-600 mb-2">目录书签</div>
+              {report.raw_sources && (
+                <div className="flex gap-1 mb-1">
+                  {(report.raw_sources as Record<string,boolean>).shukui && <span className="text-[10px] bg-blue-50 text-blue-600 px-1 rounded">书葵网</span>}
+                  {(report.raw_sources as Record<string,boolean>).douban && <span className="text-[10px] bg-green-50 text-green-600 px-1 rounded">豆瓣</span>}
+                  {(report.raw_sources as Record<string,boolean>).nlc && <span className="text-[10px] bg-amber-50 text-amber-600 px-1 rounded">NLC</span>}
+                </div>
+              )}
               <div
                 className="text-xs text-gray-700 whitespace-pre-wrap"
                 style={{

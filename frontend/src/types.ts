@@ -75,6 +75,7 @@ export interface TaskReport {
   tags?: string[]
   douban_toc?: string
   nlc_toc?: string
+  raw_sources?: Record<string, boolean>
   [key: string]: unknown
 }
 
