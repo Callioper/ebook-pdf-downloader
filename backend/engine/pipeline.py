@@ -583,6 +583,8 @@ async def _download_via_aa_and_stacks(
     if use_stacks:
         task_store.add_log(task_id, f"AA: stacks {'configured' if stacks_api_key else 'reachable'} ({stacks_url})")
 
+        import requests as _req
+
         # Session-based auth: login with username/password, fallback to API key headers
         stacks_session = None
         stacks_username = config.get("stacks_username", "")
@@ -857,6 +859,7 @@ async def _download_via_aa_and_stacks(
                         deadline = time.time() + stacks_timeout
                         start_time = deadline - stacks_timeout
                         while time.time() < deadline:
+                            dl_info = None
                             try:
                                 sr = _req.get(f"{url}/api/status", headers=_bearer(), timeout=5)
                                 if sr.status_code == 200:
@@ -950,13 +953,34 @@ async def _download_via_aa_and_stacks(
                                                     continue
                                             continue
 
-                                    # 3c. 检测是否正在下载
-                                    active = [item for item in sd.get("queue", [])
-                                              if isinstance(item, dict) and item.get("md5") == md5 and not item.get("completed_at")]
-                                    if active:
+                                    # 3c. 检测当前下载进度
+                                    active_items = sd.get("current_downloads", []) or []
+                                    cur = sd.get("current")
+                                    if cur and isinstance(cur, dict) and cur.get("md5") == md5:
+                                        active_items = [cur]
+                                    dl_info = None
+                                    for item in active_items:
+                                        if isinstance(item, dict) and item.get("md5") == md5 and not item.get("completed_at"):
+                                            dl_info = item
+                                            break
+                                    if dl_info:
+                                        progress = dl_info.get("progress", {})
+                                        if isinstance(progress, dict):
+                                            pct_val = progress.get("percent", 0)
+                                            speed_bps = progress.get("speed", 0)
+                                            downloaded = progress.get("downloaded", 0)
+                                            total_size = progress.get("total_size", 0)
+                                            speed_str = f"{speed_bps / 1024:.0f} KB/s" if speed_bps > 0 else ""
+                                            if progress_data is not None:
+                                                progress_data["progress"] = pct_val
+                                                progress_data["detail"] = f"stacks {pct_val:.0f}% {speed_str}"
+                                                if speed_bps > 0 and total_size > downloaded:
+                                                    eta_s = (total_size - downloaded) / speed_bps
+                                                    progress_data["eta"] = _format_eta(int(eta_s))
                                         remaining = int(deadline - time.time())
                                         if remaining % 6 == 0:
-                                            task_store.add_log(task_id, f"AA: stacks downloading... ({remaining}s left)")
+                                            status_msg = dl_info.get("status_message", "downloading")
+                                            task_store.add_log(task_id, f"AA: stacks {status_msg} ({pct_val:.0f}%, {speed_str}) ({remaining}s left)")
                                     else:
                                         remaining = int(deadline - time.time())
                                         if remaining % 15 == 0:
@@ -964,8 +988,8 @@ async def _download_via_aa_and_stacks(
                             except Exception as e:
                                 task_store.add_log(task_id, f"AA: heartbeat error: {str(e)[:100]}")
 
-                            # Emit progress via shared mutable dict
-                            if progress_data is not None:
+                            # Fallback progress when no real download data
+                            if progress_data is not None and not dl_info:
                                 elapsed = max(time.time() - start_time, 1)
                                 pct = min(int(elapsed / stacks_timeout * 100), 99)
                                 remaining = int(deadline - time.time())
