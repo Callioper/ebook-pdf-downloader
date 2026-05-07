@@ -787,7 +787,11 @@ async def _download_via_aa_and_stacks(
                         except Exception as e:
                             task_store.add_log(task_id, f"AA: history check error: {str(e)[:100]}")
 
-                        # Step 2: add_task — 如果 MD5 已存在，清历史重试
+                        # Step 2: add_task — 先清历史，再添加（避免 MD5 已存在冲突）
+                        try:
+                            _req.post(f"{url}/api/history/clear", headers=_xkey(), timeout=5)
+                        except Exception:
+                            pass
                         add_ok = False
                         for attempt in range(3):
                             task_store.add_log(task_id, f"AA: add_task MD5={md5} attempt {attempt+1}/3...")
