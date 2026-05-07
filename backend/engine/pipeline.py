@@ -1530,7 +1530,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
     ocr_engine = config.get("ocr_engine", "tesseract")
     ocr_lang = config.get("ocr_languages", "chi_sim+eng")
-    ocr_jobs = config.get("ocr_jobs", 4)
+    ocr_jobs = config.get("ocr_jobs", 1)
     ocr_timeout = config.get("ocr_timeout", 7200)
     ocr_oversample = str(config.get("ocr_oversample", 200))
     _opt_level = "0"

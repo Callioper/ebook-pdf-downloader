@@ -149,7 +149,6 @@ const DEFAULT_CONFIG: AppConfig = {
 const OCR_ENGINES = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
-  { key: 'appleocr', name: 'AppleOCR', desc: '仅 macOS 支持' },
   { key: 'llm_ocr', name: 'LLM OCR', desc: '本地大模型 OCR (Ollama/LM Studio)' },
 ]
 
@@ -375,7 +374,10 @@ export default function ConfigSettings() {
 
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      if (flarePollRef.current) clearInterval(flarePollRef.current)
+    }
   }, [])
 
   const fetchConfig = useCallback(async () => {
@@ -520,7 +522,7 @@ export default function ConfigSettings() {
   useEffect(() => {
     if (!config || autoOcrRef.current) return
     autoOcrRef.current = true
-    const engines = ['tesseract', 'paddleocr', 'appleocr', 'llm_ocr']
+    const engines = ['tesseract', 'paddleocr', 'llm_ocr']
     engines.forEach((eng) => {
       fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
         .then((r) => r.json())
@@ -1608,6 +1610,7 @@ export default function ConfigSettings() {
                 <option value={2}>2</option>
                 <option value={4}>4</option>
               </select>
+              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Tesseract 支持多线程，PaddleOCR 仅单线程，LLM OCR 推荐单线程</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">超时 (秒)</label>

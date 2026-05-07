@@ -737,17 +737,6 @@ async def check_ocr(engine: str = Query(default="")):
                 return {"ok": True, "engine": "paddleocr"}
             except ImportError:
                 pass
-        elif engine == "appleocr":
-            if sys.platform != "darwin":
-                return {"ok": False, "engine": "appleocr", "message": "AppleOCR 仅 macOS 支持"}
-            try:
-                result = subprocess.run(["which", "ocr"],
-                    capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    return {"ok": True, "engine": "appleocr"}
-            except Exception:
-                pass
-            return {"ok": False, "engine": "appleocr", "message": "AppleOCR 未安装"}
         elif engine == "llm_ocr":
             cfg = get_config()
             endpoint = cfg.get("llm_ocr_endpoint", "")
@@ -955,14 +944,6 @@ async def install_ocr(body: InstallOCRRequest):
             if r3.returncode == 0:
                 return {"ok": True, "message": "PaddleOCR venv 安装完成"}
             return {"ok": False, "message": f"ocrmypdf-paddleocr 插件安装失败: {r3.stderr[-200:]}"}
-        elif engine == "appleocr":
-            if sys.platform != "darwin":
-                return {"ok": False, "message": "AppleOCR 仅 macOS 支持"}
-            cmd = _pip_install_cmd() + ["appleocr"]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300
-            )
-            return {"ok": result.returncode == 0, "message": result.stdout.strip()[-500:]}
         else:
             return {"ok": False, "message": f"Unknown engine: {engine}"}
     except Exception as e:
