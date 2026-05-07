@@ -7,6 +7,8 @@ interface AppConfig {
   finished_dir: string
   tmp_dir: string
   stacks_base_url: string
+  stacks_username: string
+  stacks_password: string
   zfile_base_url: string
   zfile_external_url: string
   zfile_storage_key: string
@@ -127,6 +129,8 @@ const DEFAULT_CONFIG: AppConfig = {
   finished_dir: '',
   tmp_dir: '',
   stacks_base_url: 'http://localhost:7788',
+  stacks_username: '',
+  stacks_password: '',
   zfile_base_url: 'http://192.168.0.7:32771',
   zfile_external_url: '',
   zfile_storage_key: '1',
@@ -1171,6 +1175,23 @@ export default function ConfigSettings() {
                 placeholder="Admin API Key（Settings → Authentication）"
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mt-1"
               />
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="text"
+                  value={form.stacks_username || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_username: e.target.value }))}
+                  placeholder="用户名"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <input
+                  type="password"
+                  value={form.stacks_password || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_password: e.target.value }))}
+                  placeholder="密码"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">填写用户名密码后使用 session 登录（支持 status/history/clear 等需要管理员权限的操作）</p>
               <details>
                 <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
                   <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">

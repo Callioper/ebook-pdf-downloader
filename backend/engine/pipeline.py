@@ -583,6 +583,24 @@ async def _download_via_aa_and_stacks(
     if use_stacks:
         task_store.add_log(task_id, f"AA: stacks {'configured' if stacks_api_key else 'reachable'} ({stacks_url})")
 
+        # Session-based auth: login with username/password, fallback to API key headers
+        stacks_session = None
+        stacks_username = config.get("stacks_username", "")
+        stacks_password = config.get("stacks_password", "")
+        if stacks_username and stacks_password:
+            try:
+                lr = _req.post(f"{stacks_url}/login",
+                               json={"username": stacks_username, "password": stacks_password},
+                               timeout=5)
+                if lr.status_code == 200:
+                    stacks_session = lr.cookies.get("session")
+                    if stacks_session:
+                        task_store.add_log(task_id, f"AA: stacks login OK (user: {stacks_username})")
+                else:
+                    task_store.add_log(task_id, f"AA: stacks login failed ({lr.status_code})")
+            except Exception as e:
+                task_store.add_log(task_id, f"AA: stacks login error: {e}")
+
         # Step C: 遍历 MD5 尝试下载
         for i, entry in enumerate(all_md5_entries[:10]):
             md5 = entry["md5"]
@@ -618,11 +636,15 @@ async def _download_via_aa_and_stacks(
 
                     # ── API headers helper ──
                     def _bearer():
+                        if stacks_session:
+                            return {"Cookie": f"session={stacks_session}"}
                         return {"Authorization": f"Bearer {stacks_api_key}"} if stacks_api_key else {}
 
                     def _xkey():
                         h = {"Content-Type": "application/json"}
-                        if stacks_api_key:
+                        if stacks_session:
+                            h["Cookie"] = f"session={stacks_session}"
+                        elif stacks_api_key:
                             h["X-API-Key"] = str(stacks_api_key)
                         return h
 

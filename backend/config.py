@@ -56,6 +56,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ocr_engine": "tesseract",
     "flaresolverr_port": 8191,
     "stacks_api_key": "",
+    "stacks_username": "",
+    "stacks_password": "",
     "stacks_base_url": "http://localhost:7788",
     "stacks_timeout": 180,
     "libgen_enabled": True,
