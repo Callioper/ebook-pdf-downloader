@@ -27,7 +27,6 @@ from task_store import task_store
 from version import VERSION
 from engine.flaresolverr import stop_flaresolverr
 
-import sys
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -155,7 +154,6 @@ def main():
 
 if __name__ == "__main__":
     import webbrowser
-    import urllib.request
     import atexit
 
     # Ensure FlareSolverr is cleaned up on exit
