@@ -1527,6 +1527,7 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
     proxy = config.get("http_proxy", "")
     title = report.get("title", "")
     authors = report.get("authors", [])
+    source = report.get("source", "")
     downloaded = False
     download_source = ""
 
@@ -1561,19 +1562,28 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
     except Exception as e:
         task_store.add_log(task_id, f"FlareSolverr check: {e}")
 
-    # ── 路径A：Anna's Archive → stacks/MD5 → 直接下载 ──
-    task_store.add_log(task_id, "=== Path A: Anna's Archive ===")
-    await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 10})
+    # ── 根据来源优先走对应的下载路径 ──
+    zl_first = (source == "zlibrary")
+    if zl_first:
+        zl_book_id = report.get("book_id", "")
+    else:
+        zl_book_id = ""
 
-    aa_result = await _download_via_aa_and_stacks(
-        task_id, config, report, ss_code, isbn, title, proxy,
-    )
-    if aa_result:
-        downloaded = True
-        download_source = "annas_archive"
-        report["download_path"] = aa_result
+    # ── 路径A/B自适应：如果是 Z-Library 来源则先走 ZL，否则先走 AA ──
+    if not zl_first:
+        # 默认：AA 优先
+        task_store.add_log(task_id, "=== Path A: Anna's Archive ===")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 10})
 
-    # ── 路径B：Z-Library 三层检索 ──
+        aa_result = await _download_via_aa_and_stacks(
+            task_id, config, report, ss_code, isbn, title, proxy,
+        )
+        if aa_result:
+            downloaded = True
+            download_source = "annas_archive"
+            report["download_path"] = aa_result
+
+    # ── 路径B（或ZL优先模式的路径1）：Z-Library ──
     if not downloaded:
         task_store.add_log(task_id, "=== Path B: Z-Library ===")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
@@ -1601,10 +1611,43 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                     )
                     await _emit_progress(task_id, "download_pages", 70, f"ZL 搜索到 {len(candidates)} 个候选，等待选择", "")
                     if candidates:
-                        task_store.add_log(task_id, f"ZL: found {len(candidates)} candidates, requesting user selection...")
-                        confirmed = await _wait_for_user_confirmation(
-                            task_id, report, "zl_confirm", 300, candidates,
-                        )
+                        if zl_first:
+                            # 用户已从 Z-Lib 搜索结果中选择了此书，自动下载第一个候选
+                            task_store.add_log(task_id, f"ZL: auto-selecting from {len(candidates)} candidates (source=zlibrary)")
+                            best = candidates[0]
+                            sel_id = best.get("id", "")
+                            sel_hash = best.get("hash", "")
+                            if sel_id and sel_hash:
+                                sel_title = best.get("title", title)
+                                zl_path = await dl.zlib_download_verified(
+                                    sel_id, sel_hash, report["tmp_dir"],
+                                    filename=sel_title,
+                                )
+                                if zl_path:
+                                    task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
+                                    await _emit_progress(task_id, "download_pages", 90, "ZL 下载完成，验证中...", "")
+                                    downloaded = True
+                                    download_source = "zlibrary"
+                                    report["download_path"] = zl_path
+                                else:
+                                    task_store.add_log(task_id, "ZL: auto-download verification failed, trying next candidate")
+                                    for c in candidates[1:3]:
+                                        sid, shash = c.get("id", ""), c.get("hash", "")
+                                        if sid and shash:
+                                            zl_path2 = await dl.zlib_download_verified(sid, shash, report["tmp_dir"], filename=c.get("title", title))
+                                            if zl_path2:
+                                                task_store.add_log(task_id, f"ZL: downloaded candidate {sid}")
+                                                downloaded = True
+                                                download_source = "zlibrary"
+                                                report["download_path"] = zl_path2
+                                                break
+                            else:
+                                task_store.add_log(task_id, "ZL: auto-select failed (missing id/hash in candidate)")
+                        else:
+                            task_store.add_log(task_id, f"ZL: found {len(candidates)} candidates, requesting user selection...")
+                            confirmed = await _wait_for_user_confirmation(
+                                task_id, report, "zl_confirm", 300, candidates,
+                            )
                         if confirmed:
                             # 读取用户选择的书籍
                             task = task_store.get(task_id)
@@ -1642,7 +1685,22 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
             except Exception as e:
                 task_store.add_log(task_id, f"ZL: error: {str(e)[:150]}")
         else:
-            task_store.add_log(task_id, "ZL: no credentials configured, skipping")
+            if zl_first:
+                task_store.add_log(task_id, "ZL: no credentials configured, falling back to AA")
+            else:
+                task_store.add_log(task_id, "ZL: no credentials configured, skipping")
+
+    # ── ZL 优先模式降级：AA 兜底 ──
+    if zl_first and not downloaded:
+        task_store.add_log(task_id, "=== Path A (fallback): Anna's Archive ===")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
+        aa_result = await _download_via_aa_and_stacks(
+            task_id, config, report, ss_code, isbn, title, proxy,
+        )
+        if aa_result:
+            downloaded = True
+            download_source = "annas_archive"
+            report["download_path"] = aa_result
 
     # ── 路径C：LibGen 兜底 ──
     if not downloaded and config.get("libgen_enabled", True):
