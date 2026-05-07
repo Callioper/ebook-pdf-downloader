@@ -854,11 +854,10 @@ async def _download_via_aa_and_stacks(
                             task_store.add_log(task_id, "AA: failed to add MD5 to stacks queue after 3 attempts")
                             return None
 
-                        # Step 3: 心跳轮询（每3秒检测一次）
+                        # Step 3: 心跳轮询（每3秒检测一次，直到下载完成）
                         task_store.add_log(task_id, "AA: heartbeat polling for stacks download...")
-                        deadline = time.time() + stacks_timeout
-                        start_time = deadline - stacks_timeout
-                        while time.time() < deadline:
+                        start_time = time.time()
+                        while True:
                             dl_info = None
                             try:
                                 sr = _req.get(f"{url}/api/status", headers=_bearer(), timeout=5)
@@ -901,8 +900,6 @@ async def _download_via_aa_and_stacks(
                                                         except Exception:
                                                             pass
                                                         task_store.add_log(task_id, "AA: task re-added, restarting heartbeat...")
-                                                        deadline = time.time() + stacks_timeout
-                                                        start_time = deadline - stacks_timeout
                                                         seen_fps.clear()
                                                         break
                                                 except Exception:
@@ -945,8 +942,6 @@ async def _download_via_aa_and_stacks(
                                                         except Exception:
                                                             pass
                                                         task_store.add_log(task_id, "AA: task re-added, restarting heartbeat...")
-                                                        deadline = time.time() + stacks_timeout
-                                                        start_time = deadline - stacks_timeout
                                                         seen_fps.clear()
                                                         break
                                                 except Exception:
@@ -977,30 +972,28 @@ async def _download_via_aa_and_stacks(
                                                 if speed_bps > 0 and total_size > downloaded:
                                                     eta_s = (total_size - downloaded) / speed_bps
                                                     progress_data["eta"] = _format_eta(int(eta_s))
-                                        remaining = int(deadline - time.time())
+                                        remaining = int(time.time() - start_time)
                                         if remaining % 6 == 0:
+                                            elapsed_s = int(time.time() - start_time)
                                             status_msg = dl_info.get("status_message", "downloading")
-                                            task_store.add_log(task_id, f"AA: stacks {status_msg} ({pct_val:.0f}%, {speed_str}) ({remaining}s left)")
+                                            task_store.add_log(task_id, f"AA: stacks {status_msg} ({pct_val:.0f}%, {speed_str}) ({elapsed_s}s)")
                                     else:
-                                        remaining = int(deadline - time.time())
+                                        remaining = int(time.time() - start_time)
                                         if remaining % 15 == 0:
-                                            task_store.add_log(task_id, f"AA: stacks heartbeat ({remaining}s left)...")
+                                            elapsed_s = int(time.time() - start_time)
+                                            task_store.add_log(task_id, f"AA: stacks heartbeat ({elapsed_s}s)...")
                             except Exception as e:
                                 task_store.add_log(task_id, f"AA: heartbeat error: {str(e)[:100]}")
 
                             # Fallback progress when no real download data
                             if progress_data is not None and not dl_info:
                                 elapsed = max(time.time() - start_time, 1)
-                                pct = min(int(elapsed / stacks_timeout * 100), 99)
-                                remaining = int(deadline - time.time())
-                                eta_str = _format_eta(max(remaining, 0))
-                                progress_data["progress"] = pct
-                                progress_data["detail"] = f"AA stacks 等待中... ({remaining}s 剩余)"
-                                progress_data["eta"] = eta_str
+                                progress_data["detail"] = f"AA stacks 等待中... ({int(elapsed)}s)"
+                                progress_data["eta"] = ""
 
                             time.sleep(3)  # 心跳间隔
 
-                        task_store.add_log(task_id, f"AA: stacks heartbeat polling timed out after {stacks_timeout}s")
+                        task_store.add_log(task_id, "AA: stacks heartbeat ended")
                         return None
 
                     download_dir = config.get("download_dir", "")
