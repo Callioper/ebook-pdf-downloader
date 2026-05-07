@@ -248,11 +248,20 @@ async def _run_ocrmypdf_with_progress(
             _had_output = True
 
             # Parse LLM-OCR progress: "22 generate_pdf: pages=10, words=1001, ..."
-            _llm = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
-            if not _llm:
-                # Also match local-llm-pdf-ocr Rich progress bars: "OCR ━━━━━━━━ 75% ..."
-                _llm = re.search(r'OCR\s+[\u2500-\u2595\s]+\s*(\d+)%', _text)
-            if _llm:
+            # or local-llm-pdf-ocr Rich progress: "OCR ━━━━━━ 75% 0:15 ..."
+            _llm_pages = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
+            _llm_pct = re.search(r'OCR\s+[\u2500-\u2595\s]+\s*(\d+)%', _text) if not _llm_pages else None
+            if _llm_pages:
+                _cur += int(_llm_pages.group(1))  # cumulative page count from batch
+                if total_pages > 0:
+                    _tot = total_pages
+                elif _tot == 0:
+                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
+                _cur = min(_cur, _tot)  # cap at known total
+            elif _llm_pct and total_pages > 0:
+                _cur = max(_cur, int(total_pages * int(_llm_pct.group(1)) / 100))
+                _tot = total_pages
+            if _llm_pages or _llm_pct:
                 _cur += int(_llm.group(1))
                 if total_pages > 0:
                     _tot = total_pages
@@ -2245,26 +2254,30 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
             output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
 
-            # Find local-llm-pdf-ocr binary
+            # Find local-llm-pdf-ocr: try venv Python, then PATH binary, then uv run
             import shutil as _shutil
-            _llmocr_bin = _shutil.which("local-llm-pdf-ocr")
             _llmocr_cmd = None
 
-            if _llmocr_bin:
-                _llmocr_cmd = [_llmocr_bin]
+            # 1. Check for venv Python at install dir
+            _install_dir = r"D:\opencode\local-llm-pdf-ocr"
+            _venv_py = os.path.join(_install_dir, ".venv", "Scripts", "python.exe")
+            if os.path.isfile(_venv_py):
+                _llmocr_cmd = [_venv_py, "-m", "pdf_ocr.cli"]
             else:
-                # Try uv run from install directory
-                _install_dir = r"D:\opencode\local-llm-pdf-ocr"
-                if not os.path.isdir(_install_dir):
-                    _install_dir = os.path.join(os.path.dirname(sys.executable), "..", "..", "local-llm-pdf-ocr")
-                if os.path.isdir(_install_dir):
-                    _uv = _shutil.which("uv") or "uv"
-                    _llmocr_cmd = [_uv, "run", "local-llm-pdf-ocr"]
-                    _llmocr_env_extra = {"UV_PROJECT_DIR": _install_dir}
+                # 2. Try PATH
+                _bin = _shutil.which("local-llm-pdf-ocr")
+                if _bin:
+                    _llmocr_cmd = [_bin]
                 else:
-                    task_store.add_log(task_id, "LLM OCR: local-llm-pdf-ocr not found. Install: git clone https://github.com/ahnafnafee/local-llm-pdf-ocr && cd local-llm-pdf-ocr && uv sync")
-                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-                    return report
+                    # 3. Try uv run
+                    _uv = _shutil.which("uv") or "uv"
+                    if os.path.isdir(_install_dir):
+                        _llmocr_cmd = [_uv, "run", "local-llm-pdf-ocr"]
+                        _llmocr_env_extra = {"UV_PROJECT_DIR": _install_dir}
+                    else:
+                        task_store.add_log(task_id, "LLM OCR: local-llm-pdf-ocr not found. Install: git clone https://github.com/ahnafnafee/local-llm-pdf-ocr && cd local-llm-pdf-ocr && uv sync")
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                        return report
 
             cmd = _llmocr_cmd + [
                 "--api-base", llm_api_base,
