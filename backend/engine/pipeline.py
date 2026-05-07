@@ -254,9 +254,18 @@ async def _run_ocrmypdf_with_progress(
                 if total_pages > 0:
                     _tot = total_pages
                 elif _tot == 0:
-                    _tot = int((_cur * 1.2) if _cur > 0 else 100)  # rough estimate
+                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
+                _cur = min(_cur, _tot)  # cap at known total
+                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
+                _elapsed_llm = time.time() - _start
+                _eta_llm = ""
+                if _cur > 1 and _elapsed_llm > 5 and _tot > _cur:
+                    _sec_pp = _elapsed_llm / _cur
+                    _rem = (_tot - _cur) * _sec_pp
+                    _eta_llm = _format_eta(_rem)
                 if _cur % 10 == 0 or _cur >= _tot:
                     task_store.add_log(task_id, f"  LLM-OCR: ~{_cur}/{_tot} 页")
+                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", _eta_llm)
                 continue  # skip logging raw generate_pdf line (TEXT logged separately)
 
             _m = re.search(r'\[(\d+)/(\d+)\]', _text)
@@ -1648,34 +1657,33 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                             confirmed = await _wait_for_user_confirmation(
                                 task_id, report, "zl_confirm", 300, candidates,
                             )
-                        if confirmed:
-                            # 读取用户选择的书籍
-                            task = task_store.get(task_id)
-                            selection = task.get("_zl_confirm_selection", {})
-                            sel_id = selection.get("id", "")
-                            sel_hash = selection.get("hash", "")
-                            if sel_id and sel_hash:
-                                task_store.add_log(task_id, f"ZL: user selected book {sel_id}")
-                                # 用书名做文件名（参考代码做法）
-                                sel_title = selection.get("title", "")
-                                if not sel_title:
-                                    sel_title = report.get("title", "")
-                                zl_path = await dl.zlib_download_verified(
-                                    sel_id, sel_hash, report["tmp_dir"],
-                                    filename=sel_title,
-                                )
-                                if zl_path:
-                                    task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
-                                    await _emit_progress(task_id, "download_pages", 90, "ZL 下载完成，验证中...", "")
-                                    downloaded = True
-                                    download_source = "zlibrary"
-                                    report["download_path"] = zl_path
+                            if confirmed:
+                                # 读取用户选择的书籍
+                                task = task_store.get(task_id)
+                                selection = task.get("_zl_confirm_selection", {})
+                                sel_id = selection.get("id", "")
+                                sel_hash = selection.get("hash", "")
+                                if sel_id and sel_hash:
+                                    task_store.add_log(task_id, f"ZL: user selected book {sel_id}")
+                                    sel_title = selection.get("title", "")
+                                    if not sel_title:
+                                        sel_title = report.get("title", "")
+                                    zl_path = await dl.zlib_download_verified(
+                                        sel_id, sel_hash, report["tmp_dir"],
+                                        filename=sel_title,
+                                    )
+                                    if zl_path:
+                                        task_store.add_log(task_id, f"ZL: downloaded {os.path.basename(zl_path)}")
+                                        await _emit_progress(task_id, "download_pages", 90, "ZL 下载完成，验证中...", "")
+                                        downloaded = True
+                                        download_source = "zlibrary"
+                                        report["download_path"] = zl_path
+                                    else:
+                                        task_store.add_log(task_id, "ZL: download verification failed")
                                 else:
-                                    task_store.add_log(task_id, "ZL: download verification failed")
+                                    task_store.add_log(task_id, "ZL: no book selected by user")
                             else:
-                                task_store.add_log(task_id, "ZL: no book selected by user")
-                        else:
-                            task_store.add_log(task_id, "ZL: user declined, skipping")
+                                task_store.add_log(task_id, "ZL: user declined, skipping")
                     else:
                         task_store.add_log(task_id, "ZL: no candidates found on Z-Library")
                 else:
