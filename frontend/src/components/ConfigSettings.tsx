@@ -24,6 +24,13 @@ interface AppConfig {
   ocr_oversample: number
   llm_api_base: string
   llm_model: string
+  ai_vision_enabled: boolean
+  ai_vision_endpoint: string
+  ai_vision_model: string
+  ai_vision_api_key: string
+  ai_vision_provider: string
+  ai_vision_max_pages: number
+  ai_vision_dpi: number
   [key: string]: unknown
 }
 
@@ -144,6 +151,13 @@ const DEFAULT_CONFIG: AppConfig = {
   ocr_oversample: 200,
   llm_api_base: 'http://localhost:1234/v1',
   llm_model: '',
+  ai_vision_enabled: true,
+  ai_vision_endpoint: '',
+  ai_vision_model: '',
+  ai_vision_api_key: '',
+  ai_vision_provider: 'openai_compatible',
+  ai_vision_max_pages: 5,
+  ai_vision_dpi: 150,
 }
 
 const OCR_ENGINES = [
@@ -1665,6 +1679,73 @@ export default function ConfigSettings() {
               <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
             </div>
           </details>
+        </div>
+      )}
+
+      {/* AI Vision 目录提取 */}
+      <SectionHeader
+        title="AI Vision 目录提取"
+        summary={form.ai_vision_enabled ? (form.ai_vision_model || '未配置') : '已禁用'}
+        color="purple"
+        expanded={expanded.ai_vision}
+        onToggle={() => toggleSection('ai_vision')}
+      />
+      {expanded.ai_vision && (
+        <div className="space-y-3 py-3">
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="ai_vision_enabled"
+              checked={form.ai_vision_enabled ?? true}
+              onChange={(e) => updateForm({ ai_vision_enabled: e.target.checked })} className="rounded" />
+            <label htmlFor="ai_vision_enabled" className="text-sm">启用 AI Vision 目录提取</label>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">API 端点</label>
+            <input type="text" value={form.ai_vision_endpoint || ''}
+              onChange={(e) => updateForm({ ai_vision_endpoint: e.target.value })}
+              placeholder="https://generativelanguage.googleapis.com/v1beta"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">模型名称</label>
+            <input type="text" value={form.ai_vision_model || ''}
+              onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
+              placeholder="gemini-2.0-flash"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">API Key</label>
+            <input type="password" value={form.ai_vision_api_key || ''}
+              onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
+              placeholder="sk-..."
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">API 格式</label>
+            <select value={form.ai_vision_provider || 'openai_compatible'}
+              onChange={(e) => updateForm({ ai_vision_provider: e.target.value })}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
+              <option value="openai_compatible">OpenAI 兼容 (智谱/Qwen/DeepSeek)</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">每轮最大页数</label>
+              <input type="number" value={form.ai_vision_max_pages ?? 5}
+                onChange={(e) => updateForm({ ai_vision_max_pages: parseInt(e.target.value) || 5 })}
+                min={1} max={15} className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">DPI</label>
+              <input type="number" value={form.ai_vision_dpi ?? 150}
+                onChange={(e) => updateForm({ ai_vision_dpi: parseInt(e.target.value) || 150 })}
+                min={72} max={300} className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs" />
+            </div>
+          </div>
+          <p className="text-xs text-gray-400">
+            优先从 OCR 文字层提取目录（免费）。失败时用 AI Vision 从目录页图片提取。
+            支持 Gemini、智谱 GLM-4V、Qwen-VL 等视觉模型。
+          </p>
         </div>
       )}
 
