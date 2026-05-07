@@ -800,6 +800,14 @@ async def _download_via_aa_and_stacks(
                                                json={"md5": md5, "source": "manual"},
                                                headers=_xkey(), timeout=10)
                                 if ar.status_code == 200:
+                                    try:
+                                        resp = ar.json()
+                                        if resp.get("success") is False or "already" in resp.get("message", "").lower():
+                                            task_store.add_log(task_id, f"AA: stacks declined to add task: {resp.get('message', '')[:100]}")
+                                            add_ok = False
+                                            break
+                                    except Exception:
+                                        pass
                                     add_ok = True
                                     task_store.add_log(task_id, "AA: MD5 added to queue")
                                     break
@@ -854,17 +862,24 @@ async def _download_via_aa_and_stacks(
                                             task_store.add_log(task_id, "AA: queue completed but file not found, clearing history & re-adding task...")
                                             try:
                                                 _req.post(f"{url}/api/history/clear", headers=_xkey(), timeout=5)
-                                            except Exception as e:
-                                                task_store.add_log(task_id, f"AA: history clear error: {e}")
+                                            except Exception:
+                                                pass
                                             for _ in range(2):
                                                 try:
                                                     ar2 = _req.post(f"{url}/api/queue/add", json={"md5": md5, "source": "manual"}, headers=_xkey(), timeout=10)
                                                     if ar2.status_code == 200:
+                                                        try:
+                                                            r2 = ar2.json()
+                                                            if r2.get("success") is False and "already" in r2.get("message", "").lower():
+                                                                task_store.add_log(task_id, f"AA: stacks declined re-add: {r2.get('message', '')[:80]}")
+                                                                return None
+                                                        except Exception:
+                                                            pass
                                                         task_store.add_log(task_id, "AA: task re-added, restarting heartbeat...")
                                                         deadline = time.time() + stacks_timeout
                                                         start_time = deadline - stacks_timeout
                                                         seen_fps.clear()
-                                                        break  # break out of re-add loop, continue poll loop
+                                                        break
                                                 except Exception:
                                                     continue
                                             continue
@@ -897,6 +912,13 @@ async def _download_via_aa_and_stacks(
                                                 try:
                                                     ar3 = _req.post(f"{url}/api/queue/add", json={"md5": md5, "source": "manual"}, headers=_xkey(), timeout=10)
                                                     if ar3.status_code == 200:
+                                                        try:
+                                                            r3 = ar3.json()
+                                                            if r3.get("success") is False and "already" in r3.get("message", "").lower():
+                                                                task_store.add_log(task_id, f"AA: stacks declined re-add: {r3.get('message', '')[:80]}")
+                                                                return None
+                                                        except Exception:
+                                                            pass
                                                         task_store.add_log(task_id, "AA: task re-added, restarting heartbeat...")
                                                         deadline = time.time() + stacks_timeout
                                                         start_time = deadline - stacks_timeout
