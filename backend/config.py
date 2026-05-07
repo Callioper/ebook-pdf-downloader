@@ -23,7 +23,14 @@ def _get_app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 CONFIG_FILE = _get_app_dir() / "config.json"
-DEFAULT_CONFIG_FILE = _get_app_dir() / "config.default.json"
+
+def _get_default_config_path() -> Path:
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS) / "config.default.json"
+    else:
+        return Path(__file__).resolve().parent.parent / "config.default.json"
+
+DEFAULT_CONFIG_FILE = _get_default_config_path()
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "host": "0.0.0.0",

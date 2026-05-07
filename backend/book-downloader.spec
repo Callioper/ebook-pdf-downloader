@@ -25,6 +25,7 @@ a = Analysis(
         (str(BACKEND_DIR / "config.py"), "."),
         (str(BACKEND_DIR / "search_engine.py"), "."),
         (str(BACKEND_DIR / "version.py"), "."),
+        (str(BACKEND_DIR.parent / "config.default.json"), "config.default.json"),
         (str(BACKEND_DIR.parent / "icon.ico"), "icon.ico"),
     ],
     excludes=[
