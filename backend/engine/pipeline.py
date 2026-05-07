@@ -1902,7 +1902,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     ocr_engine = config.get("ocr_engine", "tesseract")
     ocr_lang = config.get("ocr_languages", "chi_sim+eng")
     ocr_jobs = config.get("ocr_jobs", 1)
-    ocr_timeout = config.get("ocr_timeout", 7200)
+    ocr_timeout = config.get("ocr_timeout", 3600)
     if ocr_engine == "llm_ocr":
         ocr_timeout = max(ocr_timeout, 7200)
     ocr_oversample = str(config.get("ocr_oversample", 200))
@@ -2350,7 +2350,7 @@ async def run_pipeline(task_id: str):
     ocr_engine = config.get("ocr_engine", "tesseract")
     ocr_langs = config.get("ocr_languages", "chi_sim+eng")
     ocr_jobs = config.get("ocr_jobs", 1)
-    ocr_timeout = config.get("ocr_timeout", 7200)
+    ocr_timeout = config.get("ocr_timeout", 3600)
     task_store.add_log(task_id, f"⚙ 数据库: {db_path} | 代理: {proxy}")
     task_store.add_log(task_id, f"⚙ OCR引擎: {ocr_engine} | 语言: {ocr_langs} | 线程: {ocr_jobs} | 超时: {ocr_timeout}s")
     # Log download source from task

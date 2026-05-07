@@ -45,7 +45,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "http_proxy": "",
     "ocr_jobs": 1,
     "ocr_languages": "chi_sim+eng",
-    "ocr_timeout": 1800,
+    "ocr_timeout": 3600,
     "ocr_oversample": 200,  # DPI for rendering pages before OCR, lower = faster, 150-400
     "nlc_max_workers": 5,
     "ebook_data_geter_path": "",

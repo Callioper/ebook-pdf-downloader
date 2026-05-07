@@ -137,7 +137,7 @@ const DEFAULT_CONFIG: AppConfig = {
   http_proxy: '',
   ocr_jobs: 1,
   ocr_languages: 'chi_sim+eng',
-  ocr_timeout: 1800,
+  ocr_timeout: 3600,
   ebook_db_path: '',
   zlib_email: '',
   zlib_password: '',
@@ -1658,7 +1658,7 @@ export default function ConfigSettings() {
               <input
                 type="number"
                 value={form.ocr_timeout ?? 1800}
-                onChange={(e) => updateForm({ ocr_timeout: parseInt(e.target.value) || 1800 })}
+                  onChange={(e) => updateForm({ ocr_timeout: parseInt(e.target.value) || 3600 })}
                 min={60}
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
