@@ -107,8 +107,7 @@ async def shutdown():
             task_store.stop()
         except Exception:
             pass
-        import sys as _sys
-        _sys.exit(0)
+        os._exit(0)
 
     threading.Thread(target=_do_shutdown, daemon=True).start()
     return {"ok": True, "message": "shutting down"}
@@ -152,8 +151,7 @@ def main():
     except Exception:
         import traceback
         traceback.print_exc()
-        import sys as _sys
-        _sys.exit(1)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
