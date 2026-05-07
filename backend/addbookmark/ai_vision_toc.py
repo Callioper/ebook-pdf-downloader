@@ -191,15 +191,53 @@ def _parse_toc_line(line: str) -> Tuple[Optional[str], Optional[int]]:
     return None, None
 
 
+def _preprocess_toc_text(text: str) -> str:
+    """预处理目录文本：合并"只有点线的行"和下一行的页码。
+
+    OCR 目录常见格式：
+        诞生．．．．．．．．．．．．．．．．．．．
+        1
+    合并为：
+        诞生．．．．．．．．．．．．．．．．．．．1
+    """
+    lines = text.strip().split('\n')
+    merged = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # 如果当前行以点线结尾（没有页码），下一行是纯数字 → 合并
+        if i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            # 当前行以点线结尾，下一行是数字
+            if re.search(r'[.…·]{2,}\s*$', line) and re.match(r'^\d+$', next_line):
+                merged.append(line + next_line)
+                i += 2
+                continue
+            # 当前行只有点线（标题在上一行的点线延续），下一行是数字
+            if re.match(r'^[.…·]{2,}$', line) and re.match(r'^\d+$', next_line):
+                if merged:
+                    merged[-1] = merged[-1].rstrip() + line + next_line
+                i += 2
+                continue
+        merged.append(line)
+        i += 1
+    return '\n'.join(merged)
+
+
 def extract_toc_from_text(text: str) -> List[Tuple[str, int]]:
     """从文字中解析目录条目。"""
     if not text or len(text.strip()) < 5:
         return []
+    text = _preprocess_toc_text(text)
     lines = text.strip().split('\n')
     entries: List[Tuple[str, int]] = []
     for line in lines:
         title, page = _parse_toc_line(line)
         if title and page is not None:
+            # 过滤纯点线/特殊字符的标题
+            clean_title = re.sub(r'[.…·~•\s\-—_]', '', title)
+            if len(clean_title) < 2:
+                continue
             entries.append((title, page))
     return entries
 
