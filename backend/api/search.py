@@ -122,31 +122,39 @@ def _extract_aa_search_metadata(html: str) -> List[Dict[str, Any]]:
             break
         book = results[i]
         # Extract year - look for 4-digit year near "year" or similar labels
-        year_m = re.search(r'(?:年|Year|year)[^：:]*[：:]\s*(\d{4})', block)
+        year_m = re.search(r'(?:年|Year|year|Published)[^：:>]*[：:>]\s*(?:<[^>]+>)*(\d{4})', block)
         if year_m:
             book["year"] = year_m.group(1)
         # Extract publisher
-        pub_m = re.search(r'(?:出版社?|Publisher|publisher)[^：:]*[：:]\s*([^<\n]+)', block)
+        pub_m = re.search(r'(?:出版社?|Publisher|publisher|Published by)[^：:>]*[：:>]\s*(?:<[^>]+>)*([^<\n]+)', block)
         if pub_m:
             book["publisher"] = pub_m.group(1).strip()
         # Extract format/extension
-        fmt_m = re.search(r'(?:格式|文件类型|Format|format)[^：:]*[：:]\s*(\w+)', block)
+        fmt_m = re.search(r'(?:格式|文件类型|Format|format|Extension|类型)[^：:>]*[：:>]\s*(?:<[^>]+>)*(\w+)', block)
         if fmt_m:
-            book["format"] = fmt_m.group(1).strip()
+            book["format"] = fmt_m.group(1).strip().lower()
+        if not book.get("format"):
+            bare = re.search(r'\.(pdf|epub|mobi|azw3|djvu|txt)\b', block, re.I)
+            if bare:
+                book["format"] = bare.group(1).lower()
         # Extract file size
-        size_m = re.search(r'(?:大小|文件大小|Size|size)[^：:]*[：:]\s*([\d. ]+\s*(?:MB|GB|KB|MiB|GiB))', block)
+        size_m = re.search(r'(?:大小|文件大小|Size|size|File\s*size|文件大小)[^：:>]*[：:>]\s*(?:<[^>]+>)*([\d. ]+\s*(?:MB|GB|KB|MiB|GiB|B))', block)
         if size_m:
             book["size"] = size_m.group(1).strip()
+        if not book.get("size"):
+            bare_s = re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB|KB|MiB|GiB))\b', block, re.I)
+            if bare_s:
+                book["size"] = bare_s.group(1).strip()
         # Extract author
-        auth_m = re.search(r'(?:作者|Author|author)[^：:]*[：:]\s*([^<\n]+)', block)
+        auth_m = re.search(r'(?:作者|Author|author)[^：:>]*[：:>]\s*(?:<[^>]+>)*([^<\n]+)', block)
         if auth_m:
             book["author"] = auth_m.group(1).strip()
         # Extract language
-        lang_m = re.search(r'(?:语言|Language|lang)[^：:]*[：:]\s*(\w+)', block)
+        lang_m = re.search(r'(?:语言|Language|lang|Language)[^：:>]*[：:>]\s*(?:<[^>]+>)*(\w+)', block)
         if lang_m:
             book["language"] = lang_m.group(1).strip()
         # Extract ISBN
-        isbn_m = re.search(r'[Ii][Ss][Bb][Nn][^：:]*[：:]\s*([\dX-]+)', block)
+        isbn_m = re.search(r'[Ii][Ss][Bb][Nn][^：:>]*[：:>]\s*(?:<[^>]+>)*([\dX-]+)', block)
         if isbn_m:
             book["isbn"] = isbn_m.group(1).strip()
 
@@ -205,14 +213,40 @@ def _fetch_md5_page_info(md5: str, proxy: str = "") -> Dict[str, Any]:
             info["title"] = raw_title
         # More flexible patterns - handle various HTML structures on AA pages
         patterns = [
-            (r'Author[s]?[：:\s]*([^<>\n]{2,80})', "author"),
-            (r'(?:Language|语言)[：:\s]*([A-Za-z]{2,20})', "language"),
-            (r'(?:Format|格式)[：:\s]*(\w+)', "format"),
-            (r'(?:File size|Size|文件大小)[：:\s]*([\d. ]+\s*(?:MB|GB|KB|MiB|GiB))', "size"),
-            (r'(?:Year|年份)[：:\s]*(\d{4})', "year"),
-            (r'[Ii][Ss][Bb][Nn][：:\s]*([\dX-]{10,17})', "isbn"),
-            (r'(?:Publisher|出版社)[：:\s]*([^<>\n]{2,100})', "publisher"),
+            (r'Author[s]?[：:\s>]*(?:<[^>]+>)*([^<>\n]{2,80})', "author"),
+            (r'(?:Language|语言)[：:\s>]*(?:<[^>]+>)*([A-Za-z\u4e00-\u9fff]{2,20})', "language"),
+            (r'(?:Format|格式|Extension|类型)[：:\s>]*(?:<[^>]+>)*(\w+)', "format"),
+            (r'(?:File\s*size|Size|文件大小|大小)[：:\s>]*(?:<[^>]+>)*([\d. ]+\s*(?:MB|GB|KB|MiB|GiB|B))', "size"),
+            (r'(?:Year|年份|Published)[：:\s>]*(?:<[^>]+>)*(\d{4})', "year"),
+            (r'[Ii][Ss][Bb][Nn][：:\s>]*(?:<[^>]+>)*([\dX-]{10,17})', "isbn"),
+            (r'(?:Publisher|出版社|Published by)[：:\s>]*(?:<[^>]+>)*([^<>\n]{2,100})', "publisher"),
         ]
+        # Also try JSON-LD structured data
+        jsonld_m = re.search(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if jsonld_m:
+            try:
+                import json
+                ld = json.loads(jsonld_m.group(1))
+                if isinstance(ld, dict):
+                    if not info.get("title"):
+                        info["title"] = ld.get("name", "")
+                    if not info.get("author") and ld.get("author"):
+                        auth = ld["author"]
+                        if isinstance(auth, list):
+                            info["author"] = ", ".join(a.get("name", "") for a in auth if isinstance(a, dict))
+                        elif isinstance(auth, dict):
+                            info["author"] = auth.get("name", "")
+                    if not info.get("publisher") and ld.get("publisher"):
+                        pub = ld["publisher"]
+                        info["publisher"] = pub.get("name", "") if isinstance(pub, dict) else str(pub)
+                    if not info.get("isbn"):
+                        info["isbn"] = ld.get("isbn", "")
+                    if not info.get("year"):
+                        info["year"] = ld.get("datePublished", "")[:4]
+                    if not info.get("language"):
+                        info["language"] = ld.get("inLanguage", "")
+            except Exception:
+                pass
         for pattern, key in patterns:
             if key in info:
                 continue
@@ -248,6 +282,9 @@ async def _search_zlib(query: str, proxy: str = "") -> List[Dict[str, Any]]:
         for item in (items if isinstance(items, list) else [])[:10]:
             if not item.get("title"):
                 continue
+            fmt = str(item.get("extension", item.get("format", ""))).lower()
+            if fmt and fmt != "pdf":
+                continue
             books.append({
                 "source": "zlibrary",
                 "title": item.get("title", ""),
@@ -256,7 +293,7 @@ async def _search_zlib(query: str, proxy: str = "") -> List[Dict[str, Any]]:
                 "publisher": item.get("publisher", ""),
                 "year": str(item.get("year", "")),
                 "language": item.get("language", ""),
-                "format": item.get("extension", item.get("format", "")),
+                "format": fmt,
                 "size": item.get("filesize", item.get("size", "")),
                 "md5": item.get("md5", ""),
                 "book_id": str(item.get("id", "")),
@@ -308,11 +345,20 @@ async def search_books(
             results = []
             try:
                 md5_list = _search_annas_archive(query, proxy)
-                for item in md5_list[:3]:
+                for item in md5_list[:5]:
                     try:
                         info = _fetch_md5_page_info(item["md5"], proxy)
-                        if info.get("title"):
-                            results.append(info)
+                        # Merge: keep search-page fields, fill gaps with MD5 page info
+                        merged = {**item, **{k: v for k, v in info.items() if v}}
+                        if merged.get("title"):
+                            fmt = str(merged.get("format", "")).lower()
+                            if fmt and fmt != "pdf":
+                                continue  # skip non-PDF formats
+                            if not fmt:
+                                title_lower = merged.get("title", "").lower()
+                                if any(ext in title_lower for ext in (".epub", ".mobi", ".azw", ".djvu")):
+                                    continue
+                            results.append(merged)
                     except Exception as e:
                         logger.warning(f"Failed to fetch MD5 info in _run_aa: {e}")
             except Exception as e:
@@ -331,11 +377,11 @@ async def search_books(
             future_aa = pool.submit(_run_aa)
             future_zlib = pool.submit(_run_zlib)
             try:
-                external_books.extend(future_aa.result(timeout=6))
+                external_books.extend(future_aa.result(timeout=15))
             except Exception:
                 pass
             try:
-                external_books.extend(future_zlib.result(timeout=6))
+                external_books.extend(future_zlib.result(timeout=15))
             except Exception:
                 pass
         finally:
