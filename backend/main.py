@@ -4,6 +4,7 @@
 # 依赖：config, api.search, api.tasks, api.ws, search_engine, task_store, engine.flaresolverr
 # 注意：支持打包后的frozen模式，自动查找frontend目录
 import logging
+import logging.handlers
 import os
 import subprocess
 import sys
@@ -40,6 +41,25 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
 os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
 logger = logging.getLogger("book-downloader")
+
+
+def _setup_logging():
+    log_dir = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming')) / 'BookDownloader' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'app.log'
+
+    handler = logging.handlers.RotatingFileHandler(
+        str(log_file), maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8'
+    )
+    handler.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+    return log_file
+
+_setup_logging()
 
 
 def get_frontend_dir() -> Optional[str]:
