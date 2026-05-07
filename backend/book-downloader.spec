@@ -44,7 +44,6 @@ a = Analysis(
         'api', 'api.search', 'api.tasks', 'api.ws',
         'config', 'search_engine', 'task_store', 'ws_manager', 'version',
         'curl_cffi',
-        'engine.pdf_parallel',
         'engine.llmocr',
         'engine.llmocr.plugin',
         'engine.llmocr.engine',

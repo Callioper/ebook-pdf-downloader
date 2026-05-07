@@ -1676,49 +1676,28 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30})
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 0})
 
-            # Use parallel PDF chunking when ocr_jobs > 1
-            if ocr_jobs > 1:
-                from engine.pdf_parallel import run_paddleocr_parallel
-
-                exit_code = await asyncio.wait_for(
-                    run_paddleocr_parallel(
-                        pdf_path=pdf_path,
-                        output_pdf=output_pdf,
-                        paddle_python=_paddle_venv_py,
-                        ocr_lang=ocr_lang,
-                        num_workers=ocr_jobs,
-                        total_pages=_total_pages,
-                        timeout_per_chunk=ocr_timeout,
-                        oversample=int(ocr_oversample),
-                        optimize=_opt_level,
-                        add_log=lambda msg: task_store.add_log(task_id, f"  {msg}"),
-                        emit_progress=lambda **kw: _emit_progress(task_id, **kw),
-                    ),
-                    timeout=ocr_timeout,
-                )
-            else:
-                # Original single-process path (with --oversample added)
-                _ocr_env = {**os.environ, "PATH": os.environ.get("PATH", "")
-                            + r";C:\Program Files\Tesseract-OCR"}
-                cmd = [
-                    _paddle_venv_py, "-m", "ocrmypdf",
-                    "--plugin", "ocrmypdf_paddleocr",
-                    "--optimize", _opt_level,
-                    "--oversample", ocr_oversample,
-                    "-l", ocr_lang or "chi_sim+eng",
-                    "-j", "1",
-                    "--output-type", "pdf",
-                    "--mode", "force",
-                    pdf_path,
-                    output_pdf,
-                ]
-                exit_code = await _run_ocrmypdf_with_progress(
-                    task_id, cmd, env=_ocr_env,
-                    timeout=ocr_timeout, total_pages=_total_pages,
-                    output_pdf=output_pdf,
-                )
+            # PaddleOCR always uses single process (PaddlePaddle uses all CPU cores internally)
+            _ocr_env = {**os.environ, "PATH": os.environ.get("PATH", "")
+                        + r";C:\Program Files\Tesseract-OCR"}
+            cmd = [
+                _paddle_venv_py, "-m", "ocrmypdf",
+                "--plugin", "ocrmypdf_paddleocr",
+                "--optimize", _opt_level,
+                "--oversample", ocr_oversample,
+                "-l", ocr_lang or "chi_sim+eng",
+                "-j", "1",
+                "--output-type", "pdf",
+                "--mode", "force",
+                pdf_path,
+                output_pdf,
+            ]
+            exit_code = await _run_ocrmypdf_with_progress(
+                task_id, cmd, env=_ocr_env,
+                timeout=ocr_timeout, total_pages=_total_pages,
+                output_pdf=output_pdf,
+            )
 
             if exit_code == 0:
                 task_store.add_log(task_id, "OCR completed, validating quality...")
