@@ -2279,6 +2279,17 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         os.replace(output_pdf, pdf_path)
                         task_store.add_log(task_id, "LLM OCR quality check passed")
                         report["ocr_done"] = True
+                        # Post-OCR: rebuild sandwich PDF with Surya-aligned bboxes
+                        try:
+                            from engine.surya_embed import build_sandwich_pdf
+                            surya_output = pdf_path.replace(".pdf", "_surya.pdf")
+                            if build_sandwich_pdf(pdf_path, pdf_path, surya_output, dpi=int(ocr_oversample)):
+                                os.replace(surya_output, pdf_path)
+                                task_store.add_log(task_id, "Surya: text layer aligned to detected bboxes")
+                        except ImportError:
+                            task_store.add_log(task_id, "Surya module not available on system Python, skipping alignment")
+                        except Exception as e:
+                            task_store.add_log(task_id, f"Surya alignment error: {str(e)[:100]}")
                     else:
                         task_store.add_log(task_id, "LLM OCR quality check failed, keeping original PDF")
                         try:
