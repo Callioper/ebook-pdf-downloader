@@ -104,6 +104,16 @@ def _resume_process(pid: int):
         kernel32.CloseHandle(handle)
 
 
+def _kill_proc_tree(pid: int):
+    """Kill process tree by PID on Windows."""
+    import subprocess as _sp
+    try:
+        _sp.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, timeout=10)
+    except Exception:
+        pass
+
+
 def _format_eta(remaining_seconds: float) -> str:
     """Format remaining seconds into a human-readable ETA string."""
     if remaining_seconds <= 0:
@@ -158,8 +168,12 @@ async def _run_ocrmypdf_with_progress(
             return 0
 
     async def _monitor(p):
-        """Emit heartbeat progress while process is running."""
+        """Emit heartbeat progress while process is running.
+        Also acts as silence watchdog: if cur==tot (all pages processed)
+        and no activity for 60s, force-kill the process tree."""
         nonlocal _cur, _tot, _last, _last_mtime
+        _silence_start = 0.0
+        _last_cur = 0
         while p.returncode is None:
             await asyncio.sleep(5)
             if p.returncode is not None:
@@ -176,6 +190,19 @@ async def _run_ocrmypdf_with_progress(
                 _suspend_process(p.pid)
                 await asyncio.sleep(2)
                 continue
+
+            # Silence watchdog: if all pages processed and no progress for 60s, force-kill
+            if total_pages > 0 and _cur >= total_pages:
+                if _cur == _last_cur:
+                    if _silence_start == 0:
+                        _silence_start = time.time()
+                    elif time.time() - _silence_start > 60:
+                        task_store.add_log(task_id, "  OCR process idle >60s after completion, force-killing tree")
+                        _kill_proc_tree(p.pid)
+                        break
+                else:
+                    _silence_start = 0
+                    _last_cur = _cur
 
             # Try file-based page counting (mtime-gated for performance)
             _file_pages = 0
@@ -257,7 +284,16 @@ async def _run_ocrmypdf_with_progress(
                 if _pct != _last or (_now - _start - max(_last if isinstance(_last, float) else 0, 0)) > 10:
                     _last = _pct if _pct > 0 else _now
                     await _emit_progress(task_id, "ocr", _pct, f"{_cur}/{_tot} 页", _eta)
-        return await p.wait()
+        try:
+            return await asyncio.wait_for(p.wait(), timeout=120)
+        except asyncio.TimeoutError:
+            task_store.add_log(task_id, "  OCR process hanging after exit, sending kill")
+            _kill_proc_tree(p.pid)
+            try:
+                return await asyncio.wait_for(p.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                p.kill()
+                return p.returncode or 0
 
     try:
         return await asyncio.wait_for(_reader(proc), timeout=timeout)
