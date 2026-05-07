@@ -57,7 +57,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "flaresolverr_port": 8191,
     "stacks_api_key": "",
     "stacks_base_url": "http://localhost:7788",
-    "stacks_timeout": 300,
+    "stacks_timeout": 180,
     "libgen_enabled": True,
     "download_timeout": 600,
     "pdf_compress": False,

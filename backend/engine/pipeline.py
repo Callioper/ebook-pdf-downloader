@@ -847,8 +847,23 @@ async def _download_via_aa_and_stacks(
                                                 dest = _copy_dest(found, dl_dir)
                                                 task_store.add_log(task_id, f"AA: docker cp OK → {fname}")
                                                 return dest
-                                            task_store.add_log(task_id, "AA: queue completed item but file not found on disk")
-                                            return None
+                                            task_store.add_log(task_id, "AA: queue completed but file not found, clearing history & re-adding task...")
+                                            try:
+                                                _req.post(f"{url}/api/history/clear", headers=_xkey(), timeout=5)
+                                            except Exception as e:
+                                                task_store.add_log(task_id, f"AA: history clear error: {e}")
+                                            for _ in range(2):
+                                                try:
+                                                    ar2 = _req.post(f"{url}/api/queue/add", json={"md5": md5, "source": "manual"}, headers=_xkey(), timeout=10)
+                                                    if ar2.status_code == 200:
+                                                        task_store.add_log(task_id, "AA: task re-added, restarting heartbeat...")
+                                                        deadline = time.time() + stacks_timeout
+                                                        start_time = deadline - stacks_timeout
+                                                        seen_fps.clear()
+                                                        break  # break out of re-add loop, continue poll loop
+                                                except Exception:
+                                                    continue
+                                            continue
 
                                     # 3b. 检查 recent_history 中新完成的条目
                                     for item in sd.get("recent_history", []):
@@ -869,7 +884,23 @@ async def _download_via_aa_and_stacks(
                                                 dest = _copy_dest(found, dl_dir)
                                                 task_store.add_log(task_id, f"AA: docker cp OK → {fname}")
                                                 return dest
-                                            task_store.add_log(task_id, f"AA: recent_history completed item {fp} but file not found on disk, keeping polling...")
+                                            task_store.add_log(task_id, f"AA: recent_history completed item {fp} but file not found, clearing history & re-adding task...")
+                                            try:
+                                                _req.post(f"{url}/api/history/clear", headers=_xkey(), timeout=5)
+                                            except Exception as e:
+                                                task_store.add_log(task_id, f"AA: history clear error: {e}")
+                                            for _ in range(2):
+                                                try:
+                                                    ar3 = _req.post(f"{url}/api/queue/add", json={"md5": md5, "source": "manual"}, headers=_xkey(), timeout=10)
+                                                    if ar3.status_code == 200:
+                                                        task_store.add_log(task_id, "AA: task re-added, restarting heartbeat...")
+                                                        deadline = time.time() + stacks_timeout
+                                                        start_time = deadline - stacks_timeout
+                                                        seen_fps.clear()
+                                                        break
+                                                except Exception:
+                                                    continue
+                                            continue
 
                                     # 3c. 检测是否正在下载
                                     active = [item for item in sd.get("queue", [])
