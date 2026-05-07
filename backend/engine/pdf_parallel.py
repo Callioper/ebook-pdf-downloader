@@ -90,7 +90,7 @@ async def run_paddleocr_parallel(
     add_log: Optional[Callable] = None,
     emit_progress: Optional[Callable] = None,
 ) -> int:
-    """Split PDF into num_workers chunks, run PaddleOCR on each chunk in parallel,
+    """Split PDF into num_workers chunks, run PaddleOCR on each chunk sequentially,
     merge results. Returns exit code (0 = success)."""
     if add_log is None:
         add_log = lambda msg: None
@@ -98,14 +98,13 @@ async def run_paddleocr_parallel(
         async def _noop(**kw): pass
         emit_progress = _noop
 
-    add_log(f"PaddleOCR parallel: splitting PDF into {num_workers} chunks...")
+    add_log(f"PaddleOCR: splitting PDF into {num_workers} chunks...")
     chunks = split_pdf(pdf_path, num_workers)
 
     if not chunks:
-        add_log("PaddleOCR parallel: no pages to process")
+        add_log("PaddleOCR: no pages to process")
         return 1
 
-    # Pre-compute page counts per chunk
     chunk_page_counts = []
     for c in chunks:
         import fitz
@@ -116,12 +115,13 @@ async def run_paddleocr_parallel(
     if total_pages <= 0:
         total_pages = sum(chunk_page_counts)
 
-    add_log(f"PaddleOCR parallel: {len(chunks)} chunks, {num_workers} workers, {total_pages} total pages")
+    add_log(f"PaddleOCR: {len(chunks)} chunks, {total_pages} total pages, processing sequentially")
 
     start_time = time.time()
-    _spawned_procs = []
+    chunk_outputs = []
 
-    async def process_chunk(i: int, chunk_path: str) -> Optional[str]:
+    for i, chunk_path in enumerate(chunks):
+        chunk_start = time.time()
         out_path = chunk_path.replace('.pdf', '_ocr.pdf')
         cmd = [
             paddle_python, "-m", "ocrmypdf",
@@ -138,8 +138,7 @@ async def run_paddleocr_parallel(
         env = {**os.environ, "PATH": os.environ.get("PATH", "") + r";C:\Program Files\Tesseract-OCR",
                "PYTHONUNBUFFERED": "1"}
 
-        chunk_pages = chunk_page_counts[i] if i < len(chunk_page_counts) else 0
-        chunk_completed = 0
+        add_log(f"PaddleOCR: chunk {i+1}/{len(chunks)} ({chunk_page_counts[i]} pages)...")
 
         proc = None
         try:
@@ -149,52 +148,79 @@ async def run_paddleocr_parallel(
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
             )
-            _spawned_procs.append(proc)
 
-            async for line in proc.stdout:
-                text = line.decode('utf-8', errors='replace').strip()
-                if not text:
-                    continue
+            # Parse progress from stdout in background
+            chunk_completed = 0
+            chunk_total = chunk_page_counts[i]
 
-                m = re.search(r'\[(\d+)/(\d+)\]', text)
-                if m:
-                    chunk_completed = int(m.group(1))
-                    chunk_pages = max(chunk_pages, int(m.group(2)))
-                else:
-                    m = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', text)
+            async def read_progress():
+                nonlocal chunk_completed, chunk_total
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode('utf-8', errors='replace').strip()
+                    if not text:
+                        continue
+                    m = re.search(r'\[(\d+)/(\d+)\]', text)
                     if m:
                         chunk_completed = int(m.group(1))
-                        chunk_pages = max(chunk_pages, int(m.group(2)))
+                        chunk_total = max(chunk_total, int(m.group(2)))
 
-                if chunk_pages > 0 and chunk_completed > 0:
-                    _pages_before = sum(chunk_page_counts[:i]) if i > 0 else 0
-                    global_cur = _pages_before + chunk_completed
-                    _pct = int(global_cur / total_pages * 100) if total_pages > 0 else 0
-                    _elapsed = time.time() - start_time
-                    _speed = global_cur / _elapsed if _elapsed > 0 else 0
-                    _eta = (total_pages - global_cur) / _speed if _speed > 0 else 0
-                    _eta_str = f"{int(_eta // 60)}分{int(_eta % 60)}秒" if _eta > 0 else ""
-                    await emit_progress(
-                        step="ocr",
-                        progress=_pct,
-                        detail=f"{global_cur}/{total_pages} 页",
-                        eta=_eta_str,
-                    )
+            # Run reader in background
+            reader_task = asyncio.ensure_future(read_progress())
 
-            await proc.wait()
+            # Heartbeat: update progress every 3 seconds while chunk runs
+            async def heartbeat():
+                while not proc.returncode:
+                    await asyncio.sleep(3)
+                    if chunk_total > 0 and chunk_completed > 0:
+                        _pages_before = sum(chunk_page_counts[:i])
+                        global_cur = _pages_before + chunk_completed
+                        _pct = int(global_cur / total_pages * 100) if total_pages > 0 else 0
+                        _elapsed = time.time() - start_time
+                        _speed = global_cur / _elapsed if _elapsed > 0 else 0
+                        _eta = (total_pages - global_cur) / _speed if _speed > 0 else 0
+                        _eta_str = f"{int(_eta // 60)}分{int(_eta % 60)}秒" if _eta > 0 else ""
+                        await emit_progress(
+                            step="ocr",
+                            progress=_pct,
+                            detail=f"{global_cur}/{total_pages} 页",
+                            eta=_eta_str,
+                        )
+
+            hb_task = asyncio.ensure_future(heartbeat())
+
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=timeout_per_chunk)
+            finally:
+                reader_task.cancel()
+                hb_task.cancel()
+                try: await reader_task
+                except asyncio.CancelledError: pass
+                try: await hb_task
+                except asyncio.CancelledError: pass
+
+            elapsed = time.time() - chunk_start
 
             if proc.returncode == 0 and os.path.exists(out_path):
-                return out_path
+                chunk_outputs.append(out_path)
+                pages_before = sum(chunk_page_counts[:i+1])
+                _pct = int(pages_before / total_pages * 100) if total_pages > 0 else 0
+                await emit_progress(
+                    step="ocr", progress=_pct,
+                    detail=f"{pages_before}/{total_pages} 页",
+                )
+                add_log(f"PaddleOCR: chunk {i+1}/{len(chunks)} done ({elapsed:.0f}s)")
             else:
+                add_log(f"PaddleOCR: chunk {i+1}/{len(chunks)} FAILED: exit {proc.returncode} ({elapsed:.0f}s)")
                 if os.path.exists(out_path):
                     try:
                         os.remove(out_path)
                     except Exception:
                         pass
-                add_log(f"PaddleOCR chunk {i+1} failed: exit {proc.returncode}")
-                return None
         except asyncio.TimeoutError:
-            add_log(f"PaddleOCR chunk {i+1} timed out")
+            add_log(f"PaddleOCR: chunk {i+1}/{len(chunks)} timed out")
             try:
                 proc.kill()
             except Exception:
@@ -204,9 +230,8 @@ async def run_paddleocr_parallel(
                     os.remove(out_path)
                 except Exception:
                     pass
-            return None
         except Exception as e:
-            add_log(f"PaddleOCR chunk {i+1} error: {e}")
+            add_log(f"PaddleOCR: chunk {i+1}/{len(chunks)} error: {e}")
             try:
                 if proc:
                     proc.kill()
@@ -217,31 +242,9 @@ async def run_paddleocr_parallel(
                     os.remove(out_path)
                 except Exception:
                     pass
-            return None
-        finally:
-            if proc and proc in _spawned_procs:
-                _spawned_procs.remove(proc)
-
-    add_log(f"PaddleOCR parallel: processing {len(chunks)} chunks...")
-    tasks = [process_chunk(i, chunk_path) for i, chunk_path in enumerate(chunks)]
-    try:
-        results = await asyncio.gather(*tasks)
-    finally:
-        for proc in _spawned_procs:
-            try:
-                if proc.returncode is None:
-                    proc.kill()
-            except Exception:
-                pass
-
-    chunk_outputs = [r for r in results if r is not None]
-    add_log(f"PaddleOCR parallel: {len(chunk_outputs)}/{len(chunks)} chunks completed")
-
-    if emit_progress:
-        await emit_progress(step="ocr", progress=90, detail="合并分块结果...")
 
     if not chunk_outputs:
-        add_log("PaddleOCR parallel: all chunks failed")
+        add_log("PaddleOCR: all chunks failed")
         for c in chunks:
             try:
                 os.remove(c)
@@ -249,7 +252,10 @@ async def run_paddleocr_parallel(
                 pass
         return 1
 
-    add_log("PaddleOCR parallel: merging chunks...")
+    if emit_progress:
+        await emit_progress(step="ocr", progress=90, detail="合并分块结果...")
+
+    add_log("PaddleOCR: merging chunks...")
     ok = merge_pdfs(chunk_outputs, output_pdf)
 
     for c in chunks:
@@ -264,9 +270,9 @@ async def run_paddleocr_parallel(
             pass
 
     if not ok:
-        add_log("PaddleOCR parallel: merge failed")
+        add_log("PaddleOCR: merge failed")
         return 1
 
     elapsed = time.time() - start_time
-    add_log(f"PaddleOCR parallel: done in {elapsed:.1f}s")
+    add_log(f"PaddleOCR: done in {elapsed:.0f}s")
     return 0
