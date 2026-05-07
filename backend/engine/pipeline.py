@@ -224,6 +224,11 @@ async def _run_ocrmypdf_with_progress(
             if _m:
                 _cur = int(_m.group(1))
                 _tot = int(_m.group(2))
+            elif total_pages > 0:
+                _m0 = re.search(r'\[(\d+)\]', _text)
+                if _m0:
+                    _cur = int(_m0.group(1))
+                    _tot = total_pages
 
             _m2 = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', _text)
             if _m2:
