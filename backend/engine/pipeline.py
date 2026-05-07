@@ -168,12 +168,8 @@ async def _run_ocrmypdf_with_progress(
             return 0
 
     async def _monitor(p):
-        """Emit heartbeat progress while process is running.
-        Also acts as silence watchdog: if cur==tot (all pages processed)
-        and no activity for 60s, force-kill the process tree."""
+        """Emit heartbeat progress while process is running."""
         nonlocal _cur, _tot, _last, _last_mtime
-        _silence_start = 0.0
-        _last_cur = 0
         while p.returncode is None:
             await asyncio.sleep(5)
             if p.returncode is not None:
@@ -190,19 +186,6 @@ async def _run_ocrmypdf_with_progress(
                 _suspend_process(p.pid)
                 await asyncio.sleep(2)
                 continue
-
-            # Silence watchdog: if all pages processed and no progress for 60s, force-kill
-            if total_pages > 0 and _cur >= total_pages:
-                if _cur == _last_cur:
-                    if _silence_start == 0:
-                        _silence_start = time.time()
-                    elif time.time() - _silence_start > 60:
-                        task_store.add_log(task_id, "  OCR process idle >60s after completion, force-killing tree")
-                        _kill_proc_tree(p.pid)
-                        break
-                else:
-                    _silence_start = 0
-                    _last_cur = _cur
 
             # Try file-based page counting (mtime-gated for performance)
             _file_pages = 0
@@ -239,7 +222,25 @@ async def _run_ocrmypdf_with_progress(
 
     async def _reader(p) -> int:
         nonlocal _cur, _tot, _last, _had_output
-        async for _line in p.stdout:
+        _last_output = time.time()
+        while True:
+            try:
+                _line = await asyncio.wait_for(p.stdout.readline(), timeout=10)
+            except asyncio.TimeoutError:
+                # No output within 10s. Check if process is already done.
+                if p.returncode is not None:
+                    break
+                # If all pages done and silent >30s, treat as done (pipe leaked by child process)
+                _idle = time.time() - _last_output
+                if _tot > 0 and _cur >= _tot and _idle > 30:
+                    task_store.add_log(task_id, "  OCR output silent after completion, treating as done")
+                    break
+                continue
+
+            if not _line:
+                break  # EOF
+
+            _last_output = time.time()
             _text = _line.decode(errors='replace').strip()
             if not _text:
                 continue
@@ -1688,7 +1689,7 @@ def _is_scanned(pdf_path: str, sample_pages: int = 5, python_cmd: str = "") -> b
             import shlex as _sh
             code = (
                 "import fitz;"
-                f"d=fitz.open({_sh.quote(pdf_path)});"
+                f"d=fitz.open(r{repr(str(pdf_path))});"
                 f"blank=0;n=min({sample_pages},len(d));"
                 "for i in range(n):"
                 " t=d[i].get_text();"
@@ -1738,7 +1739,7 @@ def _is_ocr_readable(pdf_path: str, sample_pages: int = 5, min_cjk_ratio: float 
             import shlex as _sh
             code = (
                 "import fitz;"
-                f"d=fitz.open({_sh.quote(pdf_path)});"
+                f"d=fitz.open(r{repr(str(pdf_path))});"
                 f"total=d.page_count;n=min({sample_pages},total);"
                 f"indices=[int(total*i/(n+1)) for i in range(1,n+1)];"
                 "readable=0;"
@@ -1962,7 +1963,21 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     except Exception:
                         pass
             else:
-                task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
+                # Exit code != 0, but output PDF may still be valid (e.g. process killed after finishing)
+                if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 1024:
+                    task_store.add_log(task_id, f"PaddleOCR exited with code {exit_code} but output exists, validating...")
+                    if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
+                        os.replace(output_pdf, pdf_path)
+                        task_store.add_log(task_id, "OCR output salvaged despite non-zero exit code")
+                        report["ocr_done"] = True
+                    else:
+                        task_store.add_log(task_id, f"PaddleOCR output invalid, code {exit_code}")
+                        try:
+                            os.remove(output_pdf)
+                        except Exception:
+                            pass
+                else:
+                    task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
         elif ocr_engine == "llm_ocr":
             task_store.add_log(task_id, "Running LLM-based OCR via llmocr plugin...")
@@ -2138,13 +2153,13 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
     finished_dir = config.get("finished_dir", "")
 
     if pdf_path and os.path.exists(pdf_path):
-        # 确定目标目录：优先 finished_dir（最终输出），其次 download_dir（临时存放）
         target_dir = finished_dir or download_dir
-        if target_dir:
+        if not target_dir:
+            task_store.add_log(task_id, "No output directory configured, keeping PDF in place")
+        else:
             try:
                 os.makedirs(target_dir, exist_ok=True)
                 ext = os.path.splitext(pdf_path)[1] or ".pdf"
-                # 文件名格式: SSID_书名.扩展名
                 ss_code = report.get("ss_code", "")
                 title = report.get("title", "book")
                 safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
@@ -2153,11 +2168,16 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
                 else:
                     new_name = f"{safe_title}{ext}"
                 dest_pdf = os.path.join(target_dir, new_name)
+                moved = False
                 if os.path.abspath(pdf_path) != os.path.abspath(dest_pdf):
+                    if os.path.exists(dest_pdf):
+                        os.remove(dest_pdf)
                     shutil.move(pdf_path, dest_pdf)
+                    moved = True
                     report["pdf_path"] = dest_pdf
                     task_store.add_log(task_id, f"PDF saved: {dest_pdf}")
-                task_store.add_log(task_id, f"任务输出: {dest_pdf}")
+                if moved or os.path.abspath(pdf_path) == os.path.abspath(dest_pdf):
+                    task_store.add_log(task_id, f"任务输出: {dest_pdf}")
             except Exception as e:
                 task_store.add_log(task_id, f"Finalize move error: {e}")
 
