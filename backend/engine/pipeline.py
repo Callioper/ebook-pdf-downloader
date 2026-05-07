@@ -218,8 +218,6 @@ async def _run_ocrmypdf_with_progress(
                 continue
             _had_output = True
 
-            task_store.add_log(task_id, f"  {_text[:200]}")
-
             _m = re.search(r'\[(\d+)/(\d+)\]', _text)
             if _m:
                 _cur = int(_m.group(1))
@@ -231,6 +229,9 @@ async def _run_ocrmypdf_with_progress(
                     _tot = total_pages
                     if _cur % 1 == 0 or _cur == total_pages:
                         task_store.add_log(task_id, f"  PaddleOCR: {_cur}/{_tot} 页")
+                    continue  # skip logging raw [N] line
+
+            task_store.add_log(task_id, f"  {_text[:200]}")
 
             _m2 = re.search(r'[Pp]age\s+(\d+)\s+[oO]f\s+(\d+)', _text)
             if _m2:

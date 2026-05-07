@@ -104,7 +104,7 @@ export default function BookCard({ book, selected, onClick, onDownload }: BookCa
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-1 text-xs text-gray-400">
-        <span>ID: {book.book_id}</span>
+        {book.book_id && <span>ID: {book.book_id}</span>}
       </div>
     </div>
   )
