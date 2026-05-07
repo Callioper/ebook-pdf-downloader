@@ -57,6 +57,10 @@ def _setup_logging():
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
+    # Redirect stderr to log file (captures tracebacks when console=False)
+    log_stream = open(str(log_file), 'a', encoding='utf-8', buffering=1)
+    sys.stderr = log_stream
+
     return log_file
 
 _setup_logging()
@@ -192,38 +196,39 @@ if __name__ == "__main__":
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
-            # SetConsoleCtrlHandler: called when console window is closed
-            ctrl_type = 0  # CTRL_C_EVENT, but we handle all
             handle = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_uint)
             def handler(ctrl_type):
                 stop_flaresolverr()
-                return 0  # ignore (allow normal shutdown)
+                return 0
             kernel32.SetConsoleCtrlHandler(handle(handler), 1)
         except Exception:
             pass
+
+    config_data = init_config()
+    port = config_data.get("port", 8000)
+    url = f"http://localhost:{port}"
+
     if "--no-browser" not in sys.argv:
-        # Open browser as subprocess, then run server in main thread
-        config_data = init_config()
-        port = config_data.get("port", 8000)
-        url = f"http://localhost:{port}"
+        def _open_browser():
+            time.sleep(2)
+            opened = False
+            for edge_path in [
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            ]:
+                if os.path.exists(edge_path):
+                    try:
+                        subprocess.Popen(
+                            [edge_path, f"--app={url}", "--new-window", "--window-size=1200,800"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        opened = True
+                        break
+                    except Exception:
+                        pass
+            if not opened:
+                webbrowser.open(url)
 
-        opened = False
-        for edge_path in [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ]:
-            if os.path.exists(edge_path):
-                try:
-                    subprocess.Popen(
-                        [edge_path, f"--app={url}", "--new-window", "--window-size=1200,800"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    )
-                    opened = True
-                    break
-                except Exception:
-                    pass
-
-        if not opened:
-            webbrowser.open(url)
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     main()
