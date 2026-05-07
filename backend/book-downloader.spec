@@ -33,7 +33,7 @@ a = Analysis(
         'torch._dynamo', 'torch._inductor', 'torch._functorch',
         'tensorboard', 'tensorflow',
         'onnx', 'onnxruntime',
-        'matplotlib', 'tkinter',
+        'matplotlib',
         'modelscope', 'PIL.ImageShow',
     ],
     hiddenimports=[
@@ -70,7 +70,7 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    console=False,
+    console=True,
     runtime_tmpdir=None,
     target_arch=None,
     codesign_identity=None,
