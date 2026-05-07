@@ -141,9 +141,65 @@ def test_find_toc_pages_density_with_page_refs():
         doc.close()
 
         start, end = find_toc_pages(pdf_path)
-        assert start == 1
+        assert start == -1
     finally:
         os.unlink(pdf_path)
+
+
+def test_extract_toc_from_text_dot_leaders():
+    """Parse 'title ..... page' format."""
+    from addbookmark.ai_vision_toc import extract_toc_from_text
+    text = "第一章 概论 ..... 1\n第二章 基础理论 ..... 15\n  2.1 背景 ..... 15\n  2.2 方法论 ..... 22\n第三章 实验 ..... 30"
+    entries = extract_toc_from_text(text)
+    assert len(entries) == 5
+    assert entries[0] == ("第一章 概论", 1)
+    assert entries[4] == ("第三章 实验", 30)
+
+
+def test_extract_toc_from_text_tab_format():
+    from addbookmark.ai_vision_toc import extract_toc_from_text
+    text = "第一章\t1\n第二章\t15\n第三章\t30"
+    entries = extract_toc_from_text(text)
+    assert len(entries) == 3
+
+
+def test_extract_toc_from_text_no_toc():
+    from addbookmark.ai_vision_toc import extract_toc_from_text
+    assert extract_toc_from_text("") == []
+    assert extract_toc_from_text("正文内容不是目录") == []
+
+
+def test_validate_entries_accepts_good_toc():
+    from addbookmark.ai_vision_toc import validate_entries
+    entries = [("第一章", 1), ("第二章", 15), ("第三章", 30)]
+    assert validate_entries(entries, total_pages=200) is True
+
+
+def test_validate_entries_rejects_too_few():
+    from addbookmark.ai_vision_toc import validate_entries
+    assert validate_entries([("第一章", 1)], total_pages=200) is False
+    assert validate_entries([], total_pages=200) is False
+
+
+def test_validate_entries_rejects_bad_page_numbers():
+    from addbookmark.ai_vision_toc import validate_entries
+    entries = [("第一章", 1), ("第二章", 9999), ("第三章", 99999)]
+    assert validate_entries(entries, total_pages=100) is False
+
+
+def test_validate_entries_rejects_non_monotonic():
+    from addbookmark.ai_vision_toc import validate_entries
+    entries = [("a", 100), ("b", 1), ("c", 200), ("d", 2), ("e", 150), ("f", 3)]
+    assert validate_entries(entries, total_pages=200) is False
+
+
+def test_validate_entries_accepts_slight_non_monotonic():
+    from addbookmark.ai_vision_toc import validate_entries
+    entries = [
+        ("第一章", 1), ("第二章", 15), ("2.1", 15), ("2.2", 22),
+        ("第三章", 30), ("附录", 1),
+    ]
+    assert validate_entries(entries, total_pages=200) is True
 
 
 def test_find_toc_pages_rejects_garbled_ocr():

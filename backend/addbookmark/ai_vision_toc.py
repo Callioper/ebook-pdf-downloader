@@ -3,9 +3,10 @@
 阶段1: 从 OCR 后的 PDF 文字层解析目录（免费）
 阶段2: 用 AI Vision 从目录页图片提取（付费，仅在阶段1失败时触发）
 """
+import base64
 import logging
 import re
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +97,152 @@ def find_toc_pages(pdf_path: str, scan_limit: int = 30) -> Tuple[int, int]:
 
     doc.close()
     return (toc_start, toc_end)
+
+
+# ── 中文数字转换 ──
+
+_CN_NUM_MAP = {
+    '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
+    '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+    '十': 10, '百': 100, '千': 1000,
+}
+
+
+def _cn_to_int(s: str) -> Optional[int]:
+    """中文数字转 int，无法解析返回 None。"""
+    s = s.strip()
+    if not s:
+        return None
+    if s in _CN_NUM_MAP:
+        return _CN_NUM_MAP[s]
+    if s.startswith('十') and len(s) == 2:
+        rest = _CN_NUM_MAP.get(s[1])
+        if rest is not None:
+            return 10 + rest
+    if s.endswith('十') and len(s) == 2:
+        first = _CN_NUM_MAP.get(s[0])
+        if first is not None:
+            return first * 10
+    if len(s) == 3 and s[1] == '十':
+        first = _CN_NUM_MAP.get(s[0])
+        last = _CN_NUM_MAP.get(s[2])
+        if first is not None and last is not None:
+            return first * 10 + last
+    return None
+
+
+def _parse_page_number(s: str) -> Optional[int]:
+    """解析页码字符串（阿拉伯数字/中文数字/罗马数字）。"""
+    s = s.strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    roman_map = {
+        'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5,
+        'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10,
+        'xi': 11, 'xii': 12, 'xiii': 13, 'xiv': 14, 'xv': 15,
+    }
+    if s.lower() in roman_map:
+        return roman_map[s.lower()]
+    cn = _cn_to_int(s)
+    if cn is not None:
+        return cn
+    return None
+
+
+def _parse_toc_line(line: str) -> Tuple[Optional[str], Optional[int]]:
+    """解析单行目录条目 → (title, page)。"""
+    line = line.strip()
+    if not line or len(line) < 3:
+        return None, None
+    if line in ('目录', '目  录', '目 录', 'Table of Contents', 'Contents'):
+        return None, None
+
+    # 格式1: tab 分隔 "title\tpage"
+    if '\t' in line:
+        parts = line.split('\t', 1)
+        title = parts[0].strip().lstrip('- ').strip()
+        page = _parse_page_number(parts[1])
+        if title and page is not None:
+            return title, page
+
+    # 格式2: 点线引导 "- title ..... page" 或 "title ..... page"
+    m = re.match(r'^[-*]?\s*(.+?)\s*[.…·]{2,}\s*(\S+)\s*$', line)
+    if m:
+        title = m.group(1).strip()
+        page = _parse_page_number(m.group(2))
+        if title and page is not None:
+            return title, page
+
+    # 格式3: 空格分隔，最后是数字
+    m = re.match(r'^(.+?)\s+(\d+)\s*$', line)
+    if m:
+        title = m.group(1).strip().lstrip('- ').strip()
+        page = _parse_page_number(m.group(2))
+        if title and page is not None and page > 0:
+            return title, page
+
+    return None, None
+
+
+def extract_toc_from_text(text: str) -> List[Tuple[str, int]]:
+    """从文字中解析目录条目。"""
+    if not text or len(text.strip()) < 5:
+        return []
+    lines = text.strip().split('\n')
+    entries: List[Tuple[str, int]] = []
+    for line in lines:
+        title, page = _parse_toc_line(line)
+        if title and page is not None:
+            entries.append((title, page))
+    return entries
+
+
+def validate_entries(
+    entries: List[Tuple[str, int]],
+    total_pages: int = 0,
+    min_entries: int = 3,
+    max_non_monotonic_ratio: float = 0.3,
+) -> bool:
+    """验证提取的目录条目是否合格。
+
+    检查项：
+    1. 条目数 ≥ min_entries
+    2. 页码 ≤ total_pages * 3（允许不同页码体系）
+    3. 页码大体递增（非递增占比 ≤ max_non_monotonic_ratio）
+
+    Returns:
+        True = 合格，False = 不合格
+    """
+    if len(entries) < min_entries:
+        logger.info(f"质量检查: 条目数 {len(entries)} < {min_entries}")
+        return False
+
+    # 页码范围检查
+    if total_pages > 0:
+        max_allowed = total_pages * 3
+        out_of_range = sum(1 for _, p in entries if p > max_allowed or p <= 0)
+        if out_of_range > len(entries) * 0.5:
+            logger.info(f"质量检查: {out_of_range}/{len(entries)} 条目页码超范围 (max={max_allowed})")
+            return False
+
+    # 页码单调性检查
+    if len(entries) >= 3:
+        pages = [p for _, p in entries]
+        non_monotonic = 0
+        for i in range(1, len(pages)):
+            if pages[i] < pages[i - 1]:
+                if pages[i - 1] - pages[i] > 10:
+                    non_monotonic += 1
+        ratio = non_monotonic / (len(pages) - 1)
+        if ratio > max_non_monotonic_ratio:
+            logger.info(f"质量检查: 页码非递增比例 {ratio:.2f} > {max_non_monotonic_ratio}")
+            return False
+
+    return True
+
+
+def format_entries_to_bookmark(entries: List[Tuple[str, int]]) -> str:
+    """将 (title, page) 列表转为 tab 分隔的书签文本。"""
+    return "\n".join(f"{title}\t{page}" for title, page in entries)
