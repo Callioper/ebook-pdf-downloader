@@ -109,6 +109,42 @@ export default function TaskReport({ report, finishedDir, createdAt }: TaskRepor
               </div>
             </div>
           )}
+
+          {(report.description || report.rating || (report.tags && (report.tags as string[]).length > 0)) && (
+            <div className="mt-2 space-y-1">
+              {report.description && (
+                <div>
+                  <div className="text-xs font-semibold text-gray-600 mb-1">简介</div>
+                  <p className="text-xs text-gray-700 leading-relaxed">{report.description}</p>
+                </div>
+              )}
+              {report.rating && (
+                <div className="text-xs text-gray-600">
+                  豆瓣评分: {report.rating} / 10
+                </div>
+              )}
+              {report.tags && (report.tags as string[]).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {(report.tags as string[]).map((t: string, i: number) => (
+                    <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{t}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {report.douban_toc && (
+            <details className="mt-2">
+              <summary className="text-xs font-semibold text-gray-600 cursor-pointer">豆瓣目录</summary>
+              <pre className="mt-1 text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 p-2 rounded max-h-48 overflow-y-auto">{report.douban_toc}</pre>
+            </details>
+          )}
+          {report.nlc_toc && (
+            <details className="mt-2">
+              <summary className="text-xs font-semibold text-gray-600 cursor-pointer">NLC 目录</summary>
+              <pre className="mt-1 text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 p-2 rounded max-h-48 overflow-y-auto">{report.nlc_toc}</pre>
+            </details>
+          )}
         </div>
       </div>
     </div>

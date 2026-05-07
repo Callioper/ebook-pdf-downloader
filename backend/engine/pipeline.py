@@ -402,6 +402,40 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
     task_store.update(task_id, update_fields)
 
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 100})
+
+    # Step 2.5: Enrich metadata from Douban and NLC TOC
+    isbn_val = report.get("isbn", "")
+    if isbn_val:
+        try:
+            from book_sources.douban import fetch_douban
+            loop = asyncio.get_running_loop()
+            douban_data = await loop.run_in_executor(None, fetch_douban, isbn_val)
+            if douban_data:
+                if douban_data.get("description"):
+                    report["description"] = douban_data["description"]
+                if douban_data.get("rating"):
+                    report["rating"] = douban_data["rating"]
+                if douban_data.get("tags"):
+                    report["tags"] = douban_data["tags"]
+                if douban_data.get("toc"):
+                    report["douban_toc"] = douban_data["toc"]
+                task_store.add_log(task_id, f"Douban: metadata enriched (rating={douban_data.get('rating', 'N/A')})")
+        except ImportError:
+            task_store.add_log(task_id, "Douban module not available")
+        except Exception as e:
+            task_store.add_log(task_id, f"Douban fetch error: {e}")
+
+        try:
+            from nlc.nlc_isbn import crawl_toc
+            nlc_toc = await crawl_toc(isbn_val)
+            if nlc_toc:
+                report["nlc_toc"] = nlc_toc
+                task_store.add_log(task_id, f"NLC: TOC extracted ({len(nlc_toc)} chars)")
+        except ImportError:
+            pass
+        except Exception as e:
+            task_store.add_log(task_id, f"NLC TOC error: {e}")
+
     task_store.add_log(task_id, "Step 2/7: metadata & bookmark fetch complete")
     return report
 

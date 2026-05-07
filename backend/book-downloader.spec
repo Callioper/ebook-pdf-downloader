@@ -18,6 +18,7 @@ a = Analysis(
         (str(NLC_DIR / "headers.py"), "nlc/headers.py"),
         (str(NLC_DIR / "formatting.py"), "nlc/formatting.py"),
         (str(ADD_BOOKMARK_DIR), "addbookmark"),
+        (str(BACKEND_DIR / "book_sources"), "book_sources"),
         (str(BACKEND_DIR / "engine"), "engine"),
         (str(BACKEND_DIR / "api"), "api"),
         (str(BACKEND_DIR / "task_store.py"), "."),

@@ -70,6 +70,11 @@ export interface TaskReport {
   output_file?: string
   completed_at?: string
   download_note?: string
+  description?: string
+  rating?: number
+  tags?: string[]
+  douban_toc?: string
+  nlc_toc?: string
   [key: string]: unknown
 }
 
