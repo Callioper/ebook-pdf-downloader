@@ -3,8 +3,6 @@
 # 入口函数：main(), serve_spa(), serve_root()
 # 依赖：config, api.search, api.tasks, api.ws, search_engine, task_store, engine.flaresolverr
 # 注意：支持打包后的frozen模式，自动查找frontend目录
-
-import asyncio
 import logging
 import os
 import subprocess
@@ -64,7 +62,7 @@ def get_frontend_dir() -> Optional[str]:
 
 app = FastAPI(
     title="Book Downloader",
-    version="1.0.0",
+    version=VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -177,9 +175,6 @@ if __name__ == "__main__":
             kernel32.SetConsoleCtrlHandler(handle(handler), 1)
         except Exception:
             pass
-    import webbrowser
-    import urllib.request
-
     if "--no-browser" not in sys.argv:
         # Open browser as subprocess, then run server in main thread
         config_data = init_config()
