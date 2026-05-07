@@ -95,3 +95,48 @@ def _extract_isbn_from_soup(soup: BeautifulSoup) -> Optional[str]:
                     return isbn
 
     return None
+
+
+def crawl_toc_sync(isbn: str) -> Optional[str]:
+    """从 NLC OPAC 获取目录(330/327字段)。"""
+    if not isbn:
+        return None
+    try:
+        params = {
+            "func": "find-b",
+            "find_code": "ISB",
+            "request": isbn,
+            "local_base": "NLC01",
+        }
+        r = requests.get(NLC_SEARCH_URL, params=params, headers=HEADERS, timeout=15)
+        if r.status_code != 200:
+            return None
+        soup = BeautifulSoup(r.text, "html.parser")
+        detail_link = soup.select_one('a[href*="find_code=ISB"]')
+        if not detail_link:
+            return None
+        href = detail_link.get("href", "")
+        detail_url = f"http://opac.nlc.cn{href}" if href.startswith("/") else href
+        dr = requests.get(detail_url, headers=HEADERS, timeout=10)
+        if dr.status_code != 200:
+            return None
+        dsoup = BeautifulSoup(dr.text, "html.parser")
+        for td in dsoup.select("td.td1"):
+            text = td.get_text(strip=True)
+            if text.startswith("330") or text.startswith("327"):
+                toc_td = td.find_next_sibling("td")
+                if toc_td:
+                    toc_text = toc_td.get_text(strip=True)
+                    if toc_text and len(toc_text) > 20:
+                        return toc_text
+        return None
+    except Exception:
+        return None
+
+
+async def crawl_toc(isbn: str) -> Optional[str]:
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, crawl_toc_sync, isbn)
+    except Exception:
+        return None
