@@ -246,3 +246,43 @@ def validate_entries(
 def format_entries_to_bookmark(entries: List[Tuple[str, int]]) -> str:
     """将 (title, page) 列表转为 tab 分隔的书签文本。"""
     return "\n".join(f"{title}\t{page}" for title, page in entries)
+
+
+def extract_toc_from_ocr_text(
+    pdf_path: str,
+    min_entries: int = 3,
+    max_scan_pages: int = 30,
+) -> Tuple[str, int, int]:
+    """阶段1: 从 OCR 文字层提取目录（免费）。
+
+    Returns:
+        (bookmark_text, toc_start_page, toc_end_page)
+        bookmark_text 为空表示提取/验证失败
+        toc_start/end 可能有效（用于阶段2 的页码提示）
+    """
+    import fitz
+
+    toc_start, toc_end = find_toc_pages(pdf_path, scan_limit=max_scan_pages)
+    if toc_start < 0:
+        logger.info("OCR TOC: 未找到目录页")
+        return ("", -1, -1)
+
+    logger.info(f"OCR TOC: 定位目录页 {toc_start}-{toc_end}")
+
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+    toc_text_parts = []
+    for i in range(toc_start, min(toc_end + 1, total_pages)):
+        toc_text_parts.append(doc[i].get_text())
+    doc.close()
+
+    toc_text = "\n".join(toc_text_parts)
+    entries = extract_toc_from_text(toc_text)
+
+    if not validate_entries(entries, total_pages=total_pages, min_entries=min_entries):
+        logger.info(f"OCR TOC: 质量检查失败（{len(entries)} 条目）")
+        return ("", toc_start, toc_end)
+
+    bookmark_text = format_entries_to_bookmark(entries)
+    logger.info(f"OCR TOC: 成功提取 {len(entries)} 条目录")
+    return (bookmark_text, toc_start, toc_end)
