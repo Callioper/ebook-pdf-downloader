@@ -765,6 +765,36 @@ async def check_ocr(engine: str = Query(default="")):
         return {"ok": False, "engine": engine, "message": str(e)}
 
 
+class StacksLoginRequest(BaseModel):
+    url: str = "http://localhost:7788"
+    username: str = ""
+    password: str = ""
+
+
+@router.post("/check-stacks")
+async def check_stacks_login(req: StacksLoginRequest):
+    """Test stacks login with username/password."""
+    if not req.url:
+        return {"ok": False, "message": "URL 为空"}
+    if not req.username or not req.password:
+        return {"ok": False, "message": "用户名或密码为空"}
+    try:
+        import requests as _r
+        session = _r.Session()
+        lr = session.post(f"{req.url}/login",
+                          json={"username": req.username, "password": req.password},
+                          timeout=10)
+        if lr.status_code != 200:
+            return {"ok": False, "message": f"登录失败: HTTP {lr.status_code}"}
+        # Verify session works by checking status
+        sr = session.get(f"{req.url}/api/status", timeout=10)
+        if sr.status_code == 200:
+            return {"ok": True, "message": "登录成功"}
+        return {"ok": False, "message": f"登录成功但状态查询失败: HTTP {sr.status_code}"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)[:100]}
+
+
 def _pip_install_cmd() -> List[str]:
     """Get the right command to run pip install, regardless of frozen status.
     In frozen mode, sys.executable is the exe (BookDownloader.exe), and

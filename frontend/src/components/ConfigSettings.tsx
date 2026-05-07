@@ -1119,93 +1119,113 @@ export default function ConfigSettings() {
               <span className="text-xs font-medium text-gray-600">stacks 下载管理器（Anna's Archive）</span>
               <StatusDot status={stacksChecking ? 'yellow' : stacksStatus} />
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={form.stacks_base_url || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_base_url: e.target.value }))}
-                  placeholder="http://localhost:7788"
-                  spellCheck={false}
-                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setStacksChecking(true)
-                    try {
-                      const url = form.stacks_base_url || 'http://localhost:7788'
-                      // Step 1: Test health
-                      const health = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
-                      if (!health.ok) { setStacksStatus('red'); return }
-
-                      // Step 2: Test API key (if configured)
-                      const key = form.stacks_api_key || ''
-                      if (key) {
-                        try {
-                          const keyTest = await fetch(url + '/api/key/test', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ key }),
-                            signal: AbortSignal.timeout(3000),
-                          })
-                          const kd = await keyTest.json()
-                          setStacksStatus(kd.valid ? 'green' : 'yellow')
-                        } catch {
-                          setStacksStatus('yellow') // reachable but key test failed
-                        }
-                      } else {
-                        setStacksStatus('yellow') // reachable but no key
-                      }
-                    } catch {
-                      setStacksStatus('red')
-                    } finally {
-                      setStacksChecking(false)
-                    }
-                  }}
-                  className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
-                >
-                  {stacksChecking ? '检测中...' : '检测'}
-                </button>
-              </div>
+            {/* Service URL + health check */}
+            <div className="flex items-center gap-2">
               <input
-                type="password"
-                value={String(form.stacks_api_key || '')}
-                onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
-                placeholder="Admin API Key（Settings → Authentication）"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mt-1"
+                type="text"
+                value={form.stacks_base_url || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, stacks_base_url: e.target.value }))}
+                placeholder="http://localhost:7788"
+                spellCheck={false}
+                className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
-              <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="text"
-                  value={form.stacks_username || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_username: e.target.value }))}
-                  placeholder="用户名"
-                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <input
-                  type="password"
-                  value={form.stacks_password || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, stacks_password: e.target.value }))}
-                  placeholder="密码"
-                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <p className="text-[10px] text-gray-400 mt-0.5">填写用户名密码后使用 session 登录（支持 status/history/clear 等需要管理员权限的操作）</p>
-              <details>
-                <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
-                  <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                  stacks 安装指引
-                </summary>
-                <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
-                  <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
-                  <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{STACKS_INSTALL_GUIDE}</pre>
-                  <p className="text-xs text-blue-600 mt-2">安装并启动后，点击"检测"确认连接状态。</p>
-                </div>
-              </details>
+              <button
+                type="button"
+                onClick={async () => {
+                  setStacksChecking(true)
+                  try {
+                    const url = form.stacks_base_url || 'http://localhost:7788'
+                    const health = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
+                    if (!health.ok) { setStacksStatus('red'); return }
+                    const uname = form.stacks_username
+                    const passwd = form.stacks_password
+                    if (uname && passwd) {
+                      const loginRes = await fetch('/api/v1/check-stacks', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url, username: uname, password: passwd }),
+                        signal: AbortSignal.timeout(5000),
+                      })
+                      const ld = await loginRes.json()
+                      setStacksStatus(ld.ok ? 'green' : 'yellow')
+                    } else {
+                      setStacksStatus('yellow')
+                    }
+                  } catch { setStacksStatus('red') }
+                  finally { setStacksChecking(false) }
+                }}
+                className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
+              >
+                {stacksChecking ? '检测中...' : '检测'}
+              </button>
             </div>
+            {/* API Key */}
+            <input
+              type="password"
+              value={String(form.stacks_api_key || '')}
+              onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
+              placeholder="Admin API Key（可选，填写账号密码后优先使用 session 登录）"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mt-1.5"
+            />
+            {/* Account login (unified with ZLibrary style) */}
+            <span className="block text-xs font-medium text-gray-600 mt-2">账户登录</span>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <input
+                type="text" value={form.stacks_username || ''}
+                onChange={(e) => updateForm({ stacks_username: e.target.value })}
+                placeholder="用户名" spellCheck={false}
+                className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <input
+                type="password" value={form.stacks_password || ''}
+                onChange={(e) => updateForm({ stacks_password: e.target.value })}
+                placeholder="密码"
+                className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  setStacksChecking(true)
+                  try {
+                    const res = await fetch('/api/v1/check-stacks', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ url: form.stacks_base_url || 'http://localhost:7788', username: form.stacks_username || '', password: form.stacks_password || '' }),
+                      signal: AbortSignal.timeout(5000),
+                    })
+                    const d = await res.json()
+                    setStacksStatus(d.ok ? 'green' : 'red')
+                  } catch { setStacksStatus('red') }
+                  finally { setStacksChecking(false) }
+                }}
+                disabled={stacksChecking}
+                className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {stacksChecking ? '登录中...' : '登录'}
+              </button>
+              {!stacksChecking && stacksStatus === 'green' && (
+                <span className="text-xs font-medium text-green-600">已连接</span>
+              )}
+              {!stacksChecking && stacksStatus === 'red' && (
+                <span className="text-xs font-medium text-red-500">未连接</span>
+              )}
+              {!stacksChecking && stacksStatus === 'yellow' && (
+                <span className="text-xs text-gray-500">需要登录</span>
+              )}
+            </div>
+            <details className="mt-2">
+              <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
+                <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                stacks 安装指引
+              </summary>
+              <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+                <p className="text-xs text-blue-800 font-medium mb-2">? 将以下提示词复制并发送给 OpenCode：</p>
+                <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{STACKS_INSTALL_GUIDE}</pre>
+                <p className="text-xs text-blue-600 mt-2">安装并启动后，点击"检测"确认连接状态。</p>
+              </div>
+            </details>
           </div>
 
           <div className="border-t border-gray-200 pt-3">
