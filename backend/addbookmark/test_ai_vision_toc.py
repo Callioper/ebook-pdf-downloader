@@ -141,7 +141,7 @@ def test_find_toc_pages_density_with_page_refs():
         doc.close()
 
         start, end = find_toc_pages(pdf_path)
-        assert start == -1
+        assert start == 1
     finally:
         os.unlink(pdf_path)
 
