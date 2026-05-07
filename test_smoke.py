@@ -217,6 +217,42 @@ def main():
 
     test("pdf split/merge round-trip", test_pdf_split_merge)
 
+    # ==== Section 9: API Route Registration (3 tests) ====
+    print("\n  [Section 9] API Route Registration")
+    print("  " + "-" * 40)
+
+    def test_api_search_importable():
+        spec = importlib.util.spec_from_file_location("search_api", os.path.join(BACKEND_DIR, "api", "search.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert hasattr(mod, 'router'), "search.py should export 'router'"
+        routes = [r.path for r in mod.router.routes]
+        assert '/api/v1/search' in routes, "search route missing"
+        assert '/api/v1/config' in routes, "config route missing"
+
+    def test_api_tasks_importable():
+        spec = importlib.util.spec_from_file_location("tasks_api", os.path.join(BACKEND_DIR, "api", "tasks.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert hasattr(mod, 'router'), "tasks.py should export 'router'"
+        routes = [r.path for r in mod.router.routes]
+        assert any('/api/v1/tasks' in p for p in routes), "tasks list route missing"
+
+    def test_pipeline_steps_consistency():
+        task_store_module = sys.modules.get('task_store')
+        if task_store_module is None:
+            spec = importlib.util.spec_from_file_location("task_store", os.path.join(BACKEND_DIR, "task_store.py"))
+            task_store_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(task_store_module)
+        steps = task_store_module.PIPELINE_STEPS
+        assert len(steps) == 7, f"Expected 7 pipeline steps, got {len(steps)}"
+        for step in ['fetch_metadata', 'fetch_isbn', 'download_pages', 'convert_pdf', 'ocr', 'bookmark', 'finalize']:
+            assert step in steps, f"Missing step: {step}"
+
+    test("search API router has expected routes", test_api_search_importable)
+    test("tasks API router has expected routes", test_api_tasks_importable)
+    test("pipeline has all 7 expected steps", test_pipeline_steps_consistency)
+
     # ==== Summary ====
     total = passed + failed
     print(f"\n  {'='*40}")
