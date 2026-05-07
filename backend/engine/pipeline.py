@@ -710,6 +710,27 @@ async def _fetch_nlc_metadata(task_id: str, report: Dict[str, Any], config: Dict
 
         # NLC API 可以直接补全作者/出版社/年/内容提要/主题词
         # 目前 nlc_isbn 模块只实现了 ISBN 查询，后续可扩展
+
+        # NEW: get author/publisher/year from NLC OPAC by ISBN
+        current_isbn = report.get("isbn", "")
+        if current_isbn:
+            try:
+                from backend.nlc.nlc_isbn import crawl_metadata
+                meta = await crawl_metadata(current_isbn)
+                if meta:
+                    if not report.get("authors") and meta.get("author"):
+                        report["authors"] = [meta["author"]]
+                        task_store.add_log(task_id, f"NLC: author found: {meta['author']}")
+                    if not report.get("publisher") and meta.get("publisher"):
+                        report["publisher"] = meta["publisher"]
+                        task_store.add_log(task_id, f"NLC: publisher found: {meta['publisher']}")
+                    if not report.get("year") and meta.get("year"):
+                        report["year"] = meta["year"]
+                        task_store.add_log(task_id, f"NLC: year found: {meta['year']}")
+            except ImportError:
+                task_store.add_log(task_id, "NLC metadata: module not available")
+            except Exception as e:
+                task_store.add_log(task_id, f"NLC metadata: error: {str(e)[:100]}")
     except ImportError:
         task_store.add_log(task_id, "NLC: module not available")
     except Exception as e:

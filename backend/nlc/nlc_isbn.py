@@ -7,7 +7,7 @@
 import asyncio
 import os
 import re
-from typing import Optional
+from typing import Optional, Dict
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,6 +20,69 @@ async def crawl_isbn(title: str, nlc_path: str = "") -> Optional[str]:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _crawl_isbn_sync, title)
         return result
+    except Exception:
+        return None
+
+
+async def crawl_metadata(isbn: str) -> Optional[Dict[str, str]]:
+    """Fetch author, publisher, year from NLC OPAC by ISBN.
+    Returns dict with keys: isbn, author, publisher, year, or None."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _crawl_metadata_sync, isbn)
+        return result
+    except Exception:
+        return None
+
+
+def _crawl_metadata_sync(isbn: str) -> Optional[Dict[str, str]]:
+    """Search NLC OPAC by ISBN, navigate to detail page, extract MARC fields."""
+    if not isbn or not isbn.strip():
+        return None
+    try:
+        clean_isbn = re.sub(r'[\s-]', '', isbn)
+        params = {
+            "func": "find-b",
+            "find_code": "ISB",
+            "request": clean_isbn,
+            "local_base": "NLC01",
+        }
+        r = requests.get(NLC_SEARCH_URL, params=params, headers=HEADERS, timeout=15)
+        if r.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        detail_links = soup.select('a[href*="find_code=ISB"]')
+        if not detail_links:
+            return None
+
+        detail_href = detail_links[0].get("href", "")
+        if not detail_href:
+            return None
+
+        detail_url = f"https://opac.nlc.cn{detail_href}" if not detail_href.startswith('http') else detail_href
+        r2 = requests.get(detail_url, headers=HEADERS, timeout=15)
+        if r2.status_code != 200:
+            return None
+
+        detail_soup = BeautifulSoup(r2.text, "html.parser")
+        result: Dict[str, str] = {"isbn": isbn}
+
+        text = detail_soup.get_text()
+        author_m = re.search(r'200\s+\d+\#\$a[^$]*\$f([^$]+)', text)
+        if author_m:
+            result["author"] = author_m.group(1).strip()
+
+        pub_m = re.search(r'210\s+\d+\#\$a[^$]*\$c([^$]+)', text)
+        if pub_m:
+            result["publisher"] = pub_m.group(1).strip()
+
+        year_m = re.search(r'210\s+\d+\#\$[a-d]*\$d(\d{4})', text)
+        if year_m:
+            result["year"] = year_m.group(1).strip()
+
+        return result if len(result) > 1 else None
     except Exception:
         return None
 
