@@ -449,26 +449,11 @@ def extract_toc_from_ocr_text(
 
 
 def build_vision_prompt() -> str:
-    """构建 Vision LLM 的 TOC 提取提示词。"""
-    return """请从这些PDF页面图片中提取目录（Table of Contents）。
+    """构建 Vision LLM 的 TOC 提取提示词。
 
-输出格式（每行一个条目）：
-标题\t页码
-
-其中\t是Tab字符。使用Tab缩进表示层级：
-- 章（第一章、第二章...）不缩进
-- 节（1. 2. 3.）缩进1个Tab
-- 小节缩进2个Tab
-
-示例输出：
-第一章 绪论\t1
-\t第一节 研究背景\t3
-\t\t问题提出\t3
-第二章 理论基础\t15
-
-如果页面中没有目录，输出 NO_TOC。
-不要输出其他解释文字。
-"""
+    策略：让模型只做文字提取（它擅长的），结构解析由我们自己的代码完成。
+    """
+    return "Extract all text from these images. Output exactly what you see."
 
 
 def parse_vision_response(
@@ -851,15 +836,22 @@ async def extract_toc_from_vision(
     all_entries: List[Tuple[str, int]] = []
     seen_titles = set()
 
-    for round_num in range(max_rounds):
+    # 分批处理目录页（每批 3 页，模型在小批次上效果更好）
+    batch_size = 3
+    current_page = page_start
+    round_num = 0
+
+    while current_page <= page_end and round_num < max_rounds:
+        batch_end = min(current_page + batch_size - 1, page_end)
         images = extract_toc_images(
-            pdf_path, page_start=page_start, page_end=page_end,
-            max_pages=max_pages_per_round, dpi=dpi,
+            pdf_path, page_start=current_page, page_end=batch_end,
+            max_pages=batch_size, dpi=dpi,
         )
         if not images:
             break
 
-        logger.info(f"AI Vision: 第{round_num+1}轮，页 {page_start}-{page_end}，{len(images)} 张图")
+        round_num += 1
+        logger.info(f"AI Vision: 第{round_num}轮，页 {current_page}-{batch_end}，{len(images)} 张图")
 
         prompt = build_vision_prompt()
         try:
@@ -869,11 +861,12 @@ async def extract_toc_from_vision(
                 api_key=api_key, provider=provider,
             )
         except Exception as e:
-            logger.warning(f"AI Vision: 第{round_num+1}轮失败: {e}")
+            logger.warning(f"AI Vision: 第{round_num}轮失败: {e}")
             break
 
-        entries, status, next_range = parse_vision_response(response)
-        logger.info(f"AI Vision: 第{round_num+1}轮返回 {len(entries)} 条，状态={status}")
+        # Vision 模型返回原始文字，用我们的解析器提取目录条目
+        entries = extract_toc_from_text(response)
+        logger.info(f"AI Vision: 第{round_num}轮提取 {len(entries)} 条")
 
         for title, page in entries:
             norm = re.sub(r'\s+', '', title).lower()
@@ -881,13 +874,7 @@ async def extract_toc_from_vision(
                 seen_titles.add(norm)
                 all_entries.append((title, page))
 
-        if status in ("NO_TOC", "TOC_COMPLETE") or not next_range:
-            break
-        if status == "TOC_CONTINUES" and next_range:
-            page_start = next_range[0] - 1
-            page_end = next_range[1] - 1
-            if page_start >= total_pages:
-                break
+        current_page = batch_end + 1
 
     if not all_entries:
         logger.info("AI Vision: 未提取到任何目录条目")
