@@ -2203,17 +2203,28 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
     if not bookmark:
         task_store.add_log(task_id, "No bookmark provided, trying addbookmark...")
         try:
-            from addbookmark.bookmarkget import get_bookmark
+            from addbookmark.bookmarkget import get_bookmark, get_bookmark_by_title
             isbn = report.get("isbn", "")
+            title = report.get("title", "")
             if isbn:
                 bookmark = await get_bookmark(isbn)
                 if bookmark:
-                    task_store.add_log(task_id, "Bookmark fetched from addbookmark")
+                    task_store.add_log(task_id, "Bookmark fetched from addbookmark (ISBN)")
                     report["bookmark"] = bookmark
-                else:
+
+            # Title-based fallback when ISBN is missing or failed
+            if not bookmark:
+                if title:
+                    bookmark = await get_bookmark_by_title(title)
+                    if bookmark:
+                        task_store.add_log(task_id, "Bookmark fetched from addbookmark (title)")
+                        report["bookmark"] = bookmark
+
+            if not bookmark:
+                if isbn or title:
                     task_store.add_log(task_id, "Bookmark not found via addbookmark")
-            else:
-                task_store.add_log(task_id, "No ISBN available for bookmark lookup")
+                else:
+                    task_store.add_log(task_id, "No ISBN or title available for bookmark lookup")
         except ImportError:
             task_store.add_log(task_id, "addbookmark module not available")
         except Exception as e:

@@ -125,6 +125,58 @@ async def parse_bookmark_hierarchy(raw_bookmark: str) -> List[Dict[str, Any]]:
     return levels
 
 
+async def get_bookmark_by_title(title: str) -> Optional[str]:
+    """Search shukui.net by title when ISBN is unavailable."""
+    if not title or len(title.strip()) < 2:
+        return None
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _get_bookmark_by_title_sync, title.strip())
+    return result
+
+
+def _get_bookmark_by_title_sync(title: str) -> Optional[str]:
+    """Search shukui.net by title, then parse the detail page for bookmarks."""
+    search_url = "https://www.shukui.net/so/search.php"
+    params = {'q': title}
+    headers = get_shukui_headers()
+
+    try:
+        response = requests.get(search_url, params=params, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None
+
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, "html.parser")
+        result_links = soup.select('div.search-list a[href*="books"]')
+        if not result_links:
+            result_links = soup.select('a[href*="book.php"]')
+        if not result_links:
+            return None
+
+        detail_href = result_links[0].get("href", "")
+        if not detail_href:
+            return None
+
+        detail_url = f"https://www.shukui.net/{detail_href.lstrip('/')}" if not detail_href.startswith('http') else detail_href
+        r2 = requests.get(detail_url, headers=headers, timeout=10)
+        if r2.status_code != 200:
+            return None
+
+        detail_soup = BeautifulSoup(r2.text, "html.parser")
+        contents_div = detail_soup.select_one('#book-contents')
+        if not contents_div:
+            return None
+
+        lines = [li.get_text(' ', strip=True) for li in contents_div.select('li')]
+        if not lines:
+            text = contents_div.get_text('\n', strip=True)
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+        return '\n'.join(lines) if lines else None
+    except Exception:
+        return None
+
+
 async def apply_bookmark_to_pdf(pdf_path: str, bookmark: str, python_cmd: str = "") -> bool:
     """将书葵网书签注入 PDF（使用新的 bookmark_injector 模块）"""
     from addbookmark.bookmark_injector import inject_bookmarks
