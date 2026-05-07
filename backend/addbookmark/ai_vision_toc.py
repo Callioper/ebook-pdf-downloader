@@ -48,21 +48,24 @@ def find_toc_pages(pdf_path: str, scan_limit: int = 30) -> Tuple[int, int]:
     doc = fitz.open(pdf_path)
     total = min(scan_limit, len(doc))
 
-    header_keywords = ['目录', '目 录', '目  录', 'CONTENTS', 'Contents', 'Table of Contents']
+    cn_keywords = ['目录', '目 录', '目  录']
+    en_keywords = ['CONTENTS', 'Contents', 'Table of Contents']
+    all_keywords = cn_keywords + en_keywords
     chapter_pattern = re.compile(r'第[一二三四五六七八九十百千\d]+[章节篇回卷]')
     section_pattern = re.compile(r'^\d+(\.\d+)*\s+\S', re.MULTILINE)
 
-    # 第一遍：找目录头（带 CJK 质量检查）
+    # 第一遍：找目录头（中文关键词需 CJK 质量检查，英文关键词直接通过）
     toc_start = -1
     for i in range(total):
         text = doc[i].get_text()
-        for kw in header_keywords:
+        for kw in all_keywords:
             if kw in text:
-                if _cjk_ratio(text) >= 0.3:
-                    toc_start = i
-                    break
-                else:
+                is_cn = kw in cn_keywords
+                if is_cn and _cjk_ratio(text) < 0.3:
                     logger.debug(f"Page {i}: found '{kw}' but CJK ratio {_cjk_ratio(text):.2f} < 0.3, skipping")
+                    continue
+                toc_start = i
+                break
         if toc_start >= 0:
             break
 

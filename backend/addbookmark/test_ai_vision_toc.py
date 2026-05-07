@@ -146,6 +146,94 @@ def test_find_toc_pages_density_with_page_refs():
         os.unlink(pdf_path)
 
 
+def test_extract_toc_from_ocr_text_success():
+    """Should return (bookmark, start, end) for valid TOC."""
+    from addbookmark.ai_vision_toc import extract_toc_from_ocr_text
+    try:
+        import fitz
+    except ImportError:
+        pytest.skip("PyMuPDF not installed")
+    if not _has_chinese_font():
+        pytest.skip("SimHei font not found")
+
+    fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        doc = fitz.open()
+        # Create enough pages so TOC page numbers pass validate_entries range check
+        for _ in range(40):
+            doc.new_page()
+
+        # Page 0: cover
+        _insert_cn(doc[0], 72, 72, "书名")
+
+        # Page 1: TOC
+        _insert_cn(doc[1], 72, 72, "目 录")
+        _insert_cn(doc[1], 72, 100, "第一章 概论 ..... 1")
+        _insert_cn(doc[1], 72, 120, "第二章 基础 ..... 15")
+        _insert_cn(doc[1], 72, 140, "第三章 实验 ..... 30")
+
+        doc.save(pdf_path)
+        doc.close()
+
+        bookmark, start, end = extract_toc_from_ocr_text(pdf_path)
+        assert bookmark
+        assert start == 1
+    finally:
+        os.unlink(pdf_path)
+
+
+def test_extract_toc_from_ocr_text_no_toc():
+    from addbookmark.ai_vision_toc import extract_toc_from_ocr_text
+    try:
+        import fitz
+    except ImportError:
+        pytest.skip("PyMuPDF not installed")
+
+    fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        doc = fitz.open()
+        for i in range(3):
+            doc.new_page().insert_text((72, 72), f"Body text page {i+1}.")
+        doc.save(pdf_path)
+        doc.close()
+
+        bookmark, start, end = extract_toc_from_ocr_text(pdf_path)
+        assert bookmark == ""
+        assert start == -1
+    finally:
+        os.unlink(pdf_path)
+
+
+def test_extract_toc_from_ocr_text_returns_page_range_on_quality_fail():
+    """Even when validation fails, page range should be returned for Phase 2."""
+    from addbookmark.ai_vision_toc import extract_toc_from_ocr_text
+    try:
+        import fitz
+    except ImportError:
+        pytest.skip("PyMuPDF not installed")
+    if not _has_chinese_font():
+        pytest.skip("SimHei font not found")
+
+    fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        doc = fitz.open()
+        p = doc.new_page()
+        p.insert_font(fontname="SimHei", fontfile=SIMHEI_PATH)
+        p.insert_text((72, 72), "目 录", fontname="SimHei", fontsize=11)
+        p.insert_text((72, 100), "第一章 ..... 1", fontname="SimHei", fontsize=11)  # only 1 entry < min_entries=3
+        doc.save(pdf_path)
+        doc.close()
+
+        bookmark, start, end = extract_toc_from_ocr_text(pdf_path)
+        assert bookmark == ""  # validation fails
+        assert start >= 0  # but page detection succeeded
+    finally:
+        os.unlink(pdf_path)
+
+
 def test_extract_toc_from_text_dot_leaders():
     """Parse 'title ..... page' format."""
     from addbookmark.ai_vision_toc import extract_toc_from_text
