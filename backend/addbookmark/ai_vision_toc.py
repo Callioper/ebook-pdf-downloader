@@ -209,89 +209,153 @@ def _parse_toc_line(line: str) -> Tuple[Optional[str], Optional[int]]:
 
 def _clean_title(title: str) -> str:
     """清理标题：去除 markdown 标记和英文翻译。"""
-    # 去除 markdown headers: ### title -> title
     title = re.sub(r'^#+\s*', '', title)
-    # 去除英文翻译: "中文 | English" -> "中文"
     title = re.split(r'\s*\|\s*[A-Za-z]', title)[0]
     return title.strip()
-    if line in ('目录', '目  录', '目 录', 'Table of Contents', 'Contents'):
-        return None, None
-
-    # 格式1: tab 分隔 "title\tpage"
-    if '\t' in line:
-        parts = line.split('\t', 1)
-        title = parts[0].strip().lstrip('- ').strip()
-        page = _parse_page_number(parts[1])
-        if title and page is not None:
-            return title, page
-
-    # 格式2: 点线引导 "- title ..... page" 或 "title ..... page"
-    m = re.match(r'^[-*]?\s*(.+?)\s*[.…·]{2,}\s*(\S+)\s*$', line)
-    if m:
-        title = m.group(1).strip()
-        page = _parse_page_number(m.group(2))
-        if title and page is not None:
-            return title, page
-
-    # 格式3: 空格分隔，最后是数字
-    m = re.match(r'^(.+?)\s+(\d+)\s*$', line)
-    if m:
-        title = m.group(1).strip().lstrip('- ').strip()
-        page = _parse_page_number(m.group(2))
-        if title and page is not None and page > 0:
-            return title, page
-
-    return None, None
 
 
 def _preprocess_toc_text(text: str) -> str:
-    """预处理目录文本：合并"只有点线的行"和下一行的页码。
+    """预处理目录文本：合并 OCR 跨行分割的内容。
 
-    OCR 目录常见格式：
-        诞生．．．．．．．．．．．．．．．．．．．
-        1
-    合并为：
-        诞生．．．．．．．．．．．．．．．．．．．1
+    处理三种模式：
+    1. 标题行 + 点线行 + 页码行 → 合并为一行
+       "监禁制度的创立" + "….........…......…" + "14"
+       → "监禁制度的创立….........…......…14"
+
+    2. 章号行 + 章标题行 → 合并
+       "第一章" + "人类学圈环一一...诞生" + "．．．．" + "1"
+       → "第一章 人类学圈环一一...诞生．．．．1"
+
+    3. 节号行 + 节标题行 → 合并
+       "2." + "理性、疯狂、疾病——《古典时代疯狂史》" + "…… 11"
+       → "2. 理性、疯狂、疾病——《古典时代疯狂史》…… 11"
     """
     lines = text.strip().split('\n')
-    merged = []
+
+    # 第一遍：合并纯点线行和页码行
+    pass1 = []
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        # 如果当前行以点线结尾（没有页码），下一行是纯数字 → 合并
+        if not line:
+            i += 1
+            continue
+
+        # 当前行是纯点线 → 合并到前一行
+        if re.match(r'^[.…·•\s~\-—]{3,}$', line):
+            if pass1:
+                pass1[-1] = pass1[-1].rstrip() + line
+            i += 1
+            continue
+
+        # 下一行是纯点线，再下一行是数字 → 合并三行
+        if i + 2 < len(lines):
+            next1 = lines[i + 1].strip()
+            next2 = lines[i + 2].strip()
+            if re.match(r'^[.…·•\s~\-—]{3,}$', next1) and re.match(r'^\d+$', next2):
+                pass1.append(line + next1 + next2)
+                i += 3
+                continue
+
+        # 当前行以点线结尾，下一行是数字 → 合并
         if i + 1 < len(lines):
-            next_line = lines[i + 1].strip()
-            # 当前行以点线结尾，下一行是数字
-            if re.search(r'[.…·]{2,}\s*$', line) and re.match(r'^\d+$', next_line):
-                merged.append(line + next_line)
+            next1 = lines[i + 1].strip()
+            if re.search(r'[.…·]{2,}\s*$', line) and re.match(r'^\d+$', next1):
+                pass1.append(line + next1)
                 i += 2
                 continue
-            # 当前行只有点线（标题在上一行的点线延续），下一行是数字
-            if re.match(r'^[.…·]{2,}$', line) and re.match(r'^\d+$', next_line):
-                if merged:
-                    merged[-1] = merged[-1].rstrip() + line + next_line
-                i += 2
-                continue
-        merged.append(line)
+
+        pass1.append(line)
         i += 1
-    return '\n'.join(merged)
+
+    # 第二遍：合并章/节号行和标题行
+    pass2 = []
+    i = 0
+    while i < len(pass1):
+        line = pass1[i].strip()
+        if not line:
+            i += 1
+            continue
+
+        # 当前行是章号（如 "第一章"）→ 下一行必然是标题
+        if re.match(r'^第[一二三四五六七八九十百千\d]+[章节篇回卷]$', line):
+            if i + 1 < len(pass1):
+                next_line = pass1[i + 1].strip()
+                pass2.append(line + " " + next_line)
+                i += 2
+                continue
+
+        # 当前行是节号（如 "2."）→ 下一行必然是标题
+        if re.match(r'^\d+[.．]\s*$', line):
+            if i + 1 < len(pass1):
+                next_line = pass1[i + 1].strip()
+                pass2.append(line + " " + next_line)
+                i += 2
+                continue
+
+        pass2.append(line)
+        i += 1
+
+    return '\n'.join(pass2)
 
 
 def extract_toc_from_text(text: str) -> List[Tuple[str, int]]:
-    """从文字中解析目录条目。"""
+    """从文字中解析目录条目。
+
+    策略：先定位章节标题作为锚点，再在章节内解析子条目。
+    章节标题用其第一个子条目的页码作为自己的页码。
+    """
     if not text or len(text.strip()) < 5:
         return []
     text = _preprocess_toc_text(text)
     lines = text.strip().split('\n')
-    entries: List[Tuple[str, int]] = []
-    for line in lines:
+
+    # 第一遍：标记哪些行是章节标题
+    chapter_indices: List[int] = []
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if re.match(r'^第[一二三四五六七八九十百千\d]+[章节篇回卷]', line):
+            chapter_indices.append(i)
+
+    # 第二遍：逐行解析，收集 (title, page, is_chapter)
+    raw: List[Tuple[str, Optional[int], bool]] = []
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line or line == '目录':
+            continue
+        is_chapter = i in chapter_indices
+
         title, page = _parse_toc_line(line)
-        if title and page is not None:
-            # 过滤纯点线/特殊字符的标题
-            clean_title = re.sub(r'[.…·~•\s\-—_]', '', title)
-            if len(clean_title) < 2:
-                continue
-            entries.append((title, page))
+        if title:
+            # 过滤纯点线标题
+            clean = re.sub(r'[.…·~•\s\-—_]', '', title)
+            if len(clean) >= 2:
+                raw.append((title, page, is_chapter))
+        elif is_chapter:
+            # 章节标题行没有页码 → 记录，页码待回填
+            # 标题就是整行（去掉章号后的部分）
+            m = re.match(r'^(第[一二三四五六七八九十百千\d]+[章节篇回卷]\s*.+)', line)
+            if m:
+                raw.append((m.group(1).strip(), None, True))
+
+    # 第三遍：回填章标题的页码（用该章节第一个子条目的页码）
+    entries: List[Tuple[str, int]] = []
+    pending_chapter: Optional[str] = None
+    for title, page, is_chapter in raw:
+        if is_chapter:
+            if page is not None:
+                entries.append((title, page))
+                pending_chapter = None
+            else:
+                pending_chapter = title
+        else:
+            if pending_chapter and page is not None:
+                entries.append((pending_chapter, page))
+                pending_chapter = None
+            if page is not None:
+                entries.append((title, page))
+
+    # 如果还有未回填的章标题（没有子条目），跳过
     return entries
 
 
@@ -386,19 +450,25 @@ def extract_toc_from_ocr_text(
 
 def build_vision_prompt() -> str:
     """构建 Vision LLM 的 TOC 提取提示词。"""
-    return (
-        "请从这些PDF页面图片中提取目录（Table of Contents）。\n"
-        "这些可能是书籍的目录页。\n\n"
-        "输出格式（严格遵守）：\n"
-        "每个条目一行：标题<Tab>页码\n"
-        "其中页码是目录中对应的数字，必须包含。\n\n"
-        "示例：\n"
-        "第一章 概论\t1\n"
-        "背景与动机\t3\n"
-        "第二章 方法\t15\n\n"
-        "如果页面中没有目录，请输出 NO_TOC。\n"
-        "不要输出表格头、分隔线、编号前缀或任何解释文字。\n"
-    )
+    return """请从这些PDF页面图片中提取目录（Table of Contents）。
+
+输出格式（每行一个条目）：
+标题\t页码
+
+其中\t是Tab字符。使用Tab缩进表示层级：
+- 章（第一章、第二章...）不缩进
+- 节（1. 2. 3.）缩进1个Tab
+- 小节缩进2个Tab
+
+示例输出：
+第一章 绪论\t1
+\t第一节 研究背景\t3
+\t\t问题提出\t3
+第二章 理论基础\t15
+
+如果页面中没有目录，输出 NO_TOC。
+不要输出其他解释文字。
+"""
 
 
 def parse_vision_response(
@@ -459,15 +529,21 @@ def _parse_hierarchical_entries(response: str) -> List[Tuple[str, int]]:
     """解析层级格式的目录条目。
 
     支持：
-    1. 层级缩进格式
-    2. Markdown 表格格式（| 章节 | 标题 | 页码 |）
+    1. Tab 缩进格式：\t标题\t页码
+    2. Markdown 表格格式
+    3. 纯文本层级格式
     """
     # 先尝试 Markdown 表格
     entries = _parse_markdown_table(response)
     if entries:
         return entries
 
-    # 回退：层级格式
+    # Tab 缩进格式
+    entries = _parse_indented_entries(response)
+    if len(entries) >= 3:
+        return entries
+
+    # 回退：逐行解析
     lines = response.strip().split('\n')
     raw_entries: List[Tuple[str, Optional[int]]] = []
 
@@ -502,6 +578,59 @@ def _parse_hierarchical_entries(response: str) -> List[Tuple[str, int]]:
             pending.append(title)
 
     return entries_out
+
+
+def _parse_indented_entries(response: str) -> List[Tuple[str, int]]:
+    """解析 Tab 缩进格式的层级目录条目。
+
+    格式：
+    第一章 标题\t1
+    \t第一节 子标题\t3
+    \t\t一、小节\t5
+
+    也支持点线格式：
+    第一章 标题 ······ 1
+    \t1. 子标题 ······ 3
+    """
+    entries: List[Tuple[str, int]] = []
+
+    for line in response.strip().split('\n'):
+        if not line.strip() or line.strip().startswith('TOC_') or line.strip() == 'NO_TOC':
+            continue
+        if line.strip().startswith('|') and '|' in line.strip()[1:]:
+            continue
+
+        # 保留缩进
+        tabs = len(line) - len(line.lstrip('\t'))
+        content = line.strip()
+
+        # 预处理：把点线 ······ 替换为 \t 便于解析
+        content = re.sub(r'\s*[·.…]{3,}\s*', '\t', content)
+
+        # 尝试 "标题\t页码" 格式
+        if '\t' in content:
+            parts = content.rsplit('\t', 1)
+            if len(parts) == 2:
+                title = parts[0].strip()
+                page = _parse_page_number(parts[1])
+                if title and page is not None:
+                    # 清理标题中的多余点线
+                    title = re.sub(r'[.…·]{2,}', '', title).strip()
+                    if title:
+                        entries.append((title, page))
+                        continue
+
+        # 尝试 "标题 页码" 格式（最后是数字）
+        m = re.match(r'^(.+?)\s+(\d+)\s*$', content)
+        if m:
+            title = m.group(1).strip()
+            page = _parse_page_number(m.group(2))
+            if title and page is not None and page > 0:
+                title = re.sub(r'[.…·]{2,}', '', title).strip()
+                if title:
+                    entries.append((title, page))
+
+    return entries
 
 
 def _parse_markdown_table(response: str) -> List[Tuple[str, int]]:
