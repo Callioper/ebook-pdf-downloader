@@ -107,7 +107,8 @@ async def shutdown():
             task_store.stop()
         except Exception:
             pass
-        os._exit(0)
+        import sys as _sys
+        _sys.exit(0)
 
     threading.Thread(target=_do_shutdown, daemon=True).start()
     return {"ok": True, "message": "shutting down"}
@@ -146,10 +147,13 @@ def main():
         if db_path:
             search_engine.set_db_dir(db_path)
         uvicorn.run(app, host=host, port=port, reload=False, log_level="info")
+    except KeyboardInterrupt:
+        pass
     except Exception:
         import traceback
         traceback.print_exc()
-        os._exit(1)
+        import sys as _sys
+        _sys.exit(1)
 
 
 if __name__ == "__main__":
