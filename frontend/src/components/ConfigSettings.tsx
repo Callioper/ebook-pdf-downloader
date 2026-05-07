@@ -22,8 +22,10 @@ interface AppConfig {
   aa_membership_key: string
   ocr_engine: string
   ocr_oversample: number
-  llm_api_base: string
-  llm_model: string
+  llm_ocr_endpoint: string
+  llm_ocr_model: string
+  llm_ocr_api_key: string
+  llm_ocr_timeout: number
   ai_vision_enabled: boolean
   ai_vision_endpoint: string
   ai_vision_model: string
@@ -149,8 +151,10 @@ const DEFAULT_CONFIG: AppConfig = {
   aa_membership_key: '',
   ocr_engine: 'tesseract',
   ocr_oversample: 200,
-  llm_api_base: 'http://localhost:1234/v1',
-  llm_model: '',
+  llm_ocr_endpoint: 'http://localhost:11434',
+  llm_ocr_model: '',
+  llm_ocr_api_key: '',
+  llm_ocr_timeout: 300,
   ai_vision_enabled: true,
   ai_vision_endpoint: '',
   ai_vision_model: '',
@@ -1590,20 +1594,40 @@ export default function ConfigSettings() {
                 <label className="text-xs text-gray-500">API 端点</label>
                 <input
                   type="text"
-                  value={form.llm_api_base || ''}
-                  onChange={(e) => updateForm({ llm_api_base: e.target.value })}
-                  placeholder="http://localhost:1234/v1"
+                  value={form.llm_ocr_endpoint || ''}
+                  onChange={(e) => updateForm({ llm_ocr_endpoint: e.target.value })}
+                  placeholder="http://localhost:11434"
                   className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
-                <p className="text-xs text-gray-400 mt-0.5">LM Studio 默认 1234，Ollama 默认 11434</p>
+                <p className="text-xs text-gray-400 mt-0.5">Ollama 默认 11434，LM Studio 默认 1234</p>
               </div>
               <div>
                 <label className="text-xs text-gray-500">模型名称</label>
                 <input
                   type="text"
-                  value={form.llm_model || ''}
-                  onChange={(e) => updateForm({ llm_model: e.target.value })}
+                  value={form.llm_ocr_model || ''}
+                  onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
                   placeholder="llama3.2-vision 或 minicpm-v"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">API Key（可选）</label>
+                <input
+                  type="password"
+                  value={form.llm_ocr_api_key || ''}
+                  onChange={(e) => updateForm({ llm_ocr_api_key: e.target.value })}
+                  placeholder="留空则不使用 API Key"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">超时（秒）</label>
+                <input
+                  type="number"
+                  value={form.llm_ocr_timeout ?? 300}
+                  onChange={(e) => updateForm({ llm_ocr_timeout: parseInt(e.target.value) || 300 })}
+                  min={60}
                   className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>

@@ -248,37 +248,19 @@ async def _run_ocrmypdf_with_progress(
             _had_output = True
 
             # Parse LLM-OCR progress: "22 generate_pdf: pages=10, words=1001, ..."
-            # or local-llm-pdf-ocr Rich progress: "OCR ━━━━━━ 75% 0:15 ..."
-            _llm_pages = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
-            _llm_pct = re.search(r'OCR\s+[\u2500-\u2595\s]+\s*(\d+)%', _text) if not _llm_pages else None
-            if _llm_pages:
-                _cur += int(_llm_pages.group(1))  # cumulative page count from batch
-                if total_pages > 0:
-                    _tot = total_pages
-                elif _tot == 0:
-                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
-                _cur = min(_cur, _tot)  # cap at known total
-            elif _llm_pct and total_pages > 0:
-                _cur = max(_cur, int(total_pages * int(_llm_pct.group(1)) / 100))
-                _tot = total_pages
-            if _llm_pages or _llm_pct:
+            _llm = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
+            if _llm:
                 _cur += int(_llm.group(1))
                 if total_pages > 0:
                     _tot = total_pages
                 elif _tot == 0:
                     _tot = int((_cur * 1.2) if _cur > 0 else 100)
-                _cur = min(_cur, _tot)  # cap at known total
-                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
-                _elapsed_llm = time.time() - _start
-                _eta_llm = ""
-                if _cur > 1 and _elapsed_llm > 5 and _tot > _cur:
-                    _sec_pp = _elapsed_llm / _cur
-                    _rem = (_tot - _cur) * _sec_pp
-                    _eta_llm = _format_eta(_rem)
+                _cur = min(_cur, _tot)
                 if _cur % 10 == 0 or _cur >= _tot:
                     task_store.add_log(task_id, f"  LLM-OCR: ~{_cur}/{_tot} 页")
-                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", _eta_llm)
-                continue  # skip logging raw generate_pdf line (TEXT logged separately)
+                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
+                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
+                continue
 
             _m = re.search(r'\[(\d+)/(\d+)\]', _text)
             if _m:
@@ -2236,7 +2218,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
         elif ocr_engine == "llm_ocr":
-            task_store.add_log(task_id, "Running LLM-based OCR via local-llm-pdf-ocr...")
+            task_store.add_log(task_id, "Running LLM-based OCR via ocrmypdf+llmocr plugin...")
 
             if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
                 task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
@@ -2244,61 +2226,46 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            llm_api_base = config.get("llm_api_base", config.get("llm_ocr_endpoint", "http://localhost:1234/v1"))
-            llm_model = config.get("llm_model", config.get("llm_ocr_model", ""))
+            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
+
+            llm_endpoint = config.get("llm_ocr_endpoint", config.get("llm_api_base", "http://localhost:11434"))
+            llm_model = config.get("llm_ocr_model", config.get("llm_model", ""))
+            llm_api_key = config.get("llm_ocr_api_key", config.get("llm_api_key", ""))
 
             if not llm_model:
                 task_store.add_log(task_id, "LLM OCR: model not configured")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
+            _engine_dir = os.path.dirname(__file__)
+            _ocr_env = {
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    [_engine_dir] + os.environ.get("PYTHONPATH", "").split(os.pathsep)
+                    if os.environ.get("PYTHONPATH")
+                    else [_engine_dir]
+                ),
+                "PYTHONUNBUFFERED": "1",
+            }
 
-            # Find local-llm-pdf-ocr: try venv Python, then PATH binary, then uv run
-            import shutil as _shutil
-            _llmocr_cmd = None
-
-            # 1. Check for venv Python at install dir
-            _install_dir = r"D:\opencode\local-llm-pdf-ocr"
-            _venv_py = os.path.join(_install_dir, ".venv", "Scripts", "python.exe")
-            if os.path.isfile(_venv_py):
-                _llmocr_cmd = [_venv_py, "-m", "pdf_ocr.cli"]
-            else:
-                # 2. Try PATH
-                _bin = _shutil.which("local-llm-pdf-ocr")
-                if _bin:
-                    _llmocr_cmd = [_bin]
-                else:
-                    # 3. Try uv run
-                    _uv = _shutil.which("uv") or "uv"
-                    if os.path.isdir(_install_dir):
-                        _llmocr_cmd = [_uv, "run", "local-llm-pdf-ocr"]
-                        _llmocr_env_extra = {"UV_PROJECT_DIR": _install_dir}
-                    else:
-                        task_store.add_log(task_id, "LLM OCR: local-llm-pdf-ocr not found. Install: git clone https://github.com/ahnafnafee/local-llm-pdf-ocr && cd local-llm-pdf-ocr && uv sync")
-                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-                        return report
-
-            cmd = _llmocr_cmd + [
-                "--api-base", llm_api_base,
-                "--model", llm_model,
-                "--dpi", ocr_oversample,
-                "--concurrency", str(ocr_jobs),
-                "--max-image-dim", "1024",
+            cmd = [
+                _py_for_ocr, "-m", "ocrmypdf",
+                "--plugin", "llmocr.plugin",
+                "--llm-ocr-endpoint", llm_endpoint,
+                "--llm-ocr-model", llm_model,
+                "--llm-ocr-lang", ocr_lang or "chi_sim+eng",
+                "--llm-ocr-timeout", str(ocr_timeout),
+                "--optimize", _opt_level,
+                "--oversample", ocr_oversample,
+                "-j", str(ocr_jobs),
+                "--output-type", "pdf",
+                "--pdf-renderer", "sandwich",
                 pdf_path,
                 output_pdf,
             ]
-
-            _ocr_env = {
-                **os.environ,
-                "PYTHONUNBUFFERED": "1",
-                "LLM_API_BASE": llm_api_base,
-                "LLM_MODEL": llm_model,
-            }
-            if hasattr(locals(), '_llmocr_env_extra'):
-                _ = locals().get('_llmocr_env_extra', {})
-                if _:
-                    _ocr_env.update(_)
+            if llm_api_key:
+                cmd += ["--llm-ocr-api-key", llm_api_key]
 
             try:
                 _exit = await _run_ocrmypdf_with_progress(
