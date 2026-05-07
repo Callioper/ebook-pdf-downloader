@@ -247,6 +247,18 @@ async def _run_ocrmypdf_with_progress(
                 continue
             _had_output = True
 
+            # Parse LLM-OCR progress: "22 generate_pdf: pages=10, words=1001, ..."
+            _llm = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
+            if _llm:
+                _cur += int(_llm.group(1))
+                if total_pages > 0:
+                    _tot = total_pages
+                elif _tot == 0:
+                    _tot = int((_cur * 1.2) if _cur > 0 else 100)  # rough estimate
+                if _cur % 10 == 0 or _cur >= _tot:
+                    task_store.add_log(task_id, f"  LLM-OCR: ~{_cur}/{_tot} 页")
+                continue  # skip logging raw generate_pdf line (TEXT logged separately)
+
             _m = re.search(r'\[(\d+)/(\d+)\]', _text)
             if _m:
                 _cur = int(_m.group(1))
@@ -494,6 +506,11 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
             missing.append("publisher")
         if missing:
             await _fetch_nlc_metadata(task_id, report, config)
+    elif report.get("title") and report.get("source", "") in ("annas_archive", "zlibrary"):
+        # External books without ISBN: try NLC title search for ISBN
+        if not report.get("authors") or not report.get("publisher"):
+            task_store.add_log(task_id, "NLC: attempting ISBN lookup by title (no ISBN in source data)")
+            await _fetch_nlc_metadata(task_id, report, config)
 
     # ═══════════════ Phase 3: 书葵网书签 ═══════════════
     # （书签获取在 Step 6 通过 NLC/SS码 处理，不使用 ISBN）
@@ -616,12 +633,14 @@ def _search_db_by_title(title: str, db_path: str) -> Optional[Dict[str, Any]]:
         se.set_db_dir(db_path)
         result = se.search(field="title", query=title, page=1, page_size=5)
         books = result.get("books", [])
-        # 选标题最匹配的
+        # 选标题最匹配的，相似度必须 >= 0.4 才采纳
         if books:
             best = books[0]
             for book in books[1:]:
                 if _title_similarity(book.get("title", ""), title) > _title_similarity(best.get("title", ""), title):
                     best = book
+            if _title_similarity(best.get("title", ""), title) < 0.4:
+                return None
             return best
     except Exception as e:
         logger.warning(f"DB search by title failed: {e}")
@@ -651,11 +670,18 @@ def _search_db_by_isbn(isbn: str, db_path: str) -> Optional[Dict[str, Any]]:
 
 
 def _title_similarity(a: str, b: str) -> float:
-    """简单标题相似度（字符重叠率）"""
+    """标题相似度：子串匹配优先，否则字符重叠率。
+    子串匹配：如果一个标题包含另一个，返回高相似度。
+    """
     if not a or not b:
         return 0
-    a_chars = set(a.lower())
-    b_chars = set(b.lower())
+    al, bl = a.lower(), b.lower()
+    # 子串匹配：一个标题包含另一个 → 高相似度
+    if al in bl or bl in al:
+        return 0.9 - 0.2 * (abs(len(a) - len(b)) / max(len(a), len(b), 1))
+    # 字符重叠率（Jaccard）
+    a_chars = set(al)
+    b_chars = set(bl)
     overlap = len(a_chars & b_chars)
     return overlap / max(len(a_chars), len(b_chars), 1)
 
@@ -693,23 +719,27 @@ def _merge_db_book(book: Dict[str, Any], report: Dict[str, Any]):
 async def _fetch_nlc_metadata(task_id: str, report: Dict[str, Any], config: Dict[str, Any]):
     """从 NLC 国家图书馆补全作者/出版社/出版年/内容提要/主题词"""
     isbn = report.get("isbn", "")
-    if not isbn:
+    title = report.get("title", "")
+    if not isbn and not title:
         return
 
-    task_store.add_log(task_id, f"NLC: fetching metadata for ISBN={isbn}")
+    task_store.add_log(task_id, f"NLC: fetching metadata for ISBN={isbn or '(search by title)'}")
     try:
         from backend.nlc.nlc_isbn import crawl_isbn
 
         nlc_path = config.get("ebook_data_geter_path", "")
-        if nlc_path:
-            # crawl_isbn 目前只返回 ISBN，这里可以根据需要扩展
-            fetched_isbn = await crawl_isbn(report.get("title", ""), nlc_path)
+        # Try title-based ISBN lookup when ISBN is missing
+        if nlc_path and not isbn and title:
+            fetched_isbn = await crawl_isbn(title, nlc_path)
+            if fetched_isbn:
+                report["isbn"] = fetched_isbn
+                isbn = fetched_isbn
+                task_store.add_log(task_id, f"NLC: ISBN discovered via title search: {fetched_isbn}")
+        elif nlc_path and isbn:
+            fetched_isbn = await crawl_isbn(title, nlc_path)
             if fetched_isbn and not report.get("isbn"):
                 report["isbn"] = fetched_isbn
                 task_store.add_log(task_id, f"NLC: ISBN confirmed: {fetched_isbn}")
-
-        # NLC API 可以直接补全作者/出版社/年/内容提要/主题词
-        # 目前 nlc_isbn 模块只实现了 ISBN 查询，后续可扩展
 
         # NEW: get author/publisher/year from NLC OPAC by ISBN
         current_isbn = report.get("isbn", "")
@@ -863,7 +893,7 @@ async def _download_via_aa_and_stacks(
                 skip = False
                 if md5_title and title:
                     rel_score = _calc_title_relevance(md5_title, title)
-                    if rel_score < 10:
+                    if rel_score < 30:
                         task_store.add_log(task_id, f"AA: MD5 {md5} title mismatch ('{md5_title[:30]}' vs '{title[:30]}', score={rel_score}), skipping")
                         skip = True
                 if not skip and isbn and details.get("isbn"):
@@ -1873,6 +1903,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     ocr_lang = config.get("ocr_languages", "chi_sim+eng")
     ocr_jobs = config.get("ocr_jobs", 1)
     ocr_timeout = config.get("ocr_timeout", 7200)
+    if ocr_engine == "llm_ocr":
+        ocr_timeout = max(ocr_timeout, 7200)
     ocr_oversample = str(config.get("ocr_oversample", 200))
     _opt_level = "0"
     if config.get("pdf_compress", False):
@@ -2318,7 +2350,7 @@ async def run_pipeline(task_id: str):
     ocr_engine = config.get("ocr_engine", "tesseract")
     ocr_langs = config.get("ocr_languages", "chi_sim+eng")
     ocr_jobs = config.get("ocr_jobs", 1)
-    ocr_timeout = config.get("ocr_timeout", 1800)
+    ocr_timeout = config.get("ocr_timeout", 7200)
     task_store.add_log(task_id, f"⚙ 数据库: {db_path} | 代理: {proxy}")
     task_store.add_log(task_id, f"⚙ OCR引擎: {ocr_engine} | 语言: {ocr_langs} | 线程: {ocr_jobs} | 超时: {ocr_timeout}s")
     # Log download source from task
