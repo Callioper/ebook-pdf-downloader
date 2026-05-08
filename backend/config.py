@@ -17,13 +17,17 @@ logger = logging.getLogger(__name__)
 def _get_app_dir() -> Path:
     if getattr(sys, 'frozen', False):
         app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
-        old_dir = app_data / 'BookDownloader'
         new_dir = app_data / 'ebook-pdf-downloader'
-        if old_dir.is_dir() and not new_dir.is_dir():
-            try:
-                old_dir.rename(new_dir)
-            except OSError:
-                pass
+        old_dir = app_data / 'BookDownloader'
+        # Prefer new dir; fall back to old if it has data
+        if old_dir.is_dir():
+            if not new_dir.is_dir():
+                try:
+                    old_dir.rename(new_dir)
+                except OSError:
+                    pass
+            if not new_dir.is_dir() or not (new_dir / "config.json").exists():
+                return old_dir
         new_dir.mkdir(parents=True, exist_ok=True)
         return new_dir
     return Path(__file__).resolve().parent.parent
