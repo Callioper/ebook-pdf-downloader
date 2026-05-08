@@ -16,6 +16,8 @@ from ocrmypdf.models.ocr_element import BoundingBox
 
 log = logging.getLogger(__name__)
 
+_surya_det = None
+
 _TESSERACT_PATHS_WIN = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
     r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -53,7 +55,14 @@ class LayoutAnalyzer:
 
         Returns a list of LayoutLine objects, each containing word-level
         bounding boxes. Lines are ordered top-to-bottom.
+        
+        Primary: Surya DetectionPredictor (line-level bboxes for CJK).
+        Fallback: Tesseract → PIL grid.
         """
+        lines = self._analyze_surya(image_path)
+        if lines is not None:
+            return lines
+        
         tess_path = self._find_tesseract()
         if tess_path:
             try:
@@ -61,6 +70,39 @@ class LayoutAnalyzer:
             except Exception as exc:
                 log.warning("Tesseract layout failed, using fallback: %s", exc)
         return self._analyze_fallback(image_path)
+
+    @staticmethod
+    def _analyze_surya(image_path: Path) -> list[LayoutLine] | None:
+        """Surya DetectionPredictor for text line detection.
+        
+        Uses standalone line detection (NOT OCR recognition) per
+        https://github.com/datalab-to/surya#text-line-detection
+        
+        Returns None if Surya is not available or fails."""
+        global _surya_det
+        try:
+            from surya.detection import DetectionPredictor
+        except ImportError:
+            return None
+        try:
+            with PILImage.open(image_path) as img:
+                if _surya_det is None:
+                    _surya_det = DetectionPredictor()
+                predictions = _surya_det([img])
+            if not predictions or not predictions[0].bboxes:
+                return None
+            
+            lines: list[LayoutLine] = []
+            for polygon_box in sorted(predictions[0].bboxes, key=lambda b: b.bbox[1]):
+                x0, y0, x1, y1 = polygon_box.bbox
+                lines.append(LayoutLine(
+                    bbox=BoundingBox(x0, y0, x1, y1),
+                    words=[LayoutWord(bbox=BoundingBox(x0, y0, x1, y1), text="")],
+                ))
+            return lines
+        except Exception as exc:
+            log.warning("Surya layout failed: %s", exc)
+            return None
 
     def _find_tesseract(self) -> str | None:
         for path in _TESSERACT_PATHS_WIN:
