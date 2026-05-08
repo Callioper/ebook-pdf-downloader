@@ -229,8 +229,8 @@ async def _run_ocrmypdf_with_progress(
                 elif _tot == 0:
                     _tot = int((_cur * 1.2) if _cur > 0 else 100)
                 _cur = min(_cur, _tot)
-                # Log every 10 pages or when done
-                if _cur % 10 == 0 or _cur >= _tot:
+                # Log every 5 pages or when done
+                if _cur % 5 == 0 or _cur >= _tot:
                     task_store.add_log(task_id, f"  LLM-OCR: {_cur}/{_tot} 页")
                 _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
                 await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
@@ -238,13 +238,13 @@ async def _run_ocrmypdf_with_progress(
 
             _llm = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
             if _llm:
-                _cur += int(_llm.group(1))
+                _cur = max(_cur, int(_llm.group(1)))
                 if total_pages > 0:
                     _tot = total_pages
                 elif _tot == 0:
                     _tot = int((_cur * 1.2) if _cur > 0 else 100)
                 _cur = min(_cur, _tot)
-                if _cur % 10 == 0 or _cur >= _tot:
+                if _cur % 5 == 0 or _cur >= _tot:
                     task_store.add_log(task_id, f"  LLM-OCR: ~{_cur}/{_tot} 页")
                 _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
                 await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")

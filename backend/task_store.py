@@ -61,16 +61,16 @@ class TaskStore:
                     self._tasks = json.load(f)
             except (json.JSONDecodeError, OSError):
                 self._tasks = {}
-        # Reset stale running tasks on startup (>1h since last update)
+        # Reset stale running tasks on startup (>1h since last update) — pause instead of fail
         _now = time.time()
         _stale_count = 0
         for tid, t in self._tasks.items():
             if t.get("status") == STATUS_RUNNING:
                 _age = _now - t.get("updated_at", t.get("created_at", 0))
                 if _age > 3600:
-                    t["status"] = STATUS_FAILED
-                    t["error"] = "Task stalled (app restarted)"
-                    t["logs"] = (t.get("logs") or []) + [f"[{time.strftime('%H:%M:%S')}] Auto-failed: task was running for >1h before app restart"]
+                    t["status"] = STATUS_PAUSED
+                    t["error"] = ""
+                    t["logs"] = (t.get("logs") or []) + [f"[{time.strftime('%H:%M:%S')}] 应用重启，任务已自动暂停。可手动恢复继续执行。"]
                     _stale_count += 1
         if _stale_count:
             self._mark_dirty()
