@@ -57,45 +57,10 @@ class LayoutAnalyzer:
         tess_path = self._find_tesseract()
         if tess_path:
             try:
-                lines = self._analyze_tesseract(image_path, tess_path)
-                lines = self._merge_narrow_words(lines)
-                return lines
+                return self._analyze_tesseract(image_path, tess_path)
             except Exception as exc:
                 log.warning("Tesseract layout failed, using fallback: %s", exc)
         return self._analyze_fallback(image_path)
-
-    @staticmethod
-    def _merge_narrow_words(lines: list[LayoutLine]) -> list[LayoutLine]:
-        """Merge adjacent narrow word bboxes on the same line.
-        
-        Tesseract produces character-level bboxes for CJK text (each
-        character = one word). This merges them into wider segments
-        so _distribute_across_words gets line-level bboxes."""
-        for line in lines:
-            if len(line.words) < 2:
-                continue
-            median_gap = sorted(
-                line.words[i+1].bbox.left - line.words[i].bbox.right
-                for i in range(len(line.words) - 1)
-            )[len(line.words) // 2]
-            gap_limit = max(median_gap * 3, 15.0)
-            merged = [line.words[0]]
-            for word in line.words[1:]:
-                prev = merged[-1]
-                gap = word.bbox.left - prev.bbox.right
-                if gap <= gap_limit:
-                    prev.bbox = BoundingBox(
-                        min(prev.bbox.left, word.bbox.left),
-                        min(prev.bbox.top, word.bbox.top),
-                        max(prev.bbox.right, word.bbox.right),
-                        max(prev.bbox.bottom, word.bbox.bottom),
-                    )
-                    prev.text += word.text
-                    prev.confidence = min(prev.confidence, word.confidence)
-                else:
-                    merged.append(word)
-            line.words = merged
-        return lines
 
     def _find_tesseract(self) -> str | None:
         for path in _TESSERACT_PATHS_WIN:

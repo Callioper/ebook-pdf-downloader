@@ -334,7 +334,9 @@ def _dp_align_text(layout_lines: list[LayoutLine], llm_text: str) -> None:
 
     # Distribute matched text across word bboxes per line
     for idx, line in enumerate(layout_lines):
-        tess_words = [w for w in line.words if w.text and (w.bbox.right - w.bbox.left) > 0]
+        # Accept words with valid bboxes even if Tesseract text is empty
+        # (needed when Surya provides line-level bboxes without text)
+        tess_words = [w for w in line.words if (w.bbox.right - w.bbox.left) > 0]
         if not tess_words:
             continue
 

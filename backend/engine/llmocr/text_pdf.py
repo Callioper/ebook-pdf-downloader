@@ -12,6 +12,8 @@ from pathlib import Path
 
 from pikepdf import Dictionary, Name, Pdf, Stream, unparse_content_stream
 from PIL import Image
+from ocrmypdf.models.ocr_element import BoundingBox
+from llmocr.layout import LayoutWord
 
 from llmocr.layout import LayoutLine
 
@@ -105,7 +107,30 @@ def _text_content_stream(
     ops.append("3 Tr")  # Text rendering mode 3 = invisible
 
     for line in lines:
+        # Merge adjacent narrow words on the same line into wider words.
+        # Tesseract produces per-character word bboxes for CJK, which
+        # yields character-level output when placed individually.
+        # Merging them creates line-level text spans.
+        merged_words: list[LayoutWord] = []
         for word in line.words:
+            if not word.text or not word.text.strip():
+                continue
+            if merged_words and (word.bbox.left - merged_words[-1].bbox.right) < 5.0:
+                # Extend previous word
+                prev = merged_words[-1]
+                prev.bbox.right = max(prev.bbox.right, word.bbox.right)
+                prev.bbox.bottom = max(prev.bbox.bottom, word.bbox.bottom)
+                prev.text += word.text
+            else:
+                merged_words.append(LayoutWord(
+                    bbox=BoundingBox(
+                        word.bbox.left, word.bbox.top,
+                        word.bbox.right, word.bbox.bottom,
+                    ),
+                    text=word.text,
+                ))
+        
+        for word in merged_words:
             if not word.text or not word.text.strip():
                 continue
             # Convert pixel bbox to PDF points
