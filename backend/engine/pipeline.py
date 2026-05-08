@@ -74,45 +74,18 @@ async def _check_paused(task_id: str):
 
 
 def _suspend_process(pid: int):
-    """Suspend a Windows process by PID."""
-    if os.name != "nt":
-        return
-    import ctypes
-    kernel32 = ctypes.windll.kernel32
-    PROCESS_SUSPEND_RESUME = 0x0800
-    handle = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
-    if handle:
-        try:
-            kernel32.DebugActiveProcess(pid)
-        except Exception:
-            pass
-        kernel32.CloseHandle(handle)
+    from platform_utils import suspend_process
+    return suspend_process(pid)
 
 
 def _resume_process(pid: int):
-    """Resume a suspended Windows process by PID."""
-    if os.name != "nt":
-        return
-    import ctypes
-    kernel32 = ctypes.windll.kernel32
-    PROCESS_SUSPEND_RESUME = 0x0800
-    handle = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
-    if handle:
-        try:
-            kernel32.DebugActiveProcessStop(pid)
-        except Exception:
-            pass
-        kernel32.CloseHandle(handle)
+    from platform_utils import resume_process
+    return resume_process(pid)
 
 
 def _kill_proc_tree(pid: int):
-    """Kill process tree by PID on Windows."""
-    import subprocess as _sp
-    try:
-        _sp.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True, timeout=10)
-    except Exception:
-        pass
+    from platform_utils import kill_process_tree
+    kill_process_tree(pid)
 
 
 def _format_eta(remaining_seconds: float) -> str:
@@ -2291,8 +2264,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 0})
 
             # PaddleOCR always uses single process (PaddlePaddle uses all CPU cores internally)
-            _ocr_env = {**os.environ, "PATH": os.environ.get("PATH", "")
-                        + r";C:\Program Files\Tesseract-OCR"}
+            from platform_utils import configure_tesseract_env
+            configure_tesseract_env()
+            _ocr_env = {**os.environ}
             cmd = [
                 _paddle_venv_py, "-m", "ocrmypdf",
                 "--plugin", "ocrmypdf_paddleocr",
