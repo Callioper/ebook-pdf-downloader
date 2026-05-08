@@ -3,7 +3,7 @@
 # 职责：配置文件管理，加载、保存和更新应用配置
 # 入口函数：init_config(), get_config(), update_config(), load_config(), save_config()
 # 依赖：无
-# 注意：支持frozen模式，配置文件存储在APPDATA目录
+# 注意：支持frozen模式和跨平台（Windows/macOS/Linux）
 
 import json
 import logging
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 def _get_app_dir() -> Path:
     if getattr(sys, 'frozen', False):
-        app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
-        new_dir = app_data / 'ebook-pdf-downloader'
-        old_dir = app_data / 'BookDownloader'
+        from platform_utils import get_app_data_dir as _get_ad
+        new_dir = _get_ad('ebook-pdf-downloader')
+        old_dir = new_dir.parent / 'BookDownloader'  # same parent, old name
         # Prefer new dir; fall back to old if it has data
         if old_dir.is_dir():
             if not new_dir.is_dir():
@@ -36,10 +36,8 @@ CONFIG_FILE = _get_app_dir() / "config.json"
 APP_DATA_DIR = _get_app_dir()
 
 def _get_default_config_path() -> Path:
-    if getattr(sys, 'frozen', False):
-        return Path(sys._MEIPASS) / "config.default.json"
-    else:
-        return Path(__file__).resolve().parent.parent / "config.default.json"
+    from platform_utils import get_default_config_file
+    return get_default_config_file()
 
 DEFAULT_CONFIG_FILE = _get_default_config_path()
 
@@ -50,7 +48,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "finished_dir": "",
     "tmp_dir": "",
     "stacks_base_url": "http://localhost:7788",
-    "zfile_base_url": "http://192.168.0.7:32771",
+    "zfile_base_url": "",
     "zfile_external_url": "",
     "zfile_storage_key": "1",
     "http_proxy": "",
