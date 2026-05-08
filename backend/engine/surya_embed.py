@@ -14,7 +14,7 @@ def build_sandwich_surya(
     input_pdf_path: str,
     output_pdf_path: str,
     dpi: int = 200,
-    font_path: str = r"C:\Windows\Fonts\NotoSansSC-VF.ttf",
+    font_path: str = r"C:\Windows\Fonts\simhei.ttf",
     languages: Optional[List[str]] = None,
 ) -> bool:
     """
@@ -67,8 +67,12 @@ def build_sandwich_surya(
             new_page.insert_image(new_page.rect, stream=img_data)
 
             # Register CJK font
-            if os.path.exists(font_path):
+            use_cjk = os.path.exists(font_path)
+            if use_cjk:
                 new_page.insert_font(fontname="CJK", fontfile=font_path)
+                cjk_font = fitz.Font(fontfile=font_path)
+            else:
+                cjk_font = fitz.Font("china-t")
 
             # Place each text line at its detected bbox
             iw, ih = result.image_bbox[2], result.image_bbox[3]
@@ -83,25 +87,26 @@ def build_sandwich_surya(
                 nx1 = x1 / iw * width
                 ny1 = y1 / ih * height
 
+                box_w = max(1, nx1 - nx0)
                 box_h = max(1, ny1 - ny0)
                 fontsize = min(72, max(4, box_h * 0.8))
 
-                if os.path.exists(font_path):
-                    new_page.insert_text(
-                        fitz.Point(nx0, ny1 - 2),
-                        text,
-                        fontname="CJK",
-                        fontsize=fontsize,
-                        render_mode=3,
-                    )
-                else:
-                    new_page.insert_text(
-                        fitz.Point(nx0, ny1 - 2),
-                        text,
-                        fontname="china-t",
-                        fontsize=fontsize,
-                        render_mode=3,
-                    )
+                # Horizontal morph: scale glyph bboxes to fill the visual text region
+                natural_w = cjk_font.text_length(text, fontsize=fontsize)
+                if natural_w <= 0:
+                    natural_w = len(text) * fontsize * 0.5  # CJK heuristic
+                scale_x = max(0.3, min(5.0, box_w / max(1, natural_w)))
+
+                baseline = fitz.Point(nx0, ny1 - 2)
+                morph = (baseline, fitz.Matrix(scale_x, 1.0))
+                new_page.insert_text(
+                    baseline,
+                    text,
+                    fontname="CJK" if use_cjk else "china-t",
+                    fontsize=fontsize,
+                    render_mode=3,
+                    morph=morph,
+                )
 
         new_doc.save(output_pdf_path)
         new_doc.close()
