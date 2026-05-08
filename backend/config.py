@@ -85,6 +85,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ai_vision_dpi": 150,
     "ocr_confirm_enabled": False,
     "bookmark_confirm_enabled": False,
+    "surya_alignment_enabled": False,
 }
 
 

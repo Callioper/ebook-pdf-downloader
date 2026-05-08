@@ -2383,7 +2383,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         # Post-OCR: rebuild sandwich PDF with Surya-aligned bboxes
                         try:
                             _surya_script = os.path.join(os.path.dirname(__file__), "run_surya.py")
-                            if os.path.exists(_surya_script) and os.path.exists(_py_for_ocr):
+                            if config.get("surya_alignment_enabled") and os.path.exists(_surya_script) and os.path.exists(_py_for_ocr):
                                 surya_output = pdf_path.replace(".pdf", "_surya.pdf")
                                 _surya_timeout = max(600, _total_pages * 4 + 60)
                                 task_store.add_log(task_id, f"Surya: aligning text bboxes (timeout {_surya_timeout}s)...")

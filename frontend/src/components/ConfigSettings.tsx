@@ -36,6 +36,7 @@ interface AppConfig {
   ai_vision_dpi: number
   ocr_confirm_enabled: boolean
   bookmark_confirm_enabled: boolean
+  surya_alignment_enabled: boolean
   [key: string]: unknown
 }
 
@@ -168,6 +169,7 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_dpi: 150,
   ocr_confirm_enabled: false,
   bookmark_confirm_enabled: false,
+  surya_alignment_enabled: false,
 }
 
 const OCR_ENGINES = [
@@ -1731,6 +1733,17 @@ export default function ConfigSettings() {
               <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
                 <input type="checkbox" checked={!!form.bookmark_confirm_enabled}
                   onChange={(e) => updateForm({ bookmark_confirm_enabled: e.target.checked })} className="sr-only peer" />
+                <div className="w-8 h-4 bg-gray-200 peer-focus:ring-1 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
+              </label>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-gray-700">Surya bbox 对齐（实验性）</span>
+                <p className="text-[10px] text-gray-400">OCR 后重新对齐文字选框，大幅增加耗时（&gt;50页慎用）</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                <input type="checkbox" checked={!!form.surya_alignment_enabled}
+                  onChange={(e) => updateForm({ surya_alignment_enabled: e.target.checked })} className="sr-only peer" />
                 <div className="w-8 h-4 bg-gray-200 peer-focus:ring-1 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
               </label>
             </div>
