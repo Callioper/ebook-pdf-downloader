@@ -917,22 +917,9 @@ async def check_ocr(engine: str = Query(default="")):
             if result.returncode == 0:
                 return {"ok": True, "engine": "ocrmypdf", "version": result.stdout.strip().split("\n")[0]}
         elif engine == "tesseract":
-            # Check common install paths first (frozen exe may not have user PATH)
-            found_path = None
-            for tess_path in [
-                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
-            ]:
-                if os.path.exists(tess_path):
-                    found_path = tess_path
-                    break
-            if not found_path:
-                try:
-                    import shutil as _sh
-                    found_path = _sh.which("tesseract")
-                except Exception:
-                    pass
+            from platform_utils import find_tesseract
+            found_path = find_tesseract()
+
 
             tess_exe = found_path or "tesseract"
             result = subprocess.run([tess_exe, "--version"], capture_output=True, text=True, timeout=5)
@@ -1061,16 +1048,8 @@ def _pip_install_cmd() -> List[str]:
                 python_cmd = found
                 break
         if python_cmd == sys.executable:
-            # No system Python found via shutil — try common Windows locations
-            for candidate in [
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python314", "python.exe"),
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python313", "python.exe"),
-                r"C:\Python314\python.exe",
-                r"C:\Python313\python.exe",
-            ]:
-                if os.path.exists(candidate):
-                    python_cmd = candidate
-                    break
+            from platform_utils import find_python_executable
+            python_cmd = find_python_executable()
     return [python_cmd, "-m", "pip", "install"] + user_flag
 
 
@@ -1080,15 +1059,11 @@ async def install_ocr(body: InstallOCRRequest):
     try:
         if engine == "tesseract":
             # First check if Tesseract is already installed (even if not in PATH)
-            for tess_path in [
-                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"C:\Program Files\Tesseract-OCR\program\tesseract.exe",
-                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
-                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\program\tesseract.exe"),
-            ]:
-                if os.path.exists(tess_path):
-                    os.environ["PATH"] = os.path.dirname(tess_path) + os.pathsep + os.environ.get("PATH", "")
-                    return {"ok": True, "message": f"Tesseract OCR 已存在于 {tess_path}，已添加至 PATH"}
+            from platform_utils import find_tesseract
+            tess_path = find_tesseract()
+            if tess_path:
+                os.environ["PATH"] = os.path.dirname(tess_path) + os.pathsep + os.environ.get("PATH", "")
+                return {"ok": True, "message": f"Tesseract OCR 已存在于 {tess_path}，已添加至 PATH"}
 
             # Try multiple install methods
             try:
@@ -1187,14 +1162,8 @@ async def install_ocr(body: InstallOCRRequest):
                     return {"ok": True, "message": "PaddleOCR venv 已就绪"}
 
             # Find Python 3.11
-            _py311 = ""
-            for _cand in [
-                r"C:\Python311\python.exe",
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python311", "python.exe"),
-            ]:
-                if os.path.exists(_cand):
-                    _py311 = _cand
-                    break
+            from platform_utils import find_python_executable
+            _py311 = find_python_executable("3.11")
             if not _py311:
                 return {"ok": False, "message": "未找到 Python 3.11，请先安装 Python 3.11"}
 

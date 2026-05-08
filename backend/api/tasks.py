@@ -183,10 +183,8 @@ async def open_pdf(task_id: str):
     pdf_path = report.get("pdf_path", "") or report.get("output_file", "")
     if pdf_path and os.path.exists(pdf_path):
         try:
-            if os.name == "nt":
-                os.startfile(pdf_path)
-            else:
-                subprocess.run(["xdg-open", pdf_path])
+            from platform_utils import open_file
+            open_file(pdf_path)
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "message": str(e)}
@@ -202,10 +200,8 @@ async def open_folder(task_id: str):
     output_dir = config.get("finished_dir", "")
     if output_dir and os.path.exists(output_dir):
         try:
-            if os.name == "nt":
-                os.startfile(output_dir)
-            else:
-                subprocess.run(["xdg-open", output_dir])
+            from platform_utils import open_folder
+            open_folder(output_dir)
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "message": str(e)}
