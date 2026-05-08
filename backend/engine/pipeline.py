@@ -195,33 +195,10 @@ async def _run_ocrmypdf_with_progress(
                 _was_suspended = False
                 _resume_process(p.pid)
 
-            # Try file-based page counting (mtime-gated for performance)
-            _file_pages = 0
-            if output_pdf and total_pages > 0:
-                try:
-                    _mtime = os.path.getmtime(output_pdf)
-                    if _mtime > _last_mtime:
-                        _last_mtime = _mtime
-                        _file_pages = _count_output_pages()
-                except Exception:
-                    pass
-
             _now = time.time()
             _elapsed_sec = int(_now - _start)
 
-            if _file_pages > 0 and _file_pages > _cur and not _had_llm_page:
-                # File-based progress found — update real page tracking
-                _cur = _file_pages
-                _tot = total_pages
-                _pct = int(_cur / _tot * 100) if _tot > 0 else 0
-                _eta = ""
-                if _cur > 1 and _elapsed_sec > 5:
-                    _sec_pp = _elapsed_sec / _cur
-                    _rem = (_tot - _cur) * _sec_pp
-                    _eta = _format_eta(_rem)
-                await _emit_progress(task_id, "ocr", _pct, f"{_cur}/{_tot} 页", _eta)
-                _last = _pct
-            elif _cur == 0 or total_pages == 0:
+            if _cur == 0 or total_pages == 0:
                 # No page info available yet — fallback to heartbeat
                 _detail = f"处理中... {_elapsed_sec//60}分{_elapsed_sec%60}秒" if _elapsed_sec >= 60 else f"处理中... {_elapsed_sec}秒"
                 await _emit_progress(task_id, "ocr", 0, _detail, "")
