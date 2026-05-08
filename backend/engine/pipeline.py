@@ -1205,7 +1205,12 @@ async def _download_via_aa_and_stacks(
                         # Step 3: 心跳轮询（每3秒检测一次，直到下载完成）
                         task_store.add_log(task_id, "AA: heartbeat polling for stacks download...")
                         start_time = time.time()
+                        _hb_timeout = 600  # 10 min global timeout for heartbeat
                         while True:
+                            _elapsed_hb = time.time() - start_time
+                            if _elapsed_hb > _hb_timeout:
+                                task_store.add_log(task_id, f"AA: heartbeat timeout ({int(_elapsed_hb)}s), giving up on this MD5")
+                                return None
                             dl_info = None
                             try:
                                 sr = _req.get(f"{url}/api/status", headers=_bearer(), timeout=5)
@@ -1265,7 +1270,18 @@ async def _download_via_aa_and_stacks(
                                             fname = os.path.basename(fp)
                                             hist_ssid = fname.split(".")[0] if "." in fname else fname
                                             if not ss_code:
-                                                task_store.add_log(task_id, f"AA:   no SS code, skip history (SSID={hist_ssid} unverifiable)")
+                                                # No SS code to verify — accept by filename match or try to find file directly
+                                                found = _find_stacks_file(fname, "", extra_search_paths)
+                                                if found:
+                                                    dest = _copy_dest(found, dl_dir)
+                                                    task_store.add_log(task_id, f"AA: stacks OK (no SS)=>{fname}")
+                                                    return dest
+                                                found = _docker_cp_stacks(fp)
+                                                if found:
+                                                    dest = _copy_dest(found, dl_dir)
+                                                    task_store.add_log(task_id, f"AA: docker cp OK (no SS)=>{fname}")
+                                                    return dest
+                                                task_store.add_log(task_id, f"AA:   file not found for history item {fname}, continuing")
                                                 continue
                                             if hist_ssid != ss_code:
                                                 task_store.add_log(task_id, f"AA:   history SSID={hist_ssid} ≠ target SSID={ss_code}, skip")
