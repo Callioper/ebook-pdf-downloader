@@ -105,7 +105,7 @@ class LlmApiClient:
                     )
                     time.sleep(delay)
                     continue
-                log.warning("LLM API error: HTTP %d", resp.status_code)
+                log.warning("LLM API error: HTTP %d — %s", resp.status_code, (resp.text or "")[:200])
                 return None
             except httpx.TimeoutException:
                 # Timeout means model is too slow — retrying won't help
@@ -161,7 +161,7 @@ class LlmApiClient:
                         delay = min(2**attempt, 30)
                         time.sleep(delay)
                         continue
-                    log.warning("LLM API error: HTTP %d", resp.status_code)
+                    log.warning("LLM API error: HTTP %d — %s", resp.status_code, (resp.text or "")[:200])
                     return None
                 except httpx.TimeoutException:
                     log.warning("LLM API timeout after %ds", self.timeout)
@@ -211,12 +211,7 @@ class LlmApiClient:
                         },
                         {
                             "type": "text",
-                            "text": (
-                                f"Extract ALL text from this image. "
-                                f"This is a scanned book page in {lang_hint}. "
-                                "Preserve the original text layout, line breaks, and structure. "
-                                "Do not add commentary. Output ONLY the extracted text."
-                            ),
+                            "text": f"Extract ALL text from this image. This is a scanned book page in {lang_hint}.",
                         },
                     ],
                 }

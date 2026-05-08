@@ -91,6 +91,7 @@ class LlmOcrPipeline:
         async def process_page(p_num: int):
             async with sem:
                 text = await self.client.perform_ocr_url(images_dict[p_num])
+                await asyncio.sleep(2)  # cooldown between page requests
             if text:
                 aligned = await asyncio.to_thread(
                     self.aligner.align, [b for b, _ in pages_data[p_num]], text
@@ -123,27 +124,26 @@ class LlmOcrPipeline:
 
 
 def _rasterize_pages(path: str, dpi: int, max_dim: int) -> dict[int, str]:
-    """Render PDF pages to data:image/jpeg;base64,... URLs ready for LLM consumption.
-    No extra re-compression — thumbnails to max_dim, JPEG quality 85."""
+    """Render PDF pages to data:image/png;base64,... URLs ready for LLM consumption."""
     ext = Path(path).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
         with Image.open(path) as src:
             img = src.convert("RGB").copy()
             img.thumbnail((max_dim, max_dim))
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85)
-            return {0: "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")}
+            img.save(buf, format="PNG")
+            return {0: "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")}
 
     images: dict[int, str] = {}
     doc = fitz.open(path)
     try:
         for page_num, page in enumerate(doc):
             pix = page.get_pixmap(dpi=dpi)
-            img = Image.open(io.BytesIO(pix.tobytes("jpg", jpg_quality=85)))
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
             img.thumbnail((max_dim, max_dim))
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85)
-            images[page_num] = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+            img.save(buf, format="PNG")
+            images[page_num] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
     finally:
         doc.close()
     return images
