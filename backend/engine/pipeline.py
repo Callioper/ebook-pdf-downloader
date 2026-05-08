@@ -218,8 +218,23 @@ async def _run_ocrmypdf_with_progress(
             _had_output = True
 
             # Parse LLM-OCR progress
-            # Format 1: "27 generate_pdf TEXT: ..." — current page number
-            # Format 2: "generate_pdf: pages=10, words=1001, ..." — batch summary
+            # Format 0: "4 HTTP Request: POST ..." — per-page LLM API call (most accurate real-time)
+            # Format 1: "27 generate_pdf TEXT: ..." — page completed by ocrmypdf
+            _llm_http = re.search(r'(\d+)\s+HTTP\s+Request', _text)
+            if _llm_http:
+                _had_llm_page = True
+                _cur = max(_cur, int(_llm_http.group(1)))
+                if total_pages > 0:
+                    _tot = total_pages
+                elif _tot == 0:
+                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
+                _cur = min(_cur, _tot)
+                if _cur % 5 == 0 or _cur >= _tot:
+                    task_store.add_log(task_id, f"  LLM-OCR: {_cur}/{_tot} 页")
+                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
+                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
+                continue
+
             _llm_pg = re.search(r'(\d+)\s+generate_pdf\s+TEXT:', _text)
             if _llm_pg:
                 _had_llm_page = True
@@ -232,20 +247,6 @@ async def _run_ocrmypdf_with_progress(
                 # Log every 5 pages or when done
                 if _cur % 5 == 0 or _cur >= _tot:
                     task_store.add_log(task_id, f"  LLM-OCR: {_cur}/{_tot} 页")
-                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
-                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
-                continue
-
-            _llm = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
-            if _llm:
-                _cur = max(_cur, int(_llm.group(1)))
-                if total_pages > 0:
-                    _tot = total_pages
-                elif _tot == 0:
-                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
-                _cur = min(_cur, _tot)
-                if _cur % 5 == 0 or _cur >= _tot:
-                    task_store.add_log(task_id, f"  LLM-OCR: ~{_cur}/{_tot} 页")
                 _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
                 await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
                 continue
