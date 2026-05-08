@@ -558,6 +558,42 @@ async def check_proxy(body: ProxyRequest):
         return {"ok": False, "message": str(e)}
 
 
+@router.post("/check-ai-vision")
+async def check_ai_vision(body: Dict[str, Any]):
+    """测试 AI Vision 模型连通性。"""
+    endpoint = body.get("endpoint", "")
+    model = body.get("model", "")
+    api_key = body.get("api_key", "")
+    provider = body.get("provider", "openai_compatible")
+
+    if not endpoint or not model:
+        return {"ok": False, "message": "请填写 API 端点和模型名称"}
+
+    try:
+        from addbookmark.ai_vision_toc import call_vision_llm
+        # Use a 1x1 red pixel PNG as test image
+        img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+        response = await call_vision_llm(
+            images=[img],
+            prompt="Say 'OK' if you can see this image.",
+            endpoint=endpoint,
+            model=model,
+            api_key=api_key or "",
+            provider=provider,
+            timeout=15,
+        )
+        # Check response
+        ok_keywords = "ok"
+        if ok_keywords in response.lower():
+            return {"ok": True, "message": f"连接成功 ({model})"}
+        return {"ok": True, "message": f"已连接，但模型未识别测试图片 (response: {response[:50]})"}
+    except ImportError as e:
+        return {"ok": False, "message": f"模块缺失: {e}"}
+    except Exception as e:
+        msg = str(e)[:200]
+        return {"ok": False, "message": f"连接失败: {msg}"}
+
+
 @router.post("/check-proxy-sources")
 async def check_proxy_sources(body: ProxyRequest):
     proxy_url = body.http_proxy or get_config().get("http_proxy", "")

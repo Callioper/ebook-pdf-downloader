@@ -328,6 +328,9 @@ export default function ConfigSettings() {
     bookmarks: false,
   })
 
+  const [aiVisionTest, setAiVisionTest] = useState<'testing' | 'ok' | 'fail' | null>(null)
+  const [aiVisionMsg, setAiVisionMsg] = useState('')
+
   const [dbDetecting, setDbDetecting] = useState(false)
   const [dbStatus, setDbStatus] = useState<'green' | 'red' | 'yellow' | null>(null)
   const [dbNames, setDbNames] = useState<string[]>([])
@@ -1706,15 +1709,15 @@ export default function ConfigSettings() {
         </div>
       )}
 
-      {/* AI Vision 目录提取 */}
+      {/* ============ 书签 ============ */}
       <SectionHeader
-        title="AI Vision 目录提取"
-        summary={form.ai_vision_enabled ? (form.ai_vision_model || '未配置') : '已禁用'}
-        color="purple"
-        expanded={expanded.ai_vision}
-        onToggle={() => toggleSection('ai_vision')}
+        title="书签"
+        summary={form.ai_vision_enabled ? (form.ai_vision_model || '已启用') : 'AI Vision 未启用'}
+        color="gray"
+        expanded={expanded.bookmarks}
+        onToggle={() => toggleSection('bookmarks')}
       />
-      {expanded.ai_vision && (
+      {expanded.bookmarks && (
         <div className="space-y-3 py-3">
           <div className="flex items-center gap-2">
             <input type="checkbox" id="ai_vision_enabled"
@@ -1726,21 +1729,21 @@ export default function ConfigSettings() {
             <label className="text-xs text-gray-500 block mb-1">API 端点</label>
             <input type="text" value={form.ai_vision_endpoint || ''}
               onChange={(e) => updateForm({ ai_vision_endpoint: e.target.value })}
-              placeholder="https://generativelanguage.googleapis.com/v1beta"
+              placeholder="http://127.0.0.1:12345/v1"
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">模型名称</label>
             <input type="text" value={form.ai_vision_model || ''}
               onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
-              placeholder="gemini-2.0-flash"
+              placeholder="sabafallah/deepseek-ocr"
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">API Key</label>
             <input type="password" value={form.ai_vision_api_key || ''}
               onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
-              placeholder="sk-..."
+              placeholder="lm-studio"
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
@@ -1748,8 +1751,9 @@ export default function ConfigSettings() {
             <select value={form.ai_vision_provider || 'openai_compatible'}
               onChange={(e) => updateForm({ ai_vision_provider: e.target.value })}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
-              <option value="openai_compatible">OpenAI 兼容 (智谱/Qwen/DeepSeek)</option>
+              <option value="openai_compatible">OpenAI 兼容 (智谱/Qwen/DeepSeek/lmstudio)</option>
               <option value="gemini">Google Gemini</option>
+              <option value="minimax">MiniMax M2.7 (Anthropic 格式)</option>
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1766,25 +1770,42 @@ export default function ConfigSettings() {
                 min={72} max={300} className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs" />
             </div>
           </div>
+          <button
+            type="button"
+            onClick={async () => {
+              setAiVisionTest('testing');
+              try {
+                const res = await fetch('/api/v1/check-ai-vision', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    endpoint: form.ai_vision_endpoint,
+                    model: form.ai_vision_model,
+                    api_key: form.ai_vision_api_key,
+                    provider: form.ai_vision_provider,
+                  }),
+                });
+                const data = await res.json();
+                setAiVisionTest(data.ok ? 'ok' : 'fail');
+                setAiVisionMsg(data.message || data.error || '');
+              } catch (e) {
+                setAiVisionTest('fail');
+                setAiVisionMsg(String(e));
+              }
+            }}
+            disabled={aiVisionTest === 'testing'}
+            className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+          >
+            {aiVisionTest === 'testing' ? '测试中...' : '测试连接'}
+          </button>
+          {aiVisionMsg && (
+            <p className={`text-xs ${aiVisionTest === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
+              {aiVisionMsg}
+            </p>
+          )}
           <p className="text-xs text-gray-400">
-            优先从 OCR 文字层提取目录（免费）。失败时用 AI Vision 从目录页图片提取。
-            支持 Gemini、智谱 GLM-4V、Qwen-VL 等视觉模型。
-          </p>
-        </div>
-      )}
-
-      {/* ============ 书签 ============ */}
-      <SectionHeader
-        title="书签"
-        summary="目录提取与PDF书签处理 (开发中)"
-        color="gray"
-        expanded={expanded.bookmarks}
-        onToggle={() => toggleSection('bookmarks')}
-      />
-      {expanded.bookmarks && (
-        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
-          <p className="text-xs text-gray-400 text-center py-4">
-            书签处理功能开发中，敬请期待...
+            阶段1 从 OCR 文字层提取目录（免费），阶段2 用 AI Vision 从目录页图片提取。
+            支持 OpenAI 兼容 / Gemini / MiniMax 格式。
           </p>
         </div>
       )}
