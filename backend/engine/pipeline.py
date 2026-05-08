@@ -1270,18 +1270,12 @@ async def _download_via_aa_and_stacks(
                                             fname = os.path.basename(fp)
                                             hist_ssid = fname.split(".")[0] if "." in fname else fname
                                             if not ss_code:
-                                                # No SS code to verify — accept by filename match or try to find file directly
-                                                found = _find_stacks_file(fname, "", extra_search_paths)
-                                                if found:
-                                                    dest = _copy_dest(found, dl_dir)
-                                                    task_store.add_log(task_id, f"AA: stacks OK (no SS)=>{fname}")
-                                                    return dest
-                                                found = _docker_cp_stacks(fp)
-                                                if found:
-                                                    dest = _copy_dest(found, dl_dir)
-                                                    task_store.add_log(task_id, f"AA: docker cp OK (no SS)=>{fname}")
-                                                    return dest
-                                                task_store.add_log(task_id, f"AA:   file not found for history item {fname}, continuing")
+                                                ext = os.path.splitext(fname)[1].lower() if "." in fname else ""
+                                                if ext and ext != ".pdf":
+                                                    task_store.add_log(task_id, f"AA: 下载格式不是 PDF ({ext}), 任务终止 — 请在 Anna's Archive 网页手动下载")
+                                                    task_store.update(task_id, {"status": STATUS_FAILED, "error": f"AA 下载格式为 {ext}，非 PDF，请在 Anna's Archive 网页手动下载 PDF 格式"})
+                                                    return None
+                                                task_store.add_log(task_id, f"AA: no SS code, skip history (SSID={hist_ssid} unverifiable)")
                                                 continue
                                             if hist_ssid != ss_code:
                                                 task_store.add_log(task_id, f"AA:   history SSID={hist_ssid} ≠ target SSID={ss_code}, skip")
@@ -1733,6 +1727,11 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
             report["download_path"] = aa_result
 
     # ── 路径B（或ZL优先模式的路径1）：Z-Library ──
+    _task_chk = task_store.get(task_id)
+    if _task_chk and _task_chk.get("status") == STATUS_FAILED:
+        task_store.add_log(task_id, "任务已标记为失败，跳过后续下载尝试")
+        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 100})
+        return report
     if not downloaded:
         task_store.add_log(task_id, "=== Path B: Z-Library ===")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
@@ -2658,12 +2657,15 @@ async def run_pipeline(task_id: str):
     try:
         for step_idx, step_name in enumerate(PIPELINE_STEPS):
             task = task_store.get(task_id)
-            if not task or task.get("status") == STATUS_CANCELLED:
-                task_store.add_log(task_id, "Task cancelled")
-                task_store.update(task_id, {"status": STATUS_CANCELLED})
+            if not task or task.get("status") in (STATUS_CANCELLED, STATUS_FAILED):
+                if task and task.get("status") == STATUS_FAILED:
+                    task_store.add_log(task_id, f"Task failed: {task.get('error', 'unknown')}")
+                elif task and task.get("status") == STATUS_CANCELLED:
+                    task_store.add_log(task_id, "Task cancelled")
+                    task_store.update(task_id, {"status": STATUS_CANCELLED})
                 await _emit(task_id, "task_update", {
                     "task_id": task_id,
-                    "status": STATUS_CANCELLED,
+                    "status": task.get("status", STATUS_FAILED) if task else STATUS_FAILED,
                 })
                 return
 
