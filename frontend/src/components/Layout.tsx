@@ -242,13 +242,15 @@ export default function Layout() {
               className="hover:text-gray-600 disabled:opacity-50"
               title="检查更新"
             >
-              {checking ? '(checking)' : '(re-check)'}
+              <svg className={`w-3.5 h-3.5 ${checking ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
             </button>
             <span>v{version || '...'}</span>
           </div>
-          <a href="https://github.com/Callioper/book-downloader" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">
-github.com/Callioper/ebook-pdf-downloader
-          </a>
+            <a href="https://github.com/Callioper/ebook-pdf-downloader" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">
+              github.com/Callioper/ebook-pdf-downloader
+            </a>
         </div>
       </footer>
     </div>
