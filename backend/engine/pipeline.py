@@ -2618,7 +2618,17 @@ async def run_pipeline(task_id: str):
     if task_status == STATUS_CANCELLED:
         return
 
-    task_store.update(task_id, {"status": STATUS_RUNNING, "current_step": "fetch_metadata"})
+    # When resuming a paused task, skip already-completed steps
+    _prev_step = task.get("current_step", "")
+    _prev_report = task.get("report", {})
+    if _prev_step and _prev_step not in ("", "starting", "fetch_metadata"):
+        report = _prev_report
+        _start_from = PIPELINE_STEPS.index(_prev_step) if _prev_step in PIPELINE_STEPS else 0
+        task_store.add_log(task_id, f"↩ 从步骤 {_start_from + 1}/7 ({_prev_step}) 恢复")
+    else:
+        _start_from = 0
+        report = {}
+    task_store.update(task_id, {"status": STATUS_RUNNING})
     await _emit(task_id, "task_started", {"task_id": task_id})
 
     # Log current settings at pipeline start
@@ -2638,6 +2648,8 @@ async def run_pipeline(task_id: str):
 
     try:
         for step_idx, step_name in enumerate(PIPELINE_STEPS):
+            if step_idx < _start_from:
+                continue
             task = task_store.get(task_id)
             if not task or task.get("status") in (STATUS_CANCELLED, STATUS_FAILED):
                 if task and task.get("status") == STATUS_FAILED:

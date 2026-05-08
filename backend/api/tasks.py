@@ -121,8 +121,11 @@ async def resume_task(task_id: str, background_tasks: BackgroundTasks):
     ok = task_store.resume(task_id)
     if not ok:
         raise HTTPException(status_code=400, detail="Task cannot be resumed")
-    from engine.pipeline import run_pipeline
-    background_tasks.add_task(run_pipeline, task_id)
+    task = task_store.get(task_id)
+    if task and task.get("_restart_paused"):
+        task_store.update(task_id, {"_restart_paused": False})
+        from engine.pipeline import run_pipeline
+        background_tasks.add_task(run_pipeline, task_id)
     await ws_manager.broadcast_task(task_id, {
         "type": "task_update",
         "task_id": task_id,

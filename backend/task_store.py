@@ -69,6 +69,7 @@ class TaskStore:
                 _age = _now - t.get("updated_at", t.get("created_at", 0))
                 if _age > 3600:
                     t["status"] = STATUS_PAUSED
+                    t["_restart_paused"] = True
                     t["error"] = ""
                     t["logs"] = (t.get("logs") or []) + [f"[{time.strftime('%H:%M:%S')}] 应用重启，任务已自动暂停。可手动恢复继续执行。"]
                     _stale_count += 1
