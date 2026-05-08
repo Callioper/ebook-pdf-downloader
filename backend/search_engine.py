@@ -194,53 +194,45 @@ def detect_database_paths(timeout: float = 30.0) -> List[Dict[str, Any]]:
         "calibre", "Calibre", "Calibre 书库",
     ]
 
-    # === Direct scan all drives for DB files at root level ===
-    if os.name == "nt":
-        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-            try:
-                root = Path(f"{drive}:\\")
-                if not os.path.exists(str(root)):
-                    continue
-                for db_name in target_files:
-                    db_path = root / db_name
-                    if db_path.exists():
-                        candidates.append({"path": str(root), "dbs": [db_name], "exists": True})
-                        break
-            except (PermissionError, OSError):
-                continue
+    # === Direct scan all search roots for DB files at root level ===
+    from platform_utils import get_search_roots
+    for root_path in get_search_roots():
+        try:
+            root = Path(root_path)
+            for db_name in target_files:
+                db_path = root / db_name
+                if db_path.exists():
+                    candidates.append({"path": str(root), "dbs": [db_name], "exists": True})
+                    break
+        except (PermissionError, OSError):
+            continue
 
-    # === Scan drive roots for known directory names (depth 1 into match) ===
-    if os.name == "nt":
-        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-            try:
-                root = Path(f"{drive}:\\")
-                if not os.path.exists(str(root)):
-                    continue
-                for name in known_names:
-                    p = root / name
-                    if p.exists() and p.is_dir():
-                        _safe_scan_dir(p, max_depth=1)
-            except (PermissionError, OSError):
-                continue
+    # === Scan search roots for known directory names (depth 1 into match) ===
+    for root_path in get_search_roots():
+        try:
+            root = Path(root_path)
+            for name in known_names:
+                p = root / name
+                if p.exists() and p.is_dir():
+                    _safe_scan_dir(p, max_depth=1)
+        except (PermissionError, OSError):
+            continue
 
-    # === Scan all drive root subdirs (depth 2: subdir -> known_name -> db) ===
-    if os.name == "nt":
-        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-            try:
-                root = Path(f"{drive}:\\")
-                if not os.path.exists(str(root)):
-                    continue
-                for child in root.iterdir():
-                    try:
-                        if child.is_dir():
-                            for name in known_names:
-                                p = child / name
-                                if p.exists() and p.is_dir():
-                                    _safe_scan_dir(p, max_depth=1)
-                    except (PermissionError, OSError):
-                        pass
-            except (PermissionError, OSError):
-                continue
+    # === Scan all search root subdirs (depth 2: subdir -> known_name -> db) ===
+    for root_path in get_search_roots():
+        try:
+            root = Path(root_path)
+            for child in root.iterdir():
+                try:
+                    if child.is_dir():
+                        for name in known_names:
+                            p = child / name
+                            if p.exists() and p.is_dir():
+                                _safe_scan_dir(p, max_depth=1)
+                except (PermissionError, OSError):
+                    pass
+        except (PermissionError, OSError):
+            continue
 
     # === Scan user home subdirs (English + Chinese) at depth 2 ===
     for sub in ["Downloads", "下载", "Documents", "文档", "Desktop", "桌面"]:
@@ -280,18 +272,18 @@ def detect_database_paths(timeout: float = 30.0) -> List[Dict[str, Any]]:
     except Exception:
         pass
 
-    # === Deep recursive scan if no results yet (os.walk on all drives) ===
-    if not candidates and os.name == "nt":
+    # === Deep recursive scan if no results yet (os.walk on all search roots) ===
+    if not candidates:
         _skip_dirs = {
             "Windows", "Program Files", "Program Files (x86)", "ProgramData",
             "Windows.old", "$RECYCLE.BIN", "System Volume Information",
             "node_modules", "__pycache__", ".git", "venv", ".venv", ".idea",
             "Recovery", "Boot", "EFI", "MSOCache", "PerfLogs",
         }
-        for drive in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+        for root_path in get_search_roots():
             if _time.time() > deadline:
                 break
-            walk_root = Path(f"{drive}:\\")
+            walk_root = Path(root_path)
             if not walk_root.exists():
                 continue
             try:
