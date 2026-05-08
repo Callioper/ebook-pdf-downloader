@@ -1570,6 +1570,59 @@ async def _wait_for_user_confirmation(
     return False
 
 
+async def _wait_for_step_confirmation(
+    task_id: str,
+    step_name: str,
+    step_label: str,
+    config_info: Dict[str, Any],
+    timeout: int = 300,
+) -> bool:
+    """
+    Emit step confirmation request before optional steps (OCR, bookmark).
+    User can "execute" (return True), "skip" (return False), or timeout → skip.
+    """
+    task_store.add_log(task_id, f"⏳ [{step_label}] 等待确认... (超时 {timeout}s 后自动跳过)")
+    task_store.update(task_id, {
+        "waiting_step_confirm": True,
+        "_step_confirm": None,
+        "_step_confirm_step": step_name,
+    })
+    await ws_manager.broadcast_task(task_id, {
+        "type": "confirm_step",
+        "task_id": task_id,
+        "step_name": step_name,
+        "step_label": step_label,
+        "config_info": config_info,
+    })
+
+    for _ in range(timeout):
+        await asyncio.sleep(1)
+        task = task_store.get(task_id)
+        if not task or task.get("status") == STATUS_CANCELLED:
+            task_store.update(task_id, {"waiting_step_confirm": False})
+            return False
+        decision = task.get("_step_confirm")
+        if decision is not None:
+            task_store.update(task_id, {
+                "waiting_step_confirm": False,
+                "_step_confirm": None,
+                "_step_confirm_step": None,
+            })
+            if decision is True:
+                task_store.add_log(task_id, f"✅ [{step_label}] 用户确认执行")
+            else:
+                task_store.add_log(task_id, f"⏭ [{step_label}] 用户跳过")
+            return decision
+
+    task_store.add_log(task_id, f"⏰ [{step_label}] 确认超时，跳过")
+    task_store.update(task_id, {
+        "waiting_step_confirm": False,
+        "_step_confirm": None,
+        "_step_confirm_step": None,
+    })
+    return False
+
+
 async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 3/7: Download book PDF — 多级降级策略

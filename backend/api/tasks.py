@@ -231,3 +231,20 @@ async def confirm_download(task_id: str, body: ConfirmDownloadRequest):
         logger.info(f"User selected book {body.book_id} for task {task_id}")
     logger.info(f"User {'confirmed' if body.confirm else 'declined'} download for task {task_id}")
     return {"ok": True, "confirm": body.confirm}
+
+
+class ConfirmStepRequest(BaseModel):
+    confirm: bool = False
+
+
+@router.post("/{task_id}/confirm-step")
+async def confirm_step(task_id: str, body: ConfirmStepRequest):
+    """用户确认/跳过可选步骤（OCR 识别或目录处理）"""
+    task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task_store.update(task_id, {"_step_confirm": body.confirm})
+    logger = logging.getLogger(__name__)
+    step = task.get("_step_confirm_step", "unknown")
+    logger.info(f"User {'confirmed' if body.confirm else 'skipped'} step {step} for task {task_id}")
+    return {"ok": True, "confirm": body.confirm}
