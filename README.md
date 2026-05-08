@@ -10,6 +10,8 @@
 
 Ebook PDF Downloader 是一款全栈电子书下载工具，内置 React 前端和 FastAPI 后端。支持本地 SQLite 数据库检索（DX_2.0-5.0 / DX_6.0），多源在线下载（Anna's Archive + Z-Library + LibGen），三引擎 OCR（Tesseract / PaddleOCR / LLM OCR），智能书签/目录生成。
 
+> **支持平台:** Windows 10+ x64。便携版 exe 开箱即用，源码版需 Python 3.10+。
+
 ---
 
 ## ✨ 功能特性
@@ -163,15 +165,11 @@ cd ebook-pdf-downloader
 cd backend
 pip install -r requirements.txt
 
-# 编译前端（可选，后端已包含预编译静态文件）
-cd ../frontend
-npm install
-npm run build
-
-# 启动
-cd ../backend
+# 启动（使用预编译的前端静态文件）
 python main.py
 ```
+
+> **前端已预编译** `backend/static/` 目录中包含最新前端构建产物，无需安装 Node.js 或运行 npm。如需修改前端代码，才需要 `cd ../frontend && npm install && npm run build`。
 
 > PaddleOCR 需要独立 Python 3.11 venv（PaddlePaddle MKL 冲突）。进入设置页 → OCR 面板 → 一键安装 PaddleOCR。
 
@@ -343,6 +341,48 @@ python main.py
 | [书葵网](https://www.shukui.net/) | 图书目录/书签数据 |
 | [Anna's Archive](https://annas-archive.org/) | 开放图书元数据与下载 |
 | [Z-Library](https://z-lib.sk/) | 图书在线下载源 |
+
+---
+
+## ❓ 常见问题
+
+<details>
+<summary><b>搜索无结果</b></summary>
+
+1. 检查设置页 → 数据库路径是否正确，是否包含 `DX_2.0-5.0.db` / `DX_6.0.db` 文件
+2. 点击"智能查找"扫描常见位置
+3. 如数据库未下载，查看 [EbookDatabase 下载文档](https://github.com/Hellohistory/EbookDatabase/blob/main/Markdown/%E6%95%B0%E6%8D%AE%E5%BA%93%E4%B8%8B%E8%BD%BD%E6%96%87%E6%A1%A3.md)
+</details>
+
+<details>
+<summary><b>下载一直卡住</b></summary>
+
+1. 检查 stacks Docker 是否运行：`docker ps | grep stacks`（默认端口 7788）
+2. 如使用 FlareSolverr，确认 Docker 容器已启动
+3. 检查 HTTP 代理设置是否正确
+4. 查看任务日志了解具体错误原因
+</details>
+
+<details>
+<summary><b>OCR 识别乱码</b></summary>
+
+1. 确认 Tesseract 已安装且包含中英文语言包
+2. 推荐使用 PaddleOCR（设置页 OCR 面板一键安装，中文识别最佳）
+3. 检查 OCR 语言设置是否为 `chi_sim+eng`
+</details>
+
+<details>
+<summary><b>无法打开 exe / 被杀毒软件拦截</b></summary>
+
+1. 添加 `ebook-pdf-downloader.exe` 到杀毒软件白名单
+2. 或使用源码版运行（`python main.py`）
+</details>
+
+<details>
+<summary><b>PaddleOCR 安装失败</b></summary>
+
+PaddlePaddle 与 Python 3.12+ MKL 存在冲突。设置页 OCR 面板提供独立 Python 3.11 venv 安装方案。
+</details>
 
 ---
 
