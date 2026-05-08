@@ -1,7 +1,8 @@
 """Build sandwich PDF with Surya OCR (detection + recognition).
 
-Uses Surya's full OCR pipeline which outputs text_lines with text+bbox+confidence
-in one step. Embeds text onto original PDF pages — no re-rendering, small file size.
+Uses Surya's full OCR pipeline which outputs text_lines with text+bbox+confidence.
+Writes a fresh sandwich PDF with re-rendered page images and invisible text layer.
+Uses china-t (PyMuPDF built-in CJK font) for minimal file bloat.
 """
 import os
 import io
@@ -14,7 +15,7 @@ def build_sandwich_surya(
     input_pdf_path: str,
     output_pdf_path: str,
     dpi: int = 200,
-    font_path: str = r"C:\Windows\Fonts\simhei.ttf",
+    font_path: str = "",
     languages: Optional[List[str]] = None,
 ) -> bool:
     """Use Surya full OCR to add invisible searchable text layer to PDF."""
@@ -34,17 +35,17 @@ def build_sandwich_surya(
         det = DetectionPredictor()
         results = rec(images, det_predictor=det)
 
+        new_doc = fitz.open()
         for page_num, result in enumerate(results):
-            page = doc[page_num]
-            width = page.rect.width
-            height = page.rect.height
+            pix = doc[page_num].get_pixmap(dpi=dpi)
+            img_data = pix.tobytes("jpg", jpg_quality=45)  # low quality = small
+            width = doc[page_num].rect.width
+            height = doc[page_num].rect.height
+            new_page = new_doc.new_page(width=width, height=height)
+            new_page.insert_image(new_page.rect, stream=img_data)
 
-            use_cjk = os.path.exists(font_path)
-            if use_cjk:
-                page.insert_font(fontname="CJK", fontfile=font_path)
-                cjk_font = fitz.Font(fontfile=font_path)
-            else:
-                cjk_font = fitz.Font("china-t")
+            # Use built-in CJK font (china-t = SimHei, no external file needed)
+            cjk_font = fitz.Font("china-t")
 
             iw, ih = result.image_bbox[2], result.image_bbox[3]
             for line in result.text_lines:
@@ -68,19 +69,21 @@ def build_sandwich_surya(
 
                 baseline = fitz.Point(nx0, ny1 - 2)
                 morph = (baseline, fitz.Matrix(scale_x, 1.0))
-                page.insert_text(
+                new_page.insert_text(
                     baseline, text,
-                    fontname="CJK" if use_cjk else "china-t",
+                    fontname="china-t",
                     fontsize=fontsize, render_mode=3,
                     morph=morph,
                 )
 
-        doc.save(output_pdf_path, deflate=True, garbage=4)
+        new_doc.save(output_pdf_path, deflate=True, garbage=4)
+        new_doc.close()
         doc.close()
         return True
     except Exception as e:
         try:
             doc.close()
+            new_doc.close()
         except Exception:
             pass
         raise e
