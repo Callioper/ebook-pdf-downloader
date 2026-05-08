@@ -701,12 +701,24 @@ async def call_vision_llm(
     if not model:
         raise ValueError("AI Vision: model is required")
 
+    # Alias mapping
+    if provider in ("minimax_openai",):
+        provider = "openai_compatible"
+    elif provider in ("minimax_anthropic",):
+        provider = "anthropic"
+
     if provider == "gemini":
         return await _call_gemini(images, prompt, endpoint, model, api_key, timeout)
-    elif provider == "minimax" or provider == "anthropic":
+    elif provider == "anthropic":
         return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
     elif provider == "azure":
         return await _call_azure(images, prompt, endpoint, model, api_key, timeout)
+    elif provider == "custom":
+        # Auto-detect: try OpenAI format first, fallback to Anthropic
+        try:
+            return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
+        except Exception:
+            return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
     else:
         return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
 

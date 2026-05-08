@@ -561,58 +561,101 @@ async def check_proxy(body: ProxyRequest):
 @router.post("/check-ai-vision")
 async def check_ai_vision(body: Dict[str, Any]):
     """测试 AI Vision 模型连通性。"""
-    endpoint = body.get("endpoint", "")  # e.g. http://127.0.0.1:12345/v1
+    endpoint = body.get("endpoint", "")
     model = body.get("model", "")
     api_key = body.get("api_key", "")
     provider = body.get("provider", "openai_compatible")
+    messages_api = body.get("messages_api", False)
 
     if not endpoint or not model:
         return {"ok": False, "message": "请填写 API 端点和模型名称"}
 
-    # Ensure endpoint ends with /v1
-    if not endpoint.rstrip('/').endswith('/v1'):
+    # Map aliases
+    if provider == "minimax_openai":
+        provider = "openai_compatible"
+    elif provider == "minimax_anthropic":
+        provider = "anthropic"
+    elif provider == "custom" and messages_api:
+        provider = "anthropic"
+    elif provider == "custom":
+        provider = "openai_compatible"
+
+    # Ensure endpoint ends with /v1 (skip for azure and gemini)
+    if provider not in ("azure", "gemini") and not endpoint.rstrip('/').endswith('/v1'):
         endpoint = endpoint.rstrip('/') + '/v1'
 
     try:
-        # Step 1: test text-only (no image) to verify basic connectivity
         import httpx
-        url = f"{endpoint.rstrip('/')}/chat/completions"
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": "Reply with just one word: OK"}],
-            "max_tokens": 10,
-            "temperature": 0,
-        }
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code != 200:
-            detail = resp.text[:200]
-            return {"ok": False, "message": f"API 返回 {resp.status_code}: {detail}"}
-        try:
-            data = resp.json()
-            text_response = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError):
-            return {"ok": False, "message": f"API 响应格式异常: {resp.text[:200]}"}
 
-        if "ok" not in text_response.lower() and len(text_response) < 20:
-            return {"ok": True, "message": f"文本连接成功 (model: {model})"}
+        if provider == "azure":
+            url = f"{endpoint.rstrip('/')}/openai/deployments/{model}/chat/completions?api-version=2024-02-15-preview"
+            payload = {
+                "messages": [{"role": "user", "content": "Reply with just one word: OK"}],
+                "max_tokens": 10, "temperature": 0,
+            }
+            headers = {"Content-Type": "application/json", "api-key": api_key}
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                return {"ok": False, "message": f"Azure API 返回 {resp.status_code}: {resp.text[:200]}"}
+            try:
+                data = resp.json()
+                data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError):
+                return {"ok": False, "message": f"响应格式异常: {resp.text[:200]}"}
+            return {"ok": True, "message": f"Azure 连接成功 (model: {model})"}
 
-        # Step 2: test with a tiny image to verify vision support
-        img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
-        payload["messages"] = [{"role": "user", "content": [
-            {"type": "text", "text": "Reply with just one word: OK"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}},
-        ]}]
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code != 200:
-            return {"ok": True, "message": f"文本连接成功，但 Vision 不支持 (HTTP {resp.status_code})"}
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        return {"ok": True, "message": f"连接成功 - 模型 {model} (端点: {endpoint})"}
+        elif provider == "anthropic":
+            url = f"{endpoint.rstrip('/')}/v1/messages"
+            payload = {
+                "model": model,
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Reply with just one word: OK"}]}],
+            }
+            headers = {"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"}
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                return {"ok": False, "message": f"Anthropic API 返回 {resp.status_code}: {resp.text[:200]}"}
+            try:
+                data = resp.json()
+                data["content"][0]["text"]
+            except (KeyError, IndexError):
+                return {"ok": False, "message": f"响应格式异常: {resp.text[:200]}"}
+            return {"ok": True, "message": f"Anthropic 连接成功 (model: {model})"}
+
+        elif provider == "gemini":
+            url = f"{endpoint.rstrip('/')}/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": "Reply with just one word: OK"}]}],
+            }
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                return {"ok": False, "message": f"Gemini API 返回 {resp.status_code}: {resp.text[:200]}"}
+            return {"ok": True, "message": f"Gemini 连接成功 (model: {model})"}
+
+        else:
+            # OpenAI-compatible
+            url = f"{endpoint.rstrip('/')}/chat/completions"
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with just one word: OK"}],
+                "max_tokens": 10, "temperature": 0,
+            }
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                return {"ok": False, "message": f"API 返回 {resp.status_code}: {resp.text[:200]}"}
+            try:
+                data = resp.json()
+                text_response = data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError):
+                return {"ok": False, "message": f"响应格式异常: {resp.text[:200]}"}
+            return {"ok": True, "message": f"连接成功 (model: {model})"}
 
     except httpx.ConnectError:
         return {"ok": False, "message": f"无法连接到 {endpoint}，请检查地址和端口"}

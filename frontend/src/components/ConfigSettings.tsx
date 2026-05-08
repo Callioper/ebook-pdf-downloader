@@ -31,6 +31,7 @@ interface AppConfig {
   ai_vision_model: string
   ai_vision_api_key: string
   ai_vision_provider: string
+  ai_vision_messages_api: boolean  // custom: use Anthropic Messages API instead of OpenAI
   ai_vision_max_pages: number
   ai_vision_dpi: number
   [key: string]: unknown
@@ -160,6 +161,7 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_model: '',
   ai_vision_api_key: '',
   ai_vision_provider: 'openai_compatible',
+  ai_vision_messages_api: false,
   ai_vision_max_pages: 5,
   ai_vision_dpi: 150,
 }
@@ -1729,7 +1731,13 @@ export default function ConfigSettings() {
             <label className="text-xs text-gray-500 block mb-1">API 端点</label>
             <input type="text" value={form.ai_vision_endpoint || ''}
               onChange={(e) => updateForm({ ai_vision_endpoint: e.target.value })}
-              placeholder="http://127.0.0.1:12345/v1"
+              placeholder={
+                form.ai_vision_provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' :
+                form.ai_vision_provider === 'azure' ? 'https://{resource}.openai.azure.com' :
+                form.ai_vision_provider === 'anthropic' || form.ai_vision_provider === 'minimax_anthropic' ? 'https://api.anthropic.com' :
+                form.ai_vision_provider === 'minimax_openai' ? 'https://api.minimaxi.com/v1' :
+                'http://127.0.0.1:12345/v1'
+              }
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
@@ -1755,16 +1763,22 @@ export default function ConfigSettings() {
               <option value="azure">Azure OpenAI</option>
               <option value="anthropic">Anthropic Claude</option>
               <option value="gemini">Google Gemini</option>
-              <option value="minimax">MiniMax M2.7</option>
+              <option value="minimax_openai">MiniMax (OpenAI 兼容 · 国内/国际通用)</option>
+              <option value="minimax_anthropic">MiniMax (Anthropic 兼容 · Token Plan)</option>
+              <option value="custom">自定义 (Custom)</option>
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">每轮最大页数</label>
-              <input type="number" value={form.ai_vision_max_pages ?? 5}
-                onChange={(e) => updateForm({ ai_vision_max_pages: parseInt(e.target.value) || 5 })}
-                min={1} max={15} className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs" />
+          {form.ai_vision_provider === 'custom' && (
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="ai_vision_messages_api"
+                checked={form.ai_vision_messages_api ?? false}
+                onChange={(e) => updateForm({ ai_vision_messages_api: e.target.checked })} className="rounded" />
+              <label htmlFor="ai_vision_messages_api" className="text-xs text-gray-500">
+                使用 Anthropic Messages API 格式 (默认 OpenAI Chat Completions)
+              </label>
             </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 block mb-1">DPI</label>
               <input type="number" value={form.ai_vision_dpi ?? 150}
@@ -1785,6 +1799,7 @@ export default function ConfigSettings() {
                     model: form.ai_vision_model,
                     api_key: form.ai_vision_api_key,
                     provider: form.ai_vision_provider,
+                    messages_api: form.ai_vision_messages_api,
                   }),
                 });
                 const data = await res.json();
