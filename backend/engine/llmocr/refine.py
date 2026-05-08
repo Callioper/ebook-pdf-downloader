@@ -21,13 +21,18 @@ def is_refinable(box: list[float]) -> bool:
     return width > 0.03 and height > 0.008
 
 
-def crop_for_ocr(image_b64: str, box: list[float], pad_ratio: float = 0.02) -> Optional[str]:
+def crop_for_ocr(image_url: str, box: list[float], pad_ratio: float = 0.02) -> Optional[str]:
     """Crop a Surya-detected box from a page image for individual re-OCR.
-
-    Returns base64-encoded JPEG crop, or None if the region is blank
-    (low pixel stddev — likely notebook background, margin, or empty space).
+    
+    Accepts either raw base64 or data: URL. Returns base64 data URL
+    of the JPEG crop, or None if blank.
     """
-    img = Image.open(io.BytesIO(base64.b64decode(image_b64)))
+    import base64
+    if "," in image_url:
+        raw = base64.b64decode(image_url.split(",", 1)[1])
+    else:
+        raw = base64.b64decode(image_url)
+    img = Image.open(io.BytesIO(raw))
     w, h = img.size
 
     nx0, ny0, nx1, ny1 = box
@@ -48,7 +53,7 @@ def crop_for_ocr(image_b64: str, box: list[float], pad_ratio: float = 0.02) -> O
 
     buf = io.BytesIO()
     crop.save(buf, format="JPEG", quality=80)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 async def refine_uncertain(

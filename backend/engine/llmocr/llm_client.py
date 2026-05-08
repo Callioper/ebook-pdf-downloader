@@ -128,9 +128,61 @@ class LlmApiClient:
 
     async def perform_ocr(self, image_b64: str) -> str:
         """OCR a full page image (base64-encoded). Returns plain text."""
-        import base64
         image_bytes = base64.b64decode(image_b64)
-        result = await asyncio.to_thread(self.ocr_image, image_bytes)
+        result = await asyncio.to_thread(self.ocr_image, image_bytes, "Chinese and English")
+        return (result or "").strip()
+
+    async def perform_ocr_on_crop(self, image_url: str) -> str:
+        """OCR a cropped region (data URL or base64). Returns plain text."""
+        if image_url.startswith("data:"):
+            result = await asyncio.to_thread(self._ocr_from_url, image_url)
+        else:
+            image_bytes = base64.b64decode(image_url)
+            result = await asyncio.to_thread(self.ocr_image, image_bytes, "Chinese and English")
+        return (result or "").strip()
+
+    async def perform_ocr_url(self, data_url: str) -> str:
+        """OCR a page image from a data: URL (already encoded, no re-compression)."""
+        result = await asyncio.to_thread(self._ocr_from_url, data_url)
+        return (result or "").strip()
+
+    def _ocr_from_url(self, data_url: str) -> str | None:
+        """Send a pre-encoded data URL to the LLM without _prepare_image.
+        Uses a fresh httpx.Client per call to avoid thread-safety issues."""
+        body = self._build_body(data_url, "Chinese and English")
+        url = f"{self.endpoint}/v1/chat/completions"
+        with httpx.Client(timeout=self.timeout) as client:
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    resp = client.post(url, json=body)
+                    if resp.status_code == 200:
+                        return self._parse_response(resp.json())
+                    if self._is_retryable(resp):
+                        delay = min(2**attempt, 30)
+                        time.sleep(delay)
+                        continue
+                    log.warning("LLM API error: HTTP %d", resp.status_code)
+                    return None
+                except httpx.TimeoutException:
+                    log.warning("LLM API timeout after %ds", self.timeout)
+                    return None
+                except httpx.ConnectError:
+                    if attempt < self.max_retries:
+                        time.sleep(min(2**attempt, 5))
+                        continue
+                    return None
+                except Exception as e:
+                    if attempt < self.max_retries:
+                        time.sleep(min(2**attempt, 5))
+                        continue
+                    log.warning("LLM API error: %s", e)
+                    return None
+            return None
+
+    async def perform_ocr_on_crop(self, image_b64: str) -> str:
+        """OCR a cropped region (base64-encoded). Returns plain text."""
+        image_bytes = base64.b64decode(image_b64)
+        result = await asyncio.to_thread(self.ocr_image, image_bytes, "Chinese and English")
         return (result or "").strip()
 
     async def perform_ocr_on_crop(self, image_b64: str) -> str:

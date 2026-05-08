@@ -25,6 +25,13 @@ IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", 
 ProgressCallback = Callable[[str, int, int, str], Awaitable[None]]
 
 
+def _data_url_to_bytes(data_url: str) -> bytes:
+    """Extract raw bytes from a data: URL."""
+    if "," in data_url:
+        return base64.b64decode(data_url.split(",", 1)[1])
+    return base64.b64decode(data_url)
+
+
 class LlmOcrPipeline:
     """Standalone LLM OCR pipeline. No ocrmypdf. No Tesseract."""
 
@@ -64,7 +71,7 @@ class LlmOcrPipeline:
 
         # Phase 2: Batch Surya detection
         await _emit(progress, "detect", 0, 1, f"Detecting layout for {total_pages} pages...")
-        image_bytes = [base64.b64decode(images_dict[p]) for p in page_nums]
+        image_bytes = [_data_url_to_bytes(images_dict[p]) for p in page_nums]
         batch_boxes = await asyncio.to_thread(self.aligner.detect_batch, image_bytes)
         pages_data: dict[int, list[tuple[list[float], str]]] = {
             p: [(box, "") for box in batch_boxes[i]]
@@ -83,7 +90,7 @@ class LlmOcrPipeline:
 
         async def process_page(p_num: int):
             async with sem:
-                text = await self.client.perform_ocr(images_dict[p_num])
+                text = await self.client.perform_ocr_url(images_dict[p_num])
             if text:
                 aligned = await asyncio.to_thread(
                     self.aligner.align, [b for b, _ in pages_data[p_num]], text
@@ -116,26 +123,27 @@ class LlmOcrPipeline:
 
 
 def _rasterize_pages(path: str, dpi: int, max_dim: int) -> dict[int, str]:
-    """Render PDF pages to base64 JPEG images. Also handles raw image files."""
+    """Render PDF pages to data:image/jpeg;base64,... URLs ready for LLM consumption.
+    No extra re-compression — thumbnails to max_dim, JPEG quality 85."""
     ext = Path(path).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
         with Image.open(path) as src:
             img = src.convert("RGB").copy()
             img.thumbnail((max_dim, max_dim))
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=80)
-            return {0: base64.b64encode(buf.getvalue()).decode("utf-8")}
+            img.save(buf, format="JPEG", quality=85)
+            return {0: "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")}
 
     images: dict[int, str] = {}
     doc = fitz.open(path)
     try:
         for page_num, page in enumerate(doc):
             pix = page.get_pixmap(dpi=dpi)
-            img = Image.open(io.BytesIO(pix.tobytes("jpg", jpg_quality=50)))
+            img = Image.open(io.BytesIO(pix.tobytes("jpg", jpg_quality=85)))
             img.thumbnail((max_dim, max_dim))
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=50)
-            images[page_num] = base64.b64encode(buf.getvalue()).decode("utf-8")
+            img.save(buf, format="JPEG", quality=85)
+            images[page_num] = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
     finally:
         doc.close()
     return images
