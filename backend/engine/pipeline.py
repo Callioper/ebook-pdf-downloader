@@ -2369,13 +2369,30 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         report["ocr_done"] = True
                         # Post-OCR: rebuild sandwich PDF with Surya-aligned bboxes
                         try:
-                            from engine.surya_embed import build_sandwich_pdf
-                            surya_output = pdf_path.replace(".pdf", "_surya.pdf")
-                            if build_sandwich_pdf(pdf_path, pdf_path, surya_output, dpi=int(ocr_oversample)):
-                                os.replace(surya_output, pdf_path)
-                                task_store.add_log(task_id, "Surya: text layer aligned to detected bboxes")
-                        except ImportError:
-                            task_store.add_log(task_id, "Surya module not available on system Python, skipping alignment")
+                            _surya_script = os.path.join(os.path.dirname(__file__), "run_surya.py")
+                            if os.path.exists(_surya_script) and os.path.exists(_py_for_ocr):
+                                surya_output = pdf_path.replace(".pdf", "_surya.pdf")
+                                task_store.add_log(task_id, "Surya: aligning text bboxes...")
+                                _surya_env = {
+                                    **os.environ,
+                                    "PYTHONPATH": os.path.dirname(__file__) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+                                    "PYTHONUNBUFFERED": "1",
+                                }
+                                _surya_proc = subprocess.run(
+                                    [_py_for_ocr, _surya_script, pdf_path, surya_output, str(ocr_oversample)],
+                                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                    timeout=600, env=_surya_env,
+                                )
+                                if _surya_proc.returncode == 0 and "OK" in _surya_proc.stdout:
+                                    os.replace(surya_output, pdf_path)
+                                    task_store.add_log(task_id, "Surya: text layer aligned to detected bboxes")
+                                else:
+                                    _surya_err = (_surya_proc.stderr or "")[:200]
+                                    task_store.add_log(task_id, f"Surya alignment failed: {_surya_err}")
+                            else:
+                                task_store.add_log(task_id, "Surya: run_surya.py not found, skipping alignment")
+                        except subprocess.TimeoutExpired:
+                            task_store.add_log(task_id, "Surya: alignment timed out (600s)")
                         except Exception as e:
                             task_store.add_log(task_id, f"Surya alignment error: {str(e)[:100]}")
                     else:

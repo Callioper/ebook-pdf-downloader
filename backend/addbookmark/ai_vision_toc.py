@@ -989,10 +989,10 @@ async def extract_toc_from_vision(
                 logger.warning(f"AI Vision: 第{round_num}轮失败: {e}")
                 break
 
-            entries = extract_toc_from_text(response)
-            logger.info(f"AI Vision: 第{round_num}轮提取 {len(entries)} 条")
+            parsed_entries, status, next_range = parse_vision_response(response)
+            logger.info(f"AI Vision: 第{round_num}轮提取 {len(parsed_entries)} 条 (status={status})")
 
-            for title, page in entries:
+            for title, page in parsed_entries:
                 norm = re.sub(r'\s+', '', title).lower()
                 if norm not in seen_titles:
                     seen_titles.add(norm)
@@ -1024,10 +1024,10 @@ async def extract_toc_from_vision(
                 logger.warning(f"AI Vision: 扫描页{scan_start}-{scan_end}失败: {e}")
                 continue
 
-            entries = extract_toc_from_text(response)
-            logger.info(f"AI Vision: 扫描页{scan_start}-{scan_end}提取 {len(entries)} 条")
+            parsed_entries, status, next_range = parse_vision_response(response)
+            logger.info(f"AI Vision: 扫描页{scan_start}-{scan_end}提取 {len(parsed_entries)} 条 (status={status})")
 
-            for title, page in entries:
+            for title, page in parsed_entries:
                 norm = re.sub(r'\s+', '', title).lower()
                 if norm not in seen_titles:
                     seen_titles.add(norm)
@@ -1058,9 +1058,9 @@ async def extract_toc_from_vision(
                         logger.warning(f"AI Vision: 续扫页{next_start}-{next_end}失败: {e}")
                         continue
 
-                    more = extract_toc_from_text(response)
-                    logger.info(f"AI Vision: 续扫页{next_start}-{next_end}提取 {len(more)} 条")
-                    for title, page in more:
+                    more_parsed, more_status, more_range = parse_vision_response(response)
+                    logger.info(f"AI Vision: 续扫页{next_start}-{next_end}提取 {len(more_parsed)} 条 (status={more_status})")
+                    for title, page in more_parsed:
                         norm = re.sub(r'\s+', '', title).lower()
                         if norm not in seen_titles:
                             seen_titles.add(norm)
