@@ -59,8 +59,8 @@ def build_sandwich_surya(
             new_page = new_doc.new_page(width=width, height=height)
             new_page.insert_image(new_page.rect, stream=img_data)
 
-            # Font: built-in china-t for minimal file size (no TTF embedding)
-            cjk_font = fitz.Font("china-t")
+            # Font: SimHei for metrics, china-t for rendering (no embedding bloat)
+            cjk_font = fitz.Font(fontfile=r"C:\Windows\Fonts\simhei.ttf")
 
             # Map Surya bboxes → page coordinates using the image's page rect
             iw, ih = result.image_bbox[2], result.image_bbox[3]
