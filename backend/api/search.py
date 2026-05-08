@@ -1467,7 +1467,7 @@ def _parse_version(tag: str) -> Tuple[int, ...]:
 def _check_github_update():
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        req = urllib.request.Request(url, headers={"User-Agent": "book-downloader-updater"})
+        req = urllib.request.Request(url, headers={"User-Agent": "ebook-pdf-downloader-updater"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
         tag_name = data.get("tag_name", "")
@@ -1528,7 +1528,7 @@ async def download_update():
             if not dl_url:
                 nonlocal_error[0] = "无下载链接"
                 return
-            dst = os.path.join(tempfile.gettempdir(), "book-downloader-update", os.path.basename(dl_url.split("?")[0]))
+            dst = os.path.join(tempfile.gettempdir(), "ebook-pdf-downloader-update", os.path.basename(dl_url.split("?")[0]))
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             _update_download_progress["dst"] = dst
             _do_download(dl_url, dst)
