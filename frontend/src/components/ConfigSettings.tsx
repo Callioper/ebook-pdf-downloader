@@ -332,6 +332,9 @@ export default function ConfigSettings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  const [aiModels, setAiModels] = useState<{ id: string; name: string }[]>([])
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchModelsMsg, setFetchModelsMsg] = useState('')
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     database: false,
@@ -1753,10 +1756,54 @@ export default function ConfigSettings() {
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">模型名称</label>
-            <input type="text" value={form.ai_vision_model || ''}
-              onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
-              placeholder="sabafallah/deepseek-ocr"
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+            <div className="flex gap-1">
+              <input type="text" value={form.ai_vision_model || ''}
+                onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
+                placeholder="sabafallah/deepseek-ocr"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono"
+                list="ai-model-datalist" />
+              <datalist id="ai-model-datalist">
+                {aiModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </datalist>
+              <button
+                type="button"
+                onClick={async () => {
+                  setFetchingModels(true)
+                  setFetchModelsMsg('')
+                  try {
+                    const res = await fetch('/api/v1/fetch-models', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        endpoint: form.ai_vision_endpoint,
+                        api_key: form.ai_vision_api_key,
+                        provider: form.ai_vision_provider,
+                      }),
+                    })
+                    const data = await res.json()
+                    if (data.ok && data.models.length > 0) {
+                      setAiModels(data.models)
+                      setFetchModelsMsg(`${data.models.length} 个模型`)
+                    } else {
+                      setFetchModelsMsg(data.message || '无可用模型')
+                    }
+                  } catch (e) {
+                    setFetchModelsMsg(String(e))
+                  }
+                  setFetchingModels(false)
+                }}
+                disabled={fetchingModels || !form.ai_vision_endpoint}
+                className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+                title="从提供商拉取可用模型列表"
+              >
+                {fetchingModels ? '...' : '获取模型'}
+              </button>
+            </div>
+            {fetchModelsMsg && (
+              <p className={`text-xs mt-1 ${fetchModelsMsg.includes('个模型') ? 'text-green-600' : 'text-red-500'}`}>
+                {fetchModelsMsg}
+              </p>
+            )}
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">API Key</label>
