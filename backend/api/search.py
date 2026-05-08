@@ -565,6 +565,11 @@ async def check_ai_vision(body: Dict[str, Any]):
     model = body.get("model", "")
     api_key = body.get("api_key", "")
     provider = body.get("provider", "openai_compatible")
+
+    # Resolve {env:VAR} if needed
+    if api_key.startswith("{env:") and api_key.endswith("}"):
+        var_name = api_key[5:-1]
+        api_key = os.environ.get(var_name, "")
     messages_api = body.get("messages_api", False)
 
     if not endpoint or not model:
@@ -575,6 +580,8 @@ async def check_ai_vision(body: Dict[str, Any]):
         provider = "openai_compatible"
     elif provider == "minimax_anthropic":
         provider = "anthropic"
+    elif provider == "openai_responses":
+        provider = "responses"
     elif provider == "custom" and messages_api:
         provider = "anthropic"
     elif provider == "custom":
@@ -604,6 +611,18 @@ async def check_ai_vision(body: Dict[str, Any]):
             except (KeyError, IndexError):
                 return {"ok": False, "message": f"响应格式异常: {resp.text[:200]}"}
             return {"ok": True, "message": f"Azure 连接成功 (model: {model})"}
+
+        elif provider == "responses":
+            url = f"{endpoint.rstrip('/')}/responses"
+            payload = {"model": model, "input": [{"type": "input_text", "text": "Reply with just one word: OK"}]}
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                return {"ok": False, "message": f"Responses API 返回 {resp.status_code}: {resp.text[:200]}"}
+            return {"ok": True, "message": f"Responses API 连接成功 (model: {model})"}
 
         elif provider == "anthropic":
             url = f"{endpoint.rstrip('/')}/v1/messages"

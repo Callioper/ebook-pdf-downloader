@@ -5,6 +5,7 @@
 """
 import base64
 import logging
+import os
 import re
 from typing import List, Optional, Tuple
 
@@ -686,6 +687,14 @@ def _parse_markdown_table(response: str) -> List[Tuple[str, int]]:
     return entries
 
 
+def _resolve_api_key(api_key: str) -> str:
+    """解析 API Key，支持 {env:VAR_NAME} 语法读取环境变量。"""
+    if api_key.startswith("{env:") and api_key.endswith("}"):
+        var_name = api_key[5:-1]
+        return os.environ.get(var_name, "")
+    return api_key
+
+
 async def call_vision_llm(
     images: List[str],
     prompt: str,
@@ -701,11 +710,15 @@ async def call_vision_llm(
     if not model:
         raise ValueError("AI Vision: model is required")
 
+    api_key = _resolve_api_key(api_key)
+
     # Alias mapping
     if provider in ("minimax_openai",):
         provider = "openai_compatible"
     elif provider in ("minimax_anthropic",):
         provider = "anthropic"
+    elif provider in ("openai_responses",):
+        provider = "responses"
 
     if provider == "gemini":
         return await _call_gemini(images, prompt, endpoint, model, api_key, timeout)
@@ -713,14 +726,23 @@ async def call_vision_llm(
         return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
     elif provider == "azure":
         return await _call_azure(images, prompt, endpoint, model, api_key, timeout)
+    elif provider == "responses":
+        return await _call_openai_responses(images, prompt, endpoint, model, api_key, timeout)
     elif provider == "custom":
-        # Auto-detect: try OpenAI format first, fallback to Anthropic
         try:
             return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
         except Exception:
             return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
     else:
         return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
+
+
+def _resolve_api_key(api_key: str) -> str:
+    """解析 API Key，支持 {env:VAR_NAME} 语法读取环境变量。"""
+    if api_key.startswith("{env:") and api_key.endswith("}"):
+        var_name = api_key[5:-1]
+        return os.environ.get(var_name, "")
+    return api_key
 
 
 async def _call_azure(
@@ -744,6 +766,31 @@ async def _call_azure(
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
+
+
+async def _call_openai_responses(
+    images: List[str], prompt: str, endpoint: str, model: str,
+    api_key: str, timeout: int,
+) -> str:
+    """OpenAI Responses API (/v1/responses, newer than chat/completions)."""
+    url = f"{endpoint.rstrip('/')}/responses"
+    content = [{"type": "input_text", "text": prompt}]
+    for img_b64 in images:
+        content.append({"type": "input_image", "image_url": f"data:image/png;base64,{img_b64}"})
+    payload = {"model": model, "input": content}
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        for output in data.get("output", []):
+            if output.get("type") == "message":
+                for item in output.get("content", []):
+                    if item.get("type") == "output_text":
+                        return item["text"]
+        return ""
 
 
 async def _call_openai_compatible(

@@ -1751,7 +1751,7 @@ export default function ConfigSettings() {
             <label className="text-xs text-gray-500 block mb-1">API Key</label>
             <input type="password" value={form.ai_vision_api_key || ''}
               onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
-              placeholder="lm-studio"
+              placeholder="sk-...  (支持 {env:VAR_NAME})"
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
@@ -1760,6 +1760,7 @@ export default function ConfigSettings() {
               onChange={(e) => updateForm({ ai_vision_provider: e.target.value })}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
               <option value="openai_compatible">OpenAI / DeepSeek / 智谱 / Qwen / Ollama / lmstudio</option>
+              <option value="openai_responses">OpenAI Responses (新版 /v1/responses)</option>
               <option value="azure">Azure OpenAI</option>
               <option value="anthropic">Anthropic Claude</option>
               <option value="gemini">Google Gemini</option>
