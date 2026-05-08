@@ -561,7 +561,7 @@ async def check_proxy(body: ProxyRequest):
 @router.post("/check-ai-vision")
 async def check_ai_vision(body: Dict[str, Any]):
     """测试 AI Vision 模型连通性。"""
-    endpoint = body.get("endpoint", "")
+    endpoint = body.get("endpoint", "")  # e.g. http://127.0.0.1:12345/v1
     model = body.get("model", "")
     api_key = body.get("api_key", "")
     provider = body.get("provider", "openai_compatible")
@@ -569,29 +569,57 @@ async def check_ai_vision(body: Dict[str, Any]):
     if not endpoint or not model:
         return {"ok": False, "message": "请填写 API 端点和模型名称"}
 
+    # Ensure endpoint ends with /v1
+    if not endpoint.rstrip('/').endswith('/v1'):
+        endpoint = endpoint.rstrip('/') + '/v1'
+
     try:
-        from addbookmark.ai_vision_toc import call_vision_llm
-        # Use a 1x1 red pixel PNG as test image
+        # Step 1: test text-only (no image) to verify basic connectivity
+        import httpx
+        url = f"{endpoint.rstrip('/')}/chat/completions"
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with just one word: OK"}],
+            "max_tokens": 10,
+            "temperature": 0,
+        }
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            detail = resp.text[:200]
+            return {"ok": False, "message": f"API 返回 {resp.status_code}: {detail}"}
+        try:
+            data = resp.json()
+            text_response = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            return {"ok": False, "message": f"API 响应格式异常: {resp.text[:200]}"}
+
+        if "ok" not in text_response.lower() and len(text_response) < 20:
+            return {"ok": True, "message": f"文本连接成功 (model: {model})"}
+
+        # Step 2: test with a tiny image to verify vision support
         img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
-        response = await call_vision_llm(
-            images=[img],
-            prompt="Say 'OK' if you can see this image.",
-            endpoint=endpoint,
-            model=model,
-            api_key=api_key or "",
-            provider=provider,
-            timeout=15,
-        )
-        # Check response
-        ok_keywords = "ok"
-        if ok_keywords in response.lower():
-            return {"ok": True, "message": f"连接成功 ({model})"}
-        return {"ok": True, "message": f"已连接，但模型未识别测试图片 (response: {response[:50]})"}
-    except ImportError as e:
-        return {"ok": False, "message": f"模块缺失: {e}"}
+        payload["messages"] = [{"role": "user", "content": [
+            {"type": "text", "text": "Reply with just one word: OK"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}},
+        ]}]
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            return {"ok": True, "message": f"文本连接成功，但 Vision 不支持 (HTTP {resp.status_code})"}
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        return {"ok": True, "message": f"连接成功 - 模型 {model} (端点: {endpoint})"}
+
+    except httpx.ConnectError:
+        return {"ok": False, "message": f"无法连接到 {endpoint}，请检查地址和端口"}
+    except httpx.TimeoutException:
+        return {"ok": False, "message": "连接超时"}
     except Exception as e:
-        msg = str(e)[:200]
-        return {"ok": False, "message": f"连接失败: {msg}"}
+        return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
 
 
 @router.post("/check-proxy-sources")
