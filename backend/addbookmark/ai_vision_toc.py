@@ -703,10 +703,35 @@ async def call_vision_llm(
 
     if provider == "gemini":
         return await _call_gemini(images, prompt, endpoint, model, api_key, timeout)
-    elif provider == "minimax":
+    elif provider == "minimax" or provider == "anthropic":
         return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
+    elif provider == "azure":
+        return await _call_azure(images, prompt, endpoint, model, api_key, timeout)
     else:
         return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
+
+
+async def _call_azure(
+    images: List[str], prompt: str, endpoint: str, model: str,
+    api_key: str, timeout: int,
+) -> str:
+    """Azure OpenAI API (api-version in URL, api-key auth header)."""
+    url = (
+        f"{endpoint.rstrip('/')}/openai/deployments/{model}"
+        f"/chat/completions?api-version=2024-02-15-preview"
+    )
+    content = [{"type": "text", "text": prompt}]
+    for img_b64 in images:
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}})
+    payload = {
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": 4096, "temperature": 0.1,
+    }
+    headers = {"Content-Type": "application/json", "api-key": api_key}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
 
 
 async def _call_openai_compatible(

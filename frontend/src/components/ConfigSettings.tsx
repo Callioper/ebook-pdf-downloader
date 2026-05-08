@@ -1751,9 +1751,11 @@ export default function ConfigSettings() {
             <select value={form.ai_vision_provider || 'openai_compatible'}
               onChange={(e) => updateForm({ ai_vision_provider: e.target.value })}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
-              <option value="openai_compatible">OpenAI 兼容 (智谱/Qwen/DeepSeek/lmstudio)</option>
+              <option value="openai_compatible">OpenAI / DeepSeek / 智谱 / Qwen / Ollama / lmstudio</option>
+              <option value="azure">Azure OpenAI</option>
+              <option value="anthropic">Anthropic Claude</option>
               <option value="gemini">Google Gemini</option>
-              <option value="minimax">MiniMax M2.7 (Anthropic 格式)</option>
+              <option value="minimax">MiniMax M2.7</option>
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
