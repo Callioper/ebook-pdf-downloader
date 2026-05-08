@@ -239,7 +239,15 @@ async def _run_ocrmypdf_with_progress(
                 continue
 
             if not _line:
-                break  # EOF
+                # Process exited but pipe still open (Windows: leaked handle from subprocess)
+                if p.returncode is not None:
+                    task_store.add_log(task_id, "  OCR process exited, pipe drained")
+                    break
+                # Empty read but process still alive — brief pause then retry
+                await asyncio.sleep(1)
+                if p.returncode is not None:
+                    break
+                continue
 
             _last_output = time.time()
             _text = _line.decode(errors='replace').strip()
@@ -1934,7 +1942,7 @@ def _is_scanned(pdf_path: str, sample_pages: int = 5, python_cmd: str = "") -> b
                 "d.close();"
                 f"print('1' if blank>=n*0.6 else '0')"
             )
-            r = _sp.run([python_cmd, "-c", code], capture_output=True, text=True, timeout=30)
+            r = _sp.run([python_cmd, "-c", code], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
             if r.returncode == 0 and r.stdout.strip() in ("0", "1"):
                 return r.stdout.strip() == "1"
         except Exception:
@@ -1989,7 +1997,7 @@ def _is_ocr_readable(pdf_path: str, sample_pages: int = 5, min_cjk_ratio: float 
                 "d.close();"
                 "print('1' if readable>=n*0.6 else '0')"
             )
-            r = _sp.run([python_cmd, "-c", code], capture_output=True, text=True, timeout=30)
+            r = _sp.run([python_cmd, "-c", code], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
             if r.returncode == 0 and r.stdout.strip() in ("0", "1"):
                 return r.stdout.strip() == "1"
         except Exception:

@@ -57,10 +57,6 @@ def _setup_logging():
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
-    # Redirect stderr to log file (captures tracebacks when console=False)
-    log_stream = open(str(log_file), 'a', encoding='utf-8', buffering=1)
-    sys.stderr = log_stream
-
     return log_file
 
 _setup_logging()
