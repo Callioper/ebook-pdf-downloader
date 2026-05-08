@@ -1263,6 +1263,13 @@ async def _download_via_aa_and_stacks(
                                             seen_fps.add(fp)
                                             task_store.add_log(task_id, f"AA: recent_history completed → {fp}")
                                             fname = os.path.basename(fp)
+                                            hist_ssid = fname.split(".")[0] if "." in fname else fname
+                                            if not ss_code:
+                                                task_store.add_log(task_id, f"AA:   no SS code, skip history (SSID={hist_ssid} unverifiable)")
+                                                continue
+                                            if hist_ssid != ss_code:
+                                                task_store.add_log(task_id, f"AA:   history SSID={hist_ssid} ≠ target SSID={ss_code}, skip")
+                                                continue
                                             found = _find_stacks_file(fname, "", extra_search_paths)
                                             if found:
                                                 dest = _copy_dest(found, dl_dir)
