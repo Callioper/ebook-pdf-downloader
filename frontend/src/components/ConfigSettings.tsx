@@ -1760,11 +1760,7 @@ export default function ConfigSettings() {
               <input type="text" value={form.ai_vision_model || ''}
                 onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
                 placeholder="sabafallah/deepseek-ocr"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono"
-                list="ai-model-datalist" />
-              <datalist id="ai-model-datalist">
-                {aiModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </datalist>
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
               <button
                 type="button"
                 onClick={async () => {
@@ -1799,6 +1795,19 @@ export default function ConfigSettings() {
                 {fetchingModels ? '...' : '获取模型'}
               </button>
             </div>
+            {aiModels.length > 0 && (
+              <select
+                value={form.ai_vision_model || ''}
+                onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
+                className="w-full mt-1 rounded border border-blue-300 px-2 py-1 text-xs font-mono"
+                size={Math.min(aiModels.length + 1, 8)}
+              >
+                <option value="" disabled>-- 选择模型 --</option>
+                {aiModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            )}
             {fetchModelsMsg && (
               <p className={`text-xs mt-1 ${fetchModelsMsg.includes('个模型') ? 'text-green-600' : 'text-red-500'}`}>
                 {fetchModelsMsg}
@@ -1820,7 +1829,7 @@ export default function ConfigSettings() {
                 const defaultEndpoint = AI_VISION_ENDPOINTS[newProvider] || ''
                 updateForm({
                   ai_vision_provider: newProvider,
-                  ai_vision_endpoint: form.ai_vision_endpoint || defaultEndpoint,
+                  ai_vision_endpoint: defaultEndpoint,
                 })
               }}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
