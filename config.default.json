@@ -30,6 +30,8 @@
   "ai_vision_provider": "openai_compatible",
   "ai_vision_max_pages": 5,
   "ai_vision_dpi": 150,
+  "ocr_confirm_enabled": false,
+  "bookmark_confirm_enabled": false,
   "nlc_max_workers": 5,
   "ebook_data_geter_path": "",
   "ebook_db_path": "",

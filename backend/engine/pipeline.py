@@ -2102,7 +2102,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         config_info["LLM端点"] = config.get("llm_ocr_endpoint", "")[:80]
         config_info["LLM模型"] = config.get("llm_ocr_model", "未设置")
 
-    confirmed = await _wait_for_step_confirmation(
+    confirmed = True  # default skip, controlled by ocr_confirm_enabled
+    if config.get("ocr_confirm_enabled", False):
+        confirmed = await _wait_for_step_confirmation(
         task_id=task_id,
         step_name="ocr",
         step_label="OCR识别",
@@ -2482,7 +2484,9 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         "AI Vision": "已启用" if config.get("ai_vision_enabled") else "未启用",
     }
 
-    confirmed = await _wait_for_step_confirmation(
+    confirmed = True  # default skip, controlled by bookmark_confirm_enabled
+    if config.get("bookmark_confirm_enabled", False):
+        confirmed = await _wait_for_step_confirmation(
         task_id=task_id,
         step_name="bookmark",
         step_label="目录处理",
