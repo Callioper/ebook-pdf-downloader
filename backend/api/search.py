@@ -684,6 +684,83 @@ async def check_ai_vision(body: Dict[str, Any]):
         return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
 
 
+@router.post("/fetch-models")
+async def fetch_models(body: Dict[str, Any]):
+    """代理拉取提供商可用模型列表，避免浏览器 CORS 限制。"""
+    endpoint = body.get("endpoint", "")
+    api_key = body.get("api_key", "")
+    provider = body.get("provider", "openai_compatible")
+
+    # Resolve {env:VAR}
+    if api_key.startswith("{env:") and api_key.endswith("}"):
+        api_key = os.environ.get(api_key[5:-1], "")
+
+    # Map aliases
+    if provider in ("minimax_openai",):
+        provider = "openai_compatible"
+    elif provider in ("minimax_anthropic",):
+        provider = "anthropic"
+    elif provider in ("openai_responses",):
+        provider = "responses"
+
+    # Ensure /v1 suffix
+    if provider not in ("azure", "gemini") and not endpoint.rstrip('/').endswith('/v1'):
+        endpoint = endpoint.rstrip('/') + '/v1'
+
+    results = []
+
+    try:
+        import httpx
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        if provider in ("openai_compatible", "responses"):
+            url = f"{endpoint.rstrip('/')}/models"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                for m in data.get("data", []):
+                    results.append({"id": m.get("id", ""), "name": m.get("id", m.get("name", ""))})
+
+        elif provider == "anthropic":
+            url = f"{endpoint.rstrip('/')}/v1/models"
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                for m in data.get("data", []):
+                    results.append({"id": m.get("id", ""), "name": m.get("display_name", m.get("id", ""))})
+
+        elif provider == "gemini":
+            url = f"{endpoint.rstrip('/')}/models?key={api_key}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                for m in data.get("models", []):
+                    name = m.get("name", "").replace("models/", "")
+                    if "gemini" in name.lower():
+                        results.append({"id": name, "name": name})
+
+        elif provider == "azure":
+            url = f"{endpoint.rstrip('/')}/openai/models?api-version=2024-02-15-preview"
+            headers["api-key"] = api_key
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                for m in data.get("data", []):
+                    results.append({"id": m.get("id", ""), "name": m.get("id", m.get("name", ""))})
+
+        return {"ok": True, "models": results}
+    except Exception as e:
+        return {"ok": False, "message": str(e)[:200], "models": []}
+
+
 @router.post("/check-proxy-sources")
 async def check_proxy_sources(body: ProxyRequest):
     proxy_url = body.http_proxy or get_config().get("http_proxy", "")
