@@ -703,6 +703,8 @@ async def call_vision_llm(
 
     if provider == "gemini":
         return await _call_gemini(images, prompt, endpoint, model, api_key, timeout)
+    elif provider == "minimax":
+        return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
     else:
         return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
 
@@ -739,6 +741,44 @@ async def _call_gemini(
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+async def _call_minimax(
+    images: List[str], prompt: str, endpoint: str, model: str,
+    api_key: str, timeout: int,
+) -> str:
+    """Call MiniMax M2.7 Vision API (Anthropic Messages format)."""
+    url = f"{endpoint.rstrip('/')}/v1/messages"
+
+    content = []
+    for img_b64 in images:
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": img_b64,
+            },
+        })
+    content.append({"type": "text", "text": prompt})
+
+    payload = {
+        "model": model,
+        "max_tokens": 4096,
+        "messages": [{"role": "user", "content": content}],
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["content"][0]["text"]
 
 
 def extract_toc_images(
@@ -907,34 +947,38 @@ async def generate_toc(
 ) -> Tuple[str, str]:
     """两阶段 TOC 提取主入口。
 
-    阶段1: OCR 文字层解析（免费）
-    阶段2: AI Vision 提取（付费，仅在阶段1失败时触发）
-
-    Returns:
-        (bookmark_text, source) — source: "ocr_text" | "ai_vision" | ""
+    阶段1: 定位目录页范围（免费）
+    阶段2: AI Vision 从目录页图片提取文字+解析（付费）
     """
     ai_vision_enabled = config.get("ai_vision_enabled", True)
 
-    logger.info("TOC 提取: 阶段1 — OCR 文字层解析")
-    bookmark, toc_start, toc_end = extract_toc_from_ocr_text(pdf_path)
+    # ── 阶段1: 定位目录页 ──
+    logger.info("TOC 提取: 阶段1 — 定位目录页")
+    toc_start, toc_end = find_toc_pages(pdf_path)
 
-    if bookmark:
-        logger.info("TOC 提取: 阶段1 成功")
-        return (bookmark, "ocr_text")
+    if toc_start < 0:
+        logger.info("TOC 提取: 阶段1 — 未找到目录页")
+    else:
+        logger.info(f"TOC 提取: 阶段1 — 目录页 {toc_start}-{toc_end}")
 
+    # ── 阶段2: AI Vision 提取 ──
     if not ai_vision_enabled:
-        logger.info("TOC 提取: 阶段1 失败，AI Vision 已禁用")
+        logger.info("TOC 提取: AI Vision 已禁用")
         return ("", "")
 
     ai_endpoint = config.get("ai_vision_endpoint", "")
     ai_model = config.get("ai_vision_model", "")
+    ai_api_key = config.get("ai_vision_api_key", "")
+    ai_provider = config.get("ai_vision_provider", "openai_compatible")
+
     if not ai_endpoint or not ai_model:
-        logger.info("TOC 提取: 阶段1 失败，AI Vision 未配置")
+        logger.info("TOC 提取: AI Vision 未配置")
         return ("", "")
 
     logger.info("TOC 提取: 阶段2 — AI Vision 提取")
     hint = (toc_start, toc_end) if toc_start >= 0 else (-1, -1)
 
+    # Extract OCR text for cross-validation (if available)
     ocr_text = ""
     if toc_start >= 0:
         try:
@@ -958,5 +1002,5 @@ async def generate_toc(
         logger.info("TOC 提取: 阶段2 成功")
         return (bookmark, "ai_vision")
 
-    logger.info("TOC 提取: 两阶段均未提取到目录")
+    logger.info("TOC 提取: 阶段2 未提取到目录")
     return ("", "")
