@@ -5,10 +5,11 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 [![OCR](https://img.shields.io/badge/OCR-PaddleOCR%20%7C%20Tesseract%20%7C%20LLM-orange?style=for-the-badge)](https://github.com/PaddlePaddle/PaddleOCR)
+[![Purpose](https://img.shields.io/badge/Purpose-PDF%20Download%20%7C%20OCR%20%7C%20Bookmark-blueviolet?style=for-the-badge)]()
 
-> **全自动电子书下载与处理管道。从本地数据库和在线书源检索、下载、OCR 识别、目录生成到最终输出，一站式完成。**
+> **专为 PDF 电子书下载、OCR 文字识别和书签目录生成而设计。从检索到可搜索、带目录的 PDF，一站式全自动完成。**
 
-Ebook PDF Downloader 是一款全栈电子书下载工具，内置 React 前端和 FastAPI 后端。支持本地 SQLite 数据库检索（DX_2.0-5.0 / DX_6.0），多源在线下载（Anna's Archive + Z-Library + LibGen），三引擎 OCR（Tesseract / PaddleOCR / LLM OCR），智能书签/目录生成。
+Ebook PDF Downloader 的核心目标是**将任意电子书转化为可搜索、带书签的高质量 PDF**。它从本地 SQLite 数据库和在线书源检索书籍、多源下载 PDF、通过三引擎 OCR 为扫描版 PDF 添加文字层、自动生成并注入书签目录。内置 React 前端和 FastAPI 后端，支持 Windows 10+ x64。
 
 > **支持平台:** Windows 10+ x64。便携版 exe 开箱即用，源码版需 Python 3.10+。
 
@@ -345,6 +346,8 @@ python main.py
 ---
 
 ## ❓ 常见问题
+
+遇到 Bug？[提交 Issue](https://github.com/Callioper/ebook-pdf-downloader/issues/new?template=bug_report.md) 并提供日志和配置信息。
 
 <details>
 <summary><b>搜索无结果</b></summary>
