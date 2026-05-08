@@ -24,13 +24,16 @@ def is_linux() -> bool:
 # ── Config / App Data Directory ──
 
 def get_app_data_dir(app_name: str = "ebook-pdf-downloader") -> Path:
-    """Get the platform-appropriate app data directory."""
+    """Get the platform-appropriate config directory.
+    In frozen mode: APPDATA / ~/Library / ~/.local/share
+    In dev mode: project root directory."""
     if getattr(sys, 'frozen', False):
         return _get_frozen_data_dir(app_name)
     return _get_dev_data_dir(app_name)
 
 
 def _get_dev_data_dir(app_name: str) -> Path:
+    """Dev mode: return project root where config files live."""
     return Path(__file__).resolve().parent.parent
 
 
@@ -104,6 +107,13 @@ def open_browser(url: str, app_mode: bool = False):
         subprocess.Popen(["open", url])
         return True
     elif sys.platform.startswith("linux"):
+        if app_mode:
+            for browser in ["google-chrome", "microsoft-edge", "chromium", "chromium-browser"]:
+                found = shutil.which(browser)
+                if found:
+                    subprocess.Popen([found, f"--app={url}", "--new-window"],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
         import webbrowser
         webbrowser.open(url)
         return True
