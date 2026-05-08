@@ -86,6 +86,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ocr_confirm_enabled": False,
     "bookmark_confirm_enabled": False,
     "surya_alignment_enabled": False,
+    "ocr_refine_enabled": True,
 }
 
 

@@ -126,7 +126,6 @@ async def _run_ocrmypdf_with_progress(
     _tot = 0
     _last = 0
     _had_output = False
-    _had_llm_page = False
     _last_mtime = 0.0
 
     def _count_output_pages() -> int:
@@ -144,7 +143,7 @@ async def _run_ocrmypdf_with_progress(
 
     async def _monitor(p):
         """Emit heartbeat progress while process is running."""
-        nonlocal _cur, _tot, _last, _last_mtime, _had_llm_page
+        nonlocal _cur, _tot, _last, _last_mtime
         _was_suspended = False
         while p.returncode is None:
             await asyncio.sleep(5)
@@ -179,7 +178,7 @@ async def _run_ocrmypdf_with_progress(
     _monitor_task = asyncio.create_task(_monitor(proc))
 
     async def _reader(p) -> int:
-        nonlocal _cur, _tot, _last, _had_output, _had_llm_page
+        nonlocal _cur, _tot, _last, _had_output
         _last_output = time.time()
         while True:
             try:
@@ -216,40 +215,6 @@ async def _run_ocrmypdf_with_progress(
             if not _text:
                 continue
             _had_output = True
-
-            # Parse LLM-OCR progress
-            # Format 0: "4 HTTP Request: POST ..." — per-page LLM API call (most accurate real-time)
-            # Format 1: "27 generate_pdf TEXT: ..." — page completed by ocrmypdf
-            _llm_http = re.search(r'(\d+)\s+HTTP\s+Request', _text)
-            if _llm_http:
-                _had_llm_page = True
-                _cur = max(_cur, int(_llm_http.group(1)))
-                if total_pages > 0:
-                    _tot = total_pages
-                elif _tot == 0:
-                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
-                _cur = min(_cur, _tot)
-                if _cur % 5 == 0 or _cur >= _tot:
-                    task_store.add_log(task_id, f"  LLM-OCR: {_cur}/{_tot} 页")
-                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
-                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
-                continue
-
-            _llm_pg = re.search(r'(\d+)\s+generate_pdf\s+TEXT:', _text)
-            if _llm_pg:
-                _had_llm_page = True
-                _cur = int(_llm_pg.group(1))
-                if total_pages > 0:
-                    _tot = total_pages
-                elif _tot == 0:
-                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
-                _cur = min(_cur, _tot)
-                # Log every 5 pages or when done
-                if _cur % 5 == 0 or _cur >= _tot:
-                    task_store.add_log(task_id, f"  LLM-OCR: {_cur}/{_tot} 页")
-                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
-                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
-                continue
 
             _m = re.search(r'\[(\d+)/(\d+)\]', _text)
             if _m:
@@ -2319,7 +2284,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
         elif ocr_engine == "llm_ocr":
-            task_store.add_log(task_id, "Running LLM-based OCR via ocrmypdf+llmocr plugin...")
+            task_store.add_log(task_id, "Running standalone LLM OCR pipeline...")
 
             if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
                 task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
@@ -2327,88 +2292,51 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
 
             llm_endpoint = config.get("llm_ocr_endpoint", config.get("llm_api_base", "http://localhost:11434"))
             llm_model = config.get("llm_ocr_model", config.get("llm_model", ""))
             llm_api_key = config.get("llm_ocr_api_key", config.get("llm_api_key", ""))
+            llm_timeout = config.get("llm_ocr_timeout", 300)
+            llm_concurrency = max(1, ocr_jobs)
 
             if not llm_model:
                 task_store.add_log(task_id, "LLM OCR: model not configured")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            _engine_dir = os.path.dirname(__file__)
-            _ocr_env = {
-                **os.environ,
-                "PYTHONPATH": os.pathsep.join(
-                    [_engine_dir] + os.environ.get("PYTHONPATH", "").split(os.pathsep)
-                    if os.environ.get("PYTHONPATH")
-                    else [_engine_dir]
-                ),
-                "PYTHONUNBUFFERED": "1",
-            }
-
-            cmd = [
-                _py_for_ocr, "-m", "ocrmypdf",
-                "--plugin", "llmocr.plugin",
-                "--llm-ocr-endpoint", llm_endpoint,
-                "--llm-ocr-model", llm_model,
-                "--llm-ocr-lang", ocr_lang or "chi_sim+eng",
-                "--llm-ocr-timeout", str(ocr_timeout),
-                "--optimize", _opt_level,
-                "--oversample", ocr_oversample,
-                "-j", str(ocr_jobs),
-                "--output-type", "pdf",
-                "--pdf-renderer", "sandwich",
-                pdf_path,
-                output_pdf,
-            ]
-            if llm_api_key:
-                cmd += ["--llm-ocr-api-key", llm_api_key]
+            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
 
             try:
-                _exit = await _run_ocrmypdf_with_progress(
-                    task_id, cmd, env=_ocr_env,
-                    timeout=ocr_timeout, total_pages=_total_pages,
-                    output_pdf=output_pdf,
+                from llmocr.engine import LlmOcrPipeline
+
+                pipeline = LlmOcrPipeline(
+                    endpoint=llm_endpoint,
+                    model=llm_model,
+                    api_key=llm_api_key,
+                    timeout=llm_timeout,
                 )
-                if _exit == 0:
-                    task_store.add_log(task_id, "LLM OCR completed, validating quality...")
+
+                async def emit_ocr_progress(stage: str, cur: int, tot: int, msg: str):
+                    stage_offsets = {"convert": 0, "detect": 10, "ocr": 20, "refine": 70, "embed": 90}
+                    base = stage_offsets.get(stage, 0)
+                    pct = min(base + int(cur / max(1, tot) * 20), 100)
+                    await _emit_progress(task_id, "ocr", pct, msg)
+
+                await pipeline.run(
+                    input_path=pdf_path,
+                    output_path=output_pdf,
+                    dpi=int(ocr_oversample),
+                    concurrency=llm_concurrency,
+                    refine=config.get("ocr_refine_enabled", True),
+                    progress=emit_ocr_progress,
+                )
+
+                if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 1024:
                     if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
                         os.replace(output_pdf, pdf_path)
-                        task_store.add_log(task_id, "LLM OCR quality check passed")
+                        task_store.add_log(task_id, "LLM OCR completed, quality check passed")
                         report["ocr_done"] = True
-                        # Post-OCR: rebuild sandwich PDF with Surya-aligned bboxes
-                        try:
-                            _surya_script = os.path.join(os.path.dirname(__file__), "run_surya.py")
-                            if config.get("surya_alignment_enabled") and os.path.exists(_surya_script) and os.path.exists(_py_for_ocr):
-                                surya_output = pdf_path.replace(".pdf", "_surya.pdf")
-                                _surya_timeout = max(600, _total_pages * 4 + 60)
-                                task_store.add_log(task_id, f"Surya: aligning text bboxes (timeout {_surya_timeout}s)...")
-                                _surya_env = {
-                                    **os.environ,
-                                    "PYTHONPATH": os.path.dirname(__file__) + os.pathsep + os.environ.get("PYTHONPATH", ""),
-                                    "PYTHONUNBUFFERED": "1",
-                                }
-                                _surya_proc = subprocess.run(
-                                    [_py_for_ocr, _surya_script, pdf_path, surya_output, str(ocr_oversample)],
-                                    capture_output=True, text=True, encoding='utf-8', errors='replace',
-                                    timeout=_surya_timeout, env=_surya_env,
-                                )
-                                if _surya_proc.returncode == 0 and "OK" in _surya_proc.stdout:
-                                    os.replace(surya_output, pdf_path)
-                                    task_store.add_log(task_id, "Surya: text layer aligned to detected bboxes")
-                                else:
-                                    _surya_err = (_surya_proc.stderr or "")[:200]
-                                    task_store.add_log(task_id, f"Surya alignment failed: {_surya_err}")
-                            else:
-                                task_store.add_log(task_id, "Surya: run_surya.py not found, skipping alignment")
-                        except subprocess.TimeoutExpired:
-                            task_store.add_log(task_id, "Surya: alignment timed out (600s)")
-                        except Exception as e:
-                            task_store.add_log(task_id, f"Surya alignment error: {str(e)[:100]}")
                     else:
                         task_store.add_log(task_id, "LLM OCR quality check failed, keeping original PDF")
                         try:
@@ -2416,11 +2344,11 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         except Exception:
                             pass
                 else:
-                    task_store.add_log(task_id, f"LLM OCR failed with exit code {_exit}")
-            except asyncio.TimeoutError:
-                task_store.add_log(task_id, f"LLM OCR timed out after {ocr_timeout}s")
+                    task_store.add_log(task_id, "LLM OCR failed: no output produced")
+            except ImportError:
+                task_store.add_log(task_id, "LLM OCR pipeline module not available")
             except Exception as e:
-                task_store.add_log(task_id, f"LLM OCR error: {e}")
+                task_store.add_log(task_id, f"LLM OCR pipeline error: {e}")
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:

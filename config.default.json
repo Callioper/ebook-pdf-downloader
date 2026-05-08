@@ -33,6 +33,7 @@
   "ocr_confirm_enabled": false,
   "bookmark_confirm_enabled": false,
   "surya_alignment_enabled": false,
+  "ocr_refine_enabled": true,
   "nlc_max_workers": 5,
   "ebook_data_geter_path": "",
   "ebook_db_path": "",
