@@ -188,18 +188,8 @@ if __name__ == "__main__":
     # Ensure FlareSolverr is cleaned up on exit
     atexit.register(stop_flaresolverr)
 
-    # Windows: handle console close (CTRL_CLOSE_EVENT)
-    if os.name == "nt":
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            handle = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_uint)
-            def handler(ctrl_type):
-                stop_flaresolverr()
-                return 0
-            kernel32.SetConsoleCtrlHandler(handle(handler), 1)
-        except Exception:
-            pass
+    from platform_utils import setup_console_handler
+    setup_console_handler(stop_flaresolverr)
 
     config_data = init_config()
     port = config_data.get("port", 8000)
@@ -208,24 +198,8 @@ if __name__ == "__main__":
     if "--no-browser" not in sys.argv:
         def _open_browser():
             time.sleep(2)
-            opened = False
-            for edge_path in [
-                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            ]:
-                if os.path.exists(edge_path):
-                    try:
-                        subprocess.Popen(
-                            [edge_path, f"--app={url}", "--new-window", "--window-size=1200,800"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        opened = True
-                        break
-                    except Exception:
-                        pass
-            if not opened:
-                webbrowser.open(url)
-
+            from platform_utils import open_browser
+            open_browser(url, app_mode=True)
         threading.Thread(target=_open_browser, daemon=True).start()
 
     main()
