@@ -112,15 +112,25 @@ def build_sandwich_surya(
                 nx1 = rx + (x1 / iw) * rw
                 ny1 = ry + (y1 / ih) * rh
 
+                box_w = max(1, nx1 - nx0)
                 box_h = max(1, ny1 - ny0)
                 fontsize = min(72, max(4, box_h * 0.85))
 
+                # Horizontal morph: stretch glyph bboxes to fill visual text width
+                # Without this, selection only covers ~2/3 of the visual line
+                font_obj = fitz.Font(fontfile=subset_path)
+                natural_w = font_obj.text_length(text, fontsize=fontsize)
+                if natural_w <= 0:
+                    natural_w = len(text) * fontsize * 0.5
+                scale_x = max(0.3, min(5.0, box_w / max(1, natural_w)))
+
+                baseline = fitz.Point(nx0, ny1 - 1)
+                morph = (baseline, fitz.Matrix(scale_x, 1.0))
                 page.insert_text(
-                    fitz.Point(nx0, ny1 - 1),
-                    text,
+                    baseline, text,
                     fontname="CJK",
-                    fontsize=fontsize,
-                    render_mode=3,
+                    fontsize=fontsize, render_mode=3,
+                    morph=morph,
                 )
 
         doc.save(output_pdf_path, deflate=True, garbage=4)
