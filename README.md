@@ -80,20 +80,60 @@ graph TD
 ````
 请帮我安装并配置 Ebook PDF Downloader（https://github.com/Callioper/ebook-pdf-downloader）：
 
-1. 从 Releases 下载最新版 `ebook-pdf-downloader.exe` 到桌面
+首先询问我选择哪种安装方式：
+A）便携版：下载 exe 直接运行（推荐，无需安装依赖）
+B）源码版：克隆仓库，手动搭建所有依赖
+
+---
+
+如果选择 A（便携版）：
+1. 从 Releases（https://github.com/Callioper/ebook-pdf-downloader/releases/latest）下载 `ebook-pdf-downloader.exe`
+2. 双击运行，确认浏览器自动打开 http://localhost:8000
+3. 帮我检查是否需要以下外部工具，缺失则指引下载：
+   - Tesseract OCR：`winget install UB-Mannheim.TesseractOCR`（OCR 默认引擎，安装时勾选中英文语言包）
+   - 数据库文件：从 EbookDatabase 项目下载 `DX_2.0-5.0.db` 和 `DX_6.0.db`，在设置页配置路径
+
+---
+
+如果选择 B（源码版）：
+1. 克隆仓库：`git clone https://github.com/Callioper/ebook-pdf-downloader.git`
 2. 检查并安装前置条件：
-   - Python 3.10+：`python --version`，未安装则指引到 python.org
-   - Tesseract OCR：`winget install UB-Mannheim.TesseractOCR`（如报错则手动安装）
-   - 数据库文件：检查 `backend/data/` 下是否有 `DX_2.0-5.0.db` 和 `DX_6.0.db`，缺失则给出下载指引
+   - Python 3.10+：`python --version`
+   - Node.js 18+：`node --version`（编译前端需要）
+   - Tesseract OCR：`winget install UB-Mannheim.TesseractOCR`（勾选中英文语言包）
+   - 数据库文件：放入 `backend/data/` 目录，缺失则从 EbookDatabase 项目下载
 
-3. 选配安装以下功能（询问我是否需要）：
-   - PaddleOCR 中文引擎：创建独立 Python 3.11 venv，安装 PaddlePaddle + PaddleOCR
-   - FlareSolverr：Docker 拉取并启动 `flaresolverr/flaresolverr:latest`，映射端口 8191
-   - LLM OCR：帮我配置 OpenAI 兼容端点（LM Studio / Ollama / vLLM）
-   - AI Vision TOC：配置 OpenAI/Anthropic 本地端点用于智能目录提取
+3. 安装后端依赖：
+   ```
+   cd ebook-pdf-downloader/backend
+   pip install -r requirements.txt
+   ```
 
-4. 启动应用：双击 `ebook-pdf-downloader.exe`，确认浏览器自动打开 http://localhost:8000
-5. 打开设置页（右上角 ⚙️），帮我完成初始配置
+4. 编译前端：
+   ```
+   cd ../frontend
+   npm install
+   npm run build
+   ```
+
+5. 启动：`cd ../backend && python main.py`
+
+---
+
+无论哪种方式，选配安装以下功能（逐一询问我是否需要）：
+
+- **PaddleOCR 中文引擎**：创建独立 Python 3.11 venv（路径如 `venv-paddle311`），在其中安装 PaddlePaddle + PaddleOCR。设置页 OCR 面板提供一键安装脚本
+- **stacks（Anna's Archive 下载服务器）**：克隆 https://github.com/zelestcarlyone/stacks ，执行 Docker Compose 构建并启动容器（默认端口 7788）。stacks 内已集成 FlareSolverr，无需单独安装
+- **LLM OCR**：配置 OpenAI 兼容端点（LM Studio / Ollama / vLLM），在设置页填入 API 地址和模型名（推荐 `allenai/olmocr-2-7b` 或 `qwen/qwen3-vl-8b`）
+- **AI Vision TOC**：配置 OpenAI/Anthropic 兼容端点，用于智能 PDF 目录提取。设置页中填入端点和模型名，建议先用本地模型测试（如 Ollama glm-ocr）
+- **aria2c**：（exe 已内置，源码版需单独下载）BT/IPFS 下载引擎，用于 LibGen 回退下载
+
+最后：打开设置页（右上角 ⚙️），检查并补全以下关键配置：
+- 数据库路径（如有）
+- HTTP 代理（如需要）
+- stacks 地址和密钥（如已安装）
+- Z-Library 邮箱/密码（如需要）
+- OCR 引擎偏好
 ````
 
 将上述提示词复制发送给 AI 助手，它会逐步引导完成安装和配置。
