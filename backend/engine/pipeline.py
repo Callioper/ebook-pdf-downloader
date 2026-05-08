@@ -153,6 +153,7 @@ async def _run_ocrmypdf_with_progress(
     _tot = 0
     _last = 0
     _had_output = False
+    _had_llm_page = False
     _last_mtime = 0.0
 
     def _count_output_pages() -> int:
@@ -170,7 +171,7 @@ async def _run_ocrmypdf_with_progress(
 
     async def _monitor(p):
         """Emit heartbeat progress while process is running."""
-        nonlocal _cur, _tot, _last, _last_mtime
+        nonlocal _cur, _tot, _last, _last_mtime, _had_llm_page
         while p.returncode is None:
             await asyncio.sleep(5)
             if p.returncode is not None:
@@ -202,7 +203,7 @@ async def _run_ocrmypdf_with_progress(
             _now = time.time()
             _elapsed_sec = int(_now - _start)
 
-            if _file_pages > 0 and _file_pages > _cur:
+            if _file_pages > 0 and _file_pages > _cur and not _had_llm_page:
                 # File-based progress found — update real page tracking
                 _cur = _file_pages
                 _tot = total_pages
@@ -222,7 +223,7 @@ async def _run_ocrmypdf_with_progress(
     _monitor_task = asyncio.create_task(_monitor(proc))
 
     async def _reader(p) -> int:
-        nonlocal _cur, _tot, _last, _had_output
+        nonlocal _cur, _tot, _last, _had_output, _had_llm_page
         _last_output = time.time()
         while True:
             try:
@@ -255,7 +256,25 @@ async def _run_ocrmypdf_with_progress(
                 continue
             _had_output = True
 
-            # Parse LLM-OCR progress: "22 generate_pdf: pages=10, words=1001, ..."
+            # Parse LLM-OCR progress
+            # Format 1: "27 generate_pdf TEXT: ..." — current page number
+            # Format 2: "generate_pdf: pages=10, words=1001, ..." — batch summary
+            _llm_pg = re.search(r'(\d+)\s+generate_pdf\s+TEXT:', _text)
+            if _llm_pg:
+                _had_llm_page = True
+                _cur = int(_llm_pg.group(1))
+                if total_pages > 0:
+                    _tot = total_pages
+                elif _tot == 0:
+                    _tot = int((_cur * 1.2) if _cur > 0 else 100)
+                _cur = min(_cur, _tot)
+                # Log every 10 pages or when done
+                if _cur % 10 == 0 or _cur >= _tot:
+                    task_store.add_log(task_id, f"  LLM-OCR: {_cur}/{_tot} 页")
+                _pct_llm = int(_cur / _tot * 100) if _tot > 0 else 0
+                await _emit_progress(task_id, "ocr", _pct_llm, f"{_cur}/{_tot} 页", "")
+                continue
+
             _llm = re.search(r'generate_pdf:\s*pages=(\d+)', _text)
             if _llm:
                 _cur += int(_llm.group(1))
