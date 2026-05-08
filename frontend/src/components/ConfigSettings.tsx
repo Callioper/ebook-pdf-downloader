@@ -315,6 +315,17 @@ const FLARESOLVERR_DOCKER_GUIDE = `## 安装 FlareSolverr（Docker）
 4. 验证：
    curl http://localhost:8191/v1`
 
+const AI_VISION_ENDPOINTS: Record<string, string> = {
+  openai_compatible: 'https://api.openai.com/v1',
+  openai_responses: 'https://api.openai.com/v1',
+  azure: 'https://RESOURCE_NAME.openai.azure.com',
+  anthropic: 'https://api.anthropic.com',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta',
+  minimax_openai: 'https://api.minimaxi.com/v1',
+  minimax_anthropic: 'https://api.minimaxi.com',
+  custom: '',
+}
+
 export default function ConfigSettings() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [form, setForm] = useState<AppConfig>({ ...DEFAULT_CONFIG })
@@ -1757,7 +1768,14 @@ export default function ConfigSettings() {
           <div>
             <label className="text-xs text-gray-500 block mb-1">API 格式</label>
             <select value={form.ai_vision_provider || 'openai_compatible'}
-              onChange={(e) => updateForm({ ai_vision_provider: e.target.value })}
+              onChange={(e) => {
+                const newProvider = e.target.value
+                const defaultEndpoint = AI_VISION_ENDPOINTS[newProvider] || ''
+                updateForm({
+                  ai_vision_provider: newProvider,
+                  ai_vision_endpoint: form.ai_vision_endpoint || defaultEndpoint,
+                })
+              }}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
               <option value="openai_compatible">OpenAI / DeepSeek / 智谱 / Qwen / Ollama / lmstudio</option>
               <option value="openai_responses">OpenAI Responses (新版 /v1/responses)</option>
