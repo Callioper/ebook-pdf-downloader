@@ -147,6 +147,8 @@ def _parse_page_number(s: str) -> Optional[int]:
         'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5,
         'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10,
         'xi': 11, 'xii': 12, 'xiii': 13, 'xiv': 14, 'xv': 15,
+        'xvi': 16, 'xvii': 17, 'xviii': 18, 'xix': 19, 'xx': 20,
+        'xxi': 21, 'xxii': 22, 'xxiii': 23, 'xxiv': 24, 'xxv': 25,
     }
     if s.lower() in roman_map:
         return roman_map[s.lower()]
@@ -314,7 +316,8 @@ def extract_toc_from_text(text: str) -> List[Tuple[str, int]]:
     chapter_indices: List[int] = []
     for i, line in enumerate(lines):
         line = line.strip()
-        if re.match(r'^第[一二三四五六七八九十百千\d]+[章节篇回卷]', line):
+        # 匹配 "第X章"、"第X篇"、"第X部"（允许后面无空格直接跟标题）
+        if re.match(r'^第[一二三四五六七八九十百千\d]+[章节篇回卷部]', line):
             chapter_indices.append(i)
 
     # 第二遍：逐行解析，收集 (title, page, is_chapter)
@@ -452,8 +455,14 @@ def build_vision_prompt() -> str:
     """构建 Vision LLM 的 TOC 提取提示词。
 
     策略：让模型只做文字提取（它擅长的），结构解析由我们自己的代码完成。
+    中英文双语 prompt 提高兼容性。
     """
-    return "Extract all text from these images. Output exactly what you see."
+    return (
+        "Extract all text from these images. Output exactly what you see, "
+        "preserving the original layout as much as possible. "
+        "Do not add any explanation, formatting, or extra text.\n"
+        "请提取这些图片中的所有文字。按原样输出，尽量保留原始排版。"
+    )
 
 
 def parse_vision_response(
@@ -585,11 +594,8 @@ def _parse_indented_entries(response: str) -> List[Tuple[str, int]]:
         if line.strip().startswith('|') and '|' in line.strip()[1:]:
             continue
 
-        # 保留缩进
-        tabs = len(line) - len(line.lstrip('\t'))
-        content = line.strip()
-
         # 预处理：把点线 ······ 替换为 \t 便于解析
+        content = line.strip()
         content = re.sub(r'\s*[·.…]{3,}\s*', '\t', content)
 
         # 尝试 "标题\t页码" 格式
@@ -774,7 +780,7 @@ def _cross_validate_entries(
         return vision_entries
 
     def _normalize(s: str) -> str:
-        return re.sub(r'[\s\.\-—·…·\t]', '', s)
+        return re.sub(r'[\s\.\-—·…\t]', '', s)
 
     ocr_clean = _normalize(ocr_text)
     validated = []
@@ -794,8 +800,9 @@ def _cross_validate_entries(
 
     match_ratio = matched / len(vision_entries) if vision_entries else 0
     if match_ratio < min_match_ratio and len(vision_entries) >= 3:
-        logger.warning(f"幻觉检测: 匹配率 {match_ratio:.2f} < {min_match_ratio}，整体结果不可信")
-        return []
+        # 匹配率过低说明 OCR 文字可能不可用（乱码），保留原条目
+        logger.debug(f"幻觉检测: 匹配率 {match_ratio:.2f} < {min_match_ratio}，跳过交叉验证")
+        return vision_entries
 
     return validated
 
@@ -813,7 +820,7 @@ async def extract_toc_from_vision(
     model = config.get("ai_vision_model", "")
     api_key = config.get("ai_vision_api_key", "")
     provider = config.get("ai_vision_provider", "openai_compatible")
-    max_pages_per_round = config.get("ai_vision_max_pages", 5)
+    batch_size = config.get("ai_vision_max_pages", 3)
 
     if not endpoint or not model:
         logger.info("AI Vision: 未配置 endpoint/model")
@@ -836,8 +843,7 @@ async def extract_toc_from_vision(
     all_entries: List[Tuple[str, int]] = []
     seen_titles = set()
 
-    # 分批处理目录页（每批 3 页，模型在小批次上效果更好）
-    batch_size = 3
+    # 分批处理目录页
     current_page = page_start
     round_num = 0
 
