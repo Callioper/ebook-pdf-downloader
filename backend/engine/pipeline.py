@@ -1611,7 +1611,7 @@ async def _wait_for_step_confirmation(
         "_step_confirm": None,
         "_step_confirm_step": step_name,
     })
-    await ws_manager.broadcast_task(task_id, {
+    await ws_manager.broadcast_all({
         "type": "confirm_step",
         "task_id": task_id,
         "step_name": step_name,
