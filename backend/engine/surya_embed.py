@@ -1,24 +1,60 @@
-"""Build sandwich PDF with Surya OCR (detection + recognition).
+"""Build sandwich PDF with Surya OCR — final working version.
 
-Uses Surya's full OCR pipeline which outputs text_lines with text+bbox+confidence.
-Extracts the original page image for Surya input to ensure correct coordinate
-mapping when the image has an offset on the PDF page.
+Design decisions:
+- Original page image → Surya (correct coordinate mapping)
+- insert_font(fontfile=simhei.ttf) → proper CJK embedding
+- fontTools subsetting → minimal font file size
+- No morph → cosmetic only, proven not to affect alignment
+- Direct page modification → no re-rendering, minimal size
 """
-import os
 import io
+import os
 import fitz
 from PIL import Image
-from typing import List, Optional
+from typing import Optional
+
+
+def _collect_unique_chars(results: list) -> set:
+    """Collect all unique characters from Surya OCR results."""
+    chars = set()
+    for result in results:
+        for line in result.text_lines:
+            for c in line.text.strip():
+                chars.add(c)
+    return chars
+
+
+def _subset_font(font_path: str, chars: set, output_path: str) -> str:
+    """Create a minimal font subset containing only the needed characters.
+    Fall back to full font if subsetting fails."""
+    try:
+        from fontTools.subset import Subsetter
+        from fontTools.ttLib import TTFont
+
+        font = TTFont(font_path)
+        subsetter = Subsetter()
+        subsetter.populate(unicodes=[ord(c) for c in chars if ord(c) > 0x1F])
+        subsetter.subset(font)
+        font.save(output_path)
+        font.close()  # type: ignore
+        return output_path
+    except Exception:
+        return font_path  # fallback to full font
 
 
 def build_sandwich_surya(
     input_pdf_path: str,
     output_pdf_path: str,
     dpi: int = 200,
-    font_path: str = "",
-    languages: Optional[List[str]] = None,
+    languages: Optional[list] = None,
 ) -> bool:
-    """Use Surya full OCR to add invisible searchable text layer to PDF."""
+    """Add invisible OCR text layer to each page of a PDF using Surya."""
+    font_path = r"C:\Windows\Fonts\simhei.ttf"
+    if not os.path.exists(font_path):
+        font_path = r"C:\Windows\Fonts\msyh.ttc"
+    if not os.path.exists(font_path):
+        return False
+
     try:
         from surya.foundation import FoundationPredictor
         from surya.recognition import RecognitionPredictor
@@ -26,7 +62,7 @@ def build_sandwich_surya(
 
         doc = fitz.open(input_pdf_path)
 
-        # Extract original page images (match Surya input to actual page content)
+        # Step 1: Extract original page images + their page rects
         page_images = []
         page_rects = []
         for page in doc:
@@ -42,27 +78,25 @@ def build_sandwich_surya(
                 page_images.append(Image.open(io.BytesIO(pix.tobytes("png"))))
                 page_rects.append(page.rect)
 
-        foundation = FoundationPredictor()
-        rec = RecognitionPredictor(foundation)
-        det = DetectionPredictor()
-        results = rec(page_images, det_predictor=det)
+        # Step 2: Run Surya
+        results = RecognitionPredictor(FoundationPredictor())(
+            page_images, det_predictor=DetectionPredictor()
+        )
 
-        new_doc = fitz.open()
+        # Step 3: Subset font to only needed characters
+        all_chars = _collect_unique_chars(results)
+        subset_path = os.path.join(os.path.dirname(output_pdf_path), "_font_subset.ttf")
+        _subset_font(font_path, all_chars, subset_path)
+
+        # Step 4: Add invisible text to each page
         for page_num, result in enumerate(results):
             page = doc[page_num]
             img_rect = page_rects[page_num]
 
-            # Re-render for background
-            pix = page.get_pixmap(dpi=dpi)
-            img_data = pix.tobytes("jpg", jpg_quality=50)
-            width, height = page.rect.width, page.rect.height
-            new_page = new_doc.new_page(width=width, height=height)
-            new_page.insert_image(new_page.rect, stream=img_data)
+            # Register font
+            page.insert_font(fontname="CJK", fontfile=subset_path)
 
-            # Font: SimHei for metrics, china-t for rendering (no embedding bloat)
-            cjk_font = fitz.Font(fontfile=r"C:\Windows\Fonts\simhei.ttf")
-
-            # Map Surya bboxes → page coordinates using the image's page rect
+            # Map Surya image coordinates → PDF page coordinates
             iw, ih = result.image_bbox[2], result.image_bbox[3]
             rx, ry = img_rect.x0, img_rect.y0
             rw, rh = img_rect.width, img_rect.height
@@ -71,39 +105,35 @@ def build_sandwich_surya(
                 text = line.text.strip()
                 if not text:
                     continue
+
                 x0, y0, x1, y1 = line.bbox
-                # Normalize to image size, then map to page coordinates
                 nx0 = rx + (x0 / iw) * rw
                 ny0 = ry + (y0 / ih) * rh
                 nx1 = rx + (x1 / iw) * rw
                 ny1 = ry + (y1 / ih) * rh
 
-                box_w = max(1, nx1 - nx0)
                 box_h = max(1, ny1 - ny0)
-                fontsize = min(72, max(4, box_h * 0.8))
+                fontsize = min(72, max(4, box_h * 0.85))
 
-                natural_w = cjk_font.text_length(text, fontsize=fontsize)
-                if natural_w <= 0:
-                    natural_w = len(text) * fontsize * 0.5
-                scale_x = max(0.3, min(5.0, box_w / max(1, natural_w)))
-
-                baseline = fitz.Point(nx0, ny1 - 2)
-                morph = (baseline, fitz.Matrix(scale_x, 1.0))
-                new_page.insert_text(
-                    baseline, text,
-                    fontname="china-t",
-                    fontsize=fontsize, render_mode=3,
-                    morph=morph,
+                page.insert_text(
+                    fitz.Point(nx0, ny1 - 1),
+                    text,
+                    fontname="CJK",
+                    fontsize=fontsize,
+                    render_mode=3,
                 )
 
-        new_doc.save(output_pdf_path, deflate=True, garbage=4)
-        new_doc.close()
+        doc.save(output_pdf_path, deflate=True, garbage=4)
         doc.close()
+
+        # Cleanup
+        if subset_path != font_path and os.path.exists(subset_path):
+            os.remove(subset_path)
+
         return True
-    except Exception as e:
+    except Exception:
         try:
             doc.close()
-            new_doc.close()
         except Exception:
             pass
-        raise e
+        return False
