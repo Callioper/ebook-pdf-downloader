@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { API_BASE } from '../constants'
 import ConfirmDownloadModal from './ConfirmDownloadModal'
+import ConfirmStepModal from './ConfirmStepModal'
 
 interface UpdateInfo {
   current: string
@@ -228,6 +229,7 @@ export default function Layout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <Outlet />
           <ConfirmDownloadModal />
+          <ConfirmStepModal />
         </div>
       </main>
 
