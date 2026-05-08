@@ -38,7 +38,7 @@ def build():
         cwd=str(backend_dir),
     )
 
-    print(f"Build complete! Output: {backend_dir / 'dist' / 'BookDownloader.exe'}")
+    print(f"Build complete! Output: {backend_dir / 'dist' / 'ebook-pdf-downloader.exe'}")
 
 
 if __name__ == "__main__":

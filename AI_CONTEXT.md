@@ -1,4 +1,4 @@
-# Book Downloader — 项目上下文（AI 用）
+# ebook-pdf-downloader — 项目上下文（AI 用）
 
 ## 项目概述
 全自动电子书下载与处理工具。从本地 SQLite 数据库和在线书源（Anna's Archive、Z-Library）检索、下载、OCR 识别、PDF 压缩到最终输出，提供一站式管道处理。vibe coding 项目，由 AI 维护。

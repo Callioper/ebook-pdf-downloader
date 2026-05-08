@@ -1,10 +1,10 @@
-# Book Downloader - Build & Release Script
+# Ebook PDF Downloader - Build & Release Script
 # Usage: python release.py [version] [--dry-run]
 #
 # === Feature Requirements (must persist across releases) ===
 #
 # 1. Version footer on every page
-#    - Pages bottom bar shows: "v{version}" (left) + "github.com/Callioper/book-downloader" (right, clickable link)
+#    - Pages bottom bar shows: "v{version}" (left) + "github.com/Callioper/ebook-pdf-downloader" (right, clickable link)
 #    - Version string comes from backend/version.py VERSION, embedded via /api/v1/check-update endpoint
 #    - Must always display version, not just when update is available
 #    - Implementation: Layout.tsx <footer>, uses check-update's "current" field
@@ -45,7 +45,7 @@ VERSION_FILE = os.path.join(BACKEND_DIR, "version.py")
 SPEC_FILE = os.path.join(BACKEND_DIR, "book-downloader.spec")
 SETUP_ISS = os.path.join(PROJECT_DIR, "setup.iss")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-GITHUB_REPO = "Callioper/book-downloader"
+GITHUB_REPO = "Callioper/ebook-pdf-downloader"
 INNO_PATHS = [
     r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"),
@@ -88,7 +88,7 @@ def step(name):
 
 
 def main():
-    print(f"\n  Book Downloader Release Builder")
+    print(f"\n  Ebook PDF Downloader Release Builder")
     print(f"  Version: {current_version} -> {new_version}")
     print(f"  Mode: {'DRY RUN' if dry_run else 'LIVE'}")
     print()
@@ -170,15 +170,15 @@ def main():
         sys.exit(1)
     # Kill any running instance that locks the exe
     if os.name == "nt":
-        subprocess.run(["taskkill", "/f", "/im", "BookDownloader.exe"], capture_output=True, shell=True)
+        subprocess.run(["taskkill", "/f", "/im", "ebook-pdf-downloader.exe"], capture_output=True, shell=True)
     if not run([python, "-m", "PyInstaller", "--noconfirm", SPEC_FILE], cwd=BACKEND_DIR, desc="pyinstaller"):
         # Retry once after kill
         if os.name == "nt":
-            subprocess.run(["taskkill", "/f", "/im", "BookDownloader.exe"], capture_output=True, shell=True)
+            subprocess.run(["taskkill", "/f", "/im", "ebook-pdf-downloader.exe"], capture_output=True, shell=True)
         if not run([python, "-m", "PyInstaller", "--noconfirm", SPEC_FILE], cwd=BACKEND_DIR, desc="pyinstaller retry"):
             sys.exit(1)
-    built_exe = os.path.join(BACKEND_DIR, "dist", "BookDownloader.exe")
-    exe_path = os.path.join(PROJECT_DIR, "dist", "BookDownloader.exe")
+    built_exe = os.path.join(BACKEND_DIR, "dist", "ebook-pdf-downloader.exe")
+    exe_path = os.path.join(PROJECT_DIR, "dist", "ebook-pdf-downloader.exe")
     os.makedirs(os.path.dirname(exe_path), exist_ok=True)
     import shutil as _shutil
     _shutil.copy2(built_exe, exe_path)
@@ -242,7 +242,7 @@ def main():
 
     # Step 7: Build installer
     step("7/8: Build installer (Inno Setup)")
-    setup_path = os.path.join(PROJECT_DIR, "dist", "book-downloader-setup.exe")
+    setup_path = os.path.join(PROJECT_DIR, "dist", "ebook-pdf-downloader-setup.exe")
     if INNO_SETUP and os.path.exists(INNO_SETUP):
         if not run(f'"{INNO_SETUP}" "{SETUP_ISS}"', desc="inno setup"):
             sys.exit(1)
@@ -302,8 +302,8 @@ def main():
 
         # Upload assets
         for name, path in [
-            ("BookDownloader.exe", exe_path),
-            ("book-downloader-setup.exe", setup_path),
+            ("ebook-pdf-downloader.exe", exe_path),
+            ("ebook-pdf-downloader-setup.exe", setup_path),
         ]:
             if not path or not os.path.exists(path):
                 continue

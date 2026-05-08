@@ -1,35 +1,35 @@
-; Inno Setup script for Book Downloader
+; Inno Setup script for ebook-pdf-downloader
 ; Download Inno Setup from https://jrsoftware.org/isinfo.php
 ; Run: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
 
 [Setup]
-AppName=Book Downloader
-AppVersion=1.5.0
-AppPublisher=Book Downloader
-DefaultDirName={autopf}\BookDownloader
-DefaultGroupName=Book Downloader
-OutputBaseFilename=book-downloader-setup
+AppName=ebook-pdf-downloader
+AppVersion=1.0.0
+AppPublisher=ebook-pdf-downloader
+DefaultDirName={autopf}\ebook-pdf-downloader
+DefaultGroupName=ebook-pdf-downloader
+OutputBaseFilename=ebook-pdf-downloader-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayName=Book Downloader
-UninstallDisplayIcon={app}\BookDownloader.exe
+UninstallDisplayName=ebook-pdf-downloader
+UninstallDisplayIcon={app}\ebook-pdf-downloader.exe
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=icon.ico
 OutputDir=.\dist
 
 [Files]
-Source: "backend\dist\BookDownloader.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "backend\dist\ebook-pdf-downloader.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "config.default.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Book Downloader"; Filename: "{app}\BookDownloader.exe"
-Name: "{group}\Uninstall Book Downloader"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\Book Downloader"; Filename: "{app}\BookDownloader.exe"
+Name: "{group}\ebook-pdf-downloader"; Filename: "{app}\ebook-pdf-downloader.exe"
+Name: "{group}\Uninstall ebook-pdf-downloader"; Filename: "{uninstallexe}"
+Name: "{commondesktop}\ebook-pdf-downloader"; Filename: "{app}\ebook-pdf-downloader.exe"
 
 [Run]
-Filename: "{app}\BookDownloader.exe"; Description: "Launch Book Downloader"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ebook-pdf-downloader.exe"; Description: "Launch ebook-pdf-downloader"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "taskkill"; Parameters: "/f /im BookDownloader.exe"; Flags: runhidden
+Filename: "taskkill"; Parameters: "/f /im ebook-pdf-downloader.exe"; Flags: runhidden

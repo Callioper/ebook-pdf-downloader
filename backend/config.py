@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def _get_app_dir() -> Path:
     if getattr(sys, 'frozen', False):
         app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
-        conf_dir = app_data / 'BookDownloader'
+        conf_dir = app_data / 'ebook-pdf-downloader'
         conf_dir.mkdir(parents=True, exist_ok=True)
         return conf_dir
     return Path(__file__).resolve().parent.parent

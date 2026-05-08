@@ -1,13 +1,13 @@
 @echo off
 chcp 65001 >nul
-title Book Downloader
+title Ebook PDF Downloader
 
 set SCRIPT_DIR=%~dp0
 cd /d "%SCRIPT_DIR%"
 
-if exist "dist\BookDownloader.exe" (
-    echo Starting Book Downloader...
-    start "" "dist\BookDownloader.exe" --no-browser
+if exist "dist\ebook-pdf-downloader.exe" (
+    echo Starting Ebook PDF Downloader...
+    start "" "dist\ebook-pdf-downloader.exe" --no-browser
     echo Waiting for server...
     set /a RETRY=0
     :wait
@@ -23,9 +23,9 @@ if exist "dist\BookDownloader.exe" (
         echo Server ready. Opening browser...
         start http://localhost:8000
     )
-) else if exist "backend\dist\BookDownloader.exe" (
+) else if exist "backend\dist\ebook-pdf-downloader.exe" (
     echo Using development build...
-    start "" "backend\dist\BookDownloader.exe" --no-browser
+    start "" "backend\dist\ebook-pdf-downloader.exe" --no-browser
     echo Waiting for server...
     set /a RETRY=0
     :wait2
@@ -41,7 +41,7 @@ if exist "dist\BookDownloader.exe" (
         start http://localhost:8000
     )
 ) else (
-    echo BookDownloader.exe not found!
+    echo ebook-pdf-downloader.exe not found!
     echo Please run: python release.py 1.4.0
     pause
 )

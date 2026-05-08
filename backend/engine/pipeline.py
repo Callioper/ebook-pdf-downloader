@@ -172,6 +172,7 @@ async def _run_ocrmypdf_with_progress(
     async def _monitor(p):
         """Emit heartbeat progress while process is running."""
         nonlocal _cur, _tot, _last, _last_mtime, _had_llm_page
+        _was_suspended = False
         while p.returncode is None:
             await asyncio.sleep(5)
             if p.returncode is not None:
@@ -185,9 +186,14 @@ async def _run_ocrmypdf_with_progress(
                     pass
                 break
             if _t and _t.get("status") == "paused":
-                _suspend_process(p.pid)
+                if not _was_suspended:
+                    _suspend_process(p.pid)
+                    _was_suspended = True
                 await asyncio.sleep(2)
                 continue
+            if _was_suspended and _t and _t.get("status") != "paused":
+                _was_suspended = False
+                _resume_process(p.pid)
 
             # Try file-based page counting (mtime-gated for performance)
             _file_pages = 0
@@ -232,6 +238,11 @@ async def _run_ocrmypdf_with_progress(
                 # No output within 10s. Check if process is already done.
                 if p.returncode is not None:
                     break
+                # If task is paused, don't treat silence as completion — process is suspended
+                _t = task_store.get(task_id)
+                if _t and _t.get("status") == "paused":
+                    await asyncio.sleep(1)
+                    continue
                 # If all pages done and silent >30s, treat as done (pipe leaked by child process)
                 _idle = time.time() - _last_output
                 if _tot > 0 and _cur >= _tot and _idle > 30:

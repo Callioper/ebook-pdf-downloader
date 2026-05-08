@@ -67,7 +67,7 @@ pyz = PYZ(a.pure, a.zipped_data)
 exe = EXE(
     pyz, a.scripts, a.binaries, a.zipfiles, a.datas,
     [],
-    name='BookDownloader',
+    name='ebook-pdf-downloader',
     debug=False,
     strip=False,
     upx=False,

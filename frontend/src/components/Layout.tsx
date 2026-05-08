@@ -193,7 +193,7 @@ export default function Layout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-1">
-              <NavLink to="/" className="text-base font-semibold text-gray-800 mr-4 hover:text-blue-600 transition-colors">Book Downloader</NavLink>
+              <NavLink to="/" className="text-base font-semibold text-gray-800 mr-4 hover:text-blue-600 transition-colors">Ebook PDF Downloader</NavLink>
               <NavLink
                 to="/"
                 className={({ isActive }) =>
@@ -247,7 +247,7 @@ export default function Layout() {
             <span>v{version || '...'}</span>
           </div>
           <a href="https://github.com/Callioper/book-downloader" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">
-            github.com/Callioper/book-downloader
+github.com/Callioper/ebook-pdf-downloader
           </a>
         </div>
       </footer>
