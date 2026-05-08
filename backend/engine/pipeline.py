@@ -2383,7 +2383,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                             _surya_script = os.path.join(os.path.dirname(__file__), "run_surya.py")
                             if os.path.exists(_surya_script) and os.path.exists(_py_for_ocr):
                                 surya_output = pdf_path.replace(".pdf", "_surya.pdf")
-                                task_store.add_log(task_id, "Surya: aligning text bboxes...")
+                                _surya_timeout = max(600, _total_pages * 4 + 60)
+                                task_store.add_log(task_id, f"Surya: aligning text bboxes (timeout {_surya_timeout}s)...")
                                 _surya_env = {
                                     **os.environ,
                                     "PYTHONPATH": os.path.dirname(__file__) + os.pathsep + os.environ.get("PYTHONPATH", ""),
@@ -2392,7 +2393,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                                 _surya_proc = subprocess.run(
                                     [_py_for_ocr, _surya_script, pdf_path, surya_output, str(ocr_oversample)],
                                     capture_output=True, text=True, encoding='utf-8', errors='replace',
-                                    timeout=600, env=_surya_env,
+                                    timeout=_surya_timeout, env=_surya_env,
                                 )
                                 if _surya_proc.returncode == 0 and "OK" in _surya_proc.stdout:
                                     os.replace(surya_output, pdf_path)
