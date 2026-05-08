@@ -2063,12 +2063,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     task_store.add_log(task_id, "Step 5/7: Running OCR...")
     await _emit(task_id, "step_progress", {"step": "ocr", "progress": 0})
 
-    ocr_enabled = config.get("ocr_jobs", 0) > 0
-    if not ocr_enabled:
-        task_store.add_log(task_id, "OCR disabled in config, skipping")
-        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-        return report
-
     pdf_path = report.get("pdf_path", "")
     if not pdf_path or not os.path.exists(pdf_path):
         task_store.add_log(task_id, "No PDF to OCR")
@@ -2079,6 +2073,39 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     ocr_lang = config.get("ocr_languages", "chi_sim+eng")
     ocr_jobs = config.get("ocr_jobs", 1)
     ocr_timeout = config.get("ocr_timeout", 3600)
+    ocr_enabled = config.get("ocr_jobs", 0) > 0
+
+    # Build config summary for the confirmation dialog
+    engine_labels = {
+        "tesseract": "Tesseract OCR",
+        "paddleocr": "PaddleOCR",
+        "llm_ocr": "LLM OCR",
+    }
+    config_info = {
+        "引擎": engine_labels.get(ocr_engine, ocr_engine),
+        "语言": ocr_lang,
+        "线程数": str(ocr_jobs),
+        "超时": f"{ocr_timeout}s",
+        "配置已启用": "是" if ocr_enabled else "否（ocr_jobs=0）",
+    }
+    if ocr_engine == "llm_ocr":
+        config_info["LLM端点"] = config.get("llm_ocr_endpoint", "")[:80]
+        config_info["LLM模型"] = config.get("llm_ocr_model", "未设置")
+
+    confirmed = await _wait_for_step_confirmation(
+        task_id=task_id,
+        step_name="ocr",
+        step_label="OCR识别",
+        config_info=config_info,
+    )
+    if not confirmed:
+        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+        return report
+
+    if not ocr_enabled:
+        task_store.add_log(task_id, "OCR disabled in config, skipping")
+        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+        return report
     if ocr_engine == "llm_ocr":
         ocr_timeout = max(ocr_timeout, 7200)
     ocr_oversample = str(config.get("ocr_oversample", 200))
