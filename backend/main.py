@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import init_config, get_config
+from config import APP_DATA_DIR as _app_data
 from api.search import router as search_router
 from api.tasks import router as tasks_router
 from api.ws import router as ws_router
@@ -44,7 +45,7 @@ logger = logging.getLogger("book-downloader")
 
 
 def _setup_logging():
-    log_dir = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming')) / 'BookDownloader' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent
+    log_dir = _app_data
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / 'app.log'
 

@@ -14,13 +14,12 @@ from threading import Lock
 from typing import Any, Dict, List, Optional
 
 from config import get_config
+from config import APP_DATA_DIR as _app_data
 
 def _get_tasks_path() -> Path:
     if getattr(_sys, 'frozen', False):
-        app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
-        conf_dir = app_data / 'BookDownloader'
-        conf_dir.mkdir(parents=True, exist_ok=True)
-        return conf_dir / "tasks.json"
+        _app_data.mkdir(parents=True, exist_ok=True)
+        return _app_data / "tasks.json"
     return Path(__file__).resolve().parent.parent / "tasks.json"
 
 TASKS_FILE = _get_tasks_path()

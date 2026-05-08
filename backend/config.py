@@ -17,12 +17,19 @@ logger = logging.getLogger(__name__)
 def _get_app_dir() -> Path:
     if getattr(sys, 'frozen', False):
         app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
-        conf_dir = app_data / 'ebook-pdf-downloader'
-        conf_dir.mkdir(parents=True, exist_ok=True)
-        return conf_dir
+        old_dir = app_data / 'BookDownloader'
+        new_dir = app_data / 'ebook-pdf-downloader'
+        if old_dir.is_dir() and not new_dir.is_dir():
+            try:
+                old_dir.rename(new_dir)
+            except OSError:
+                pass
+        new_dir.mkdir(parents=True, exist_ok=True)
+        return new_dir
     return Path(__file__).resolve().parent.parent
 
 CONFIG_FILE = _get_app_dir() / "config.json"
+APP_DATA_DIR = _get_app_dir()
 
 def _get_default_config_path() -> Path:
     if getattr(sys, 'frozen', False):
