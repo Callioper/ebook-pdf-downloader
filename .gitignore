@@ -36,3 +36,9 @@ Thumbs.db
 tmp/
 *.log
 tasks.json
+
+# macOS
+.DS_Store
+*.dmg
+*.app
+!book-downloader-mac.spec
