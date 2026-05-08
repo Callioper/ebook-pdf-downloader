@@ -251,8 +251,9 @@ def test_cross_validate_entries():
     assert validated[0] == ("第一章 概论", 1)
 
 
-def test_generate_toc_uses_ocr_text_when_available():
-    from addbookmark.ai_vision_toc import generate_toc
+def test_generate_toc_finds_pages_without_vision_config():
+    """Phase 1 should locate TOC pages even when Phase 2 is not configured."""
+    from addbookmark.ai_vision_toc import generate_toc, find_toc_pages
     try:
         import fitz
     except ImportError:
@@ -274,11 +275,16 @@ def test_generate_toc_uses_ocr_text_when_available():
         doc.save(pdf_path)
         doc.close()
 
+        # Phase 1 should find pages
+        start, end = find_toc_pages(pdf_path)
+        assert start >= 0
+
+        # Phase 2 returns empty without Vision config
         result, source = asyncio.run(
             generate_toc(pdf_path, config={})
         )
-        assert result
-        assert source == "ocr_text"
+        assert result == ""  # no Vision API configured
+        assert source == ""
     finally:
         os.unlink(pdf_path)
 

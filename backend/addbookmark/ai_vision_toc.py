@@ -876,51 +876,170 @@ async def extract_toc_from_vision(
         page_end = toc_page_hint[1]
         logger.info(f"AI Vision: 使用 OCR 定位的目录页范围 {page_start}-{page_end}")
     else:
+        # Phase 1 未定位目录页 → 扫描多个页码范围
         page_start = 0
         page_end = min(4, total_pages - 1)
-        logger.info(f"AI Vision: OCR 未定位目录，从第0页开始")
+        logger.info(f"AI Vision: OCR 未定位目录，扫描多页范围")
+        
+        # 尝试多个页码范围找目录
+        for scan_start in [0, 5, 10, 15]:
+            if scan_start >= total_pages:
+                break
+            scan_end = min(scan_start + 4, total_pages - 1)
+            images = extract_toc_images(
+                pdf_path, page_start=scan_start, page_end=scan_end,
+                max_pages=5, dpi=dpi,
+            )
+            if not images:
+                continue
+
+            prompt = build_vision_prompt()
+            try:
+                response = await call_vision_llm(
+                    images=images, prompt=prompt,
+                    endpoint=endpoint, model=model,
+                    api_key=api_key, provider=provider,
+                )
+            except Exception as e:
+                logger.warning(f"AI Vision: 扫描页{scan_start}-{scan_end}失败: {e}")
+                continue
+
+            entries = extract_toc_from_text(response)
+            logger.info(f"AI Vision: 扫描页{scan_start}-{scan_end}提取 {len(entries)} 条")
+
+            for title, page in entries:
+                norm = re.sub(r'\s+', '', title).lower()
+                if norm not in seen_titles:
+                    seen_titles.add(norm)
+                    all_entries.append((title, page))
+
+            # 找到足够条目后，使用这个范围继续细粒度扫描
+            if len(all_entries) >= 3:
+                page_start = scan_start
+                page_end = scan_end
+                break
+
+        if len(all_entries) >= 3:
+            logger.info(f"AI Vision: 扫描模式成功，定位目录页{page_start}-{page_end}，继续细粒度提取...")
+            # 继续从这个范围往后扫描
+            current_page = page_end + 1
+            round_num = 1
+        else:
+            logger.info("AI Vision: 扫描模式未找到目录页")
+            current_page = total_pages  # 跳过后续循环
+            round_num = 0
 
     all_entries: List[Tuple[str, int]] = []
     seen_titles = set()
 
-    # 分批处理目录页
-    current_page = page_start
-    round_num = 0
+    if toc_page_hint[0] >= 0:
+        # Phase 1 已定位目录页 → 分批精细提取
+        page_start = toc_page_hint[0]
+        page_end = toc_page_hint[1]
+        logger.info(f"AI Vision: 使用 OCR 定位的目录页范围 {page_start}-{page_end}")
 
-    while current_page <= page_end and round_num < max_rounds:
-        batch_end = min(current_page + batch_size - 1, page_end)
-        images = extract_toc_images(
-            pdf_path, page_start=current_page, page_end=batch_end,
-            max_pages=batch_size, dpi=dpi,
-        )
-        if not images:
-            break
-
-        round_num += 1
-        logger.info(f"AI Vision: 第{round_num}轮，页 {current_page}-{batch_end}，{len(images)} 张图")
-
-        prompt = build_vision_prompt()
-        try:
-            response = await call_vision_llm(
-                images=images, prompt=prompt,
-                endpoint=endpoint, model=model,
-                api_key=api_key, provider=provider,
+        current_page = page_start
+        round_num = 0
+        while current_page <= page_end and round_num < max_rounds:
+            batch_end = min(current_page + batch_size - 1, page_end)
+            images = extract_toc_images(
+                pdf_path, page_start=current_page, page_end=batch_end,
+                max_pages=batch_size, dpi=dpi,
             )
-        except Exception as e:
-            logger.warning(f"AI Vision: 第{round_num}轮失败: {e}")
-            break
+            if not images:
+                break
 
-        # Vision 模型返回原始文字，用我们的解析器提取目录条目
-        entries = extract_toc_from_text(response)
-        logger.info(f"AI Vision: 第{round_num}轮提取 {len(entries)} 条")
+            round_num += 1
+            logger.info(f"AI Vision: 第{round_num}轮，页 {current_page}-{batch_end}，{len(images)} 张图")
 
-        for title, page in entries:
-            norm = re.sub(r'\s+', '', title).lower()
-            if norm not in seen_titles:
-                seen_titles.add(norm)
-                all_entries.append((title, page))
+            prompt = build_vision_prompt()
+            try:
+                response = await call_vision_llm(
+                    images=images, prompt=prompt,
+                    endpoint=endpoint, model=model,
+                    api_key=api_key, provider=provider,
+                )
+            except Exception as e:
+                logger.warning(f"AI Vision: 第{round_num}轮失败: {e}")
+                break
 
-        current_page = batch_end + 1
+            entries = extract_toc_from_text(response)
+            logger.info(f"AI Vision: 第{round_num}轮提取 {len(entries)} 条")
+
+            for title, page in entries:
+                norm = re.sub(r'\s+', '', title).lower()
+                if norm not in seen_titles:
+                    seen_titles.add(norm)
+                    all_entries.append((title, page))
+
+            current_page = batch_end + 1
+    else:
+        # Phase 1 未定位 → 扫描多个页码范围找目录
+        logger.info("AI Vision: OCR 未定位目录，扫描多页范围")
+        for scan_start in [0, 5, 10, 15]:
+            if scan_start >= total_pages:
+                break
+            scan_end = min(scan_start + 4, total_pages - 1)
+            images = extract_toc_images(
+                pdf_path, page_start=scan_start, page_end=scan_end,
+                max_pages=5, dpi=dpi,
+            )
+            if not images:
+                continue
+
+            prompt = build_vision_prompt()
+            try:
+                response = await call_vision_llm(
+                    images=images, prompt=prompt,
+                    endpoint=endpoint, model=model,
+                    api_key=api_key, provider=provider,
+                )
+            except Exception as e:
+                logger.warning(f"AI Vision: 扫描页{scan_start}-{scan_end}失败: {e}")
+                continue
+
+            entries = extract_toc_from_text(response)
+            logger.info(f"AI Vision: 扫描页{scan_start}-{scan_end}提取 {len(entries)} 条")
+
+            for title, page in entries:
+                norm = re.sub(r'\s+', '', title).lower()
+                if norm not in seen_titles:
+                    seen_titles.add(norm)
+                    all_entries.append((title, page))
+
+            # 找到目录后继续扫描后续页
+            if len(all_entries) >= 3:
+                # 继续从这个范围往后扫描
+                for next_start in [scan_end + 1, scan_end + 4]:
+                    if next_start >= total_pages:
+                        break
+                    next_end = min(next_start + 4, total_pages - 1)
+                    images = extract_toc_images(
+                        pdf_path, page_start=next_start, page_end=next_end,
+                        max_pages=5, dpi=dpi,
+                    )
+                    if not images:
+                        continue
+
+                    prompt = build_vision_prompt()
+                    try:
+                        response = await call_vision_llm(
+                            images=images, prompt=prompt,
+                            endpoint=endpoint, model=model,
+                            api_key=api_key, provider=provider,
+                        )
+                    except Exception as e:
+                        logger.warning(f"AI Vision: 续扫页{next_start}-{next_end}失败: {e}")
+                        continue
+
+                    more = extract_toc_from_text(response)
+                    logger.info(f"AI Vision: 续扫页{next_start}-{next_end}提取 {len(more)} 条")
+                    for title, page in more:
+                        norm = re.sub(r'\s+', '', title).lower()
+                        if norm not in seen_titles:
+                            seen_titles.add(norm)
+                            all_entries.append((title, page))
+                break
 
     if not all_entries:
         logger.info("AI Vision: 未提取到任何目录条目")
