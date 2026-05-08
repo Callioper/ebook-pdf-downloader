@@ -2445,6 +2445,24 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
     bookmark = task.get("bookmark", "")
     pdf_path = report.get("pdf_path", "")
 
+    # Build config summary for the confirmation dialog
+    config_info = {
+        "外源书签": "已提供" if task.get("bookmark") else "自动获取",
+        "ISBN": report.get("isbn", "") or "未获取",
+        "智能TOC": "已启用" if pdf_path else "无PDF",
+        "AI Vision": "已启用" if config.get("ai_vision_enabled") else "未启用",
+    }
+
+    confirmed = await _wait_for_step_confirmation(
+        task_id=task_id,
+        step_name="bookmark",
+        step_label="目录处理",
+        config_info=config_info,
+    )
+    if not confirmed:
+        await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 100})
+        return report
+
     if not bookmark:
         task_store.add_log(task_id, "No bookmark provided, trying addbookmark...")
         try:
