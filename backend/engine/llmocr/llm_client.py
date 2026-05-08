@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
@@ -127,15 +128,22 @@ class LlmApiClient:
 
     async def perform_ocr(self, image_b64: str) -> str:
         """OCR a full page image (base64-encoded). Returns plain text."""
+        import base64
         image_bytes = base64.b64decode(image_b64)
-        result = await self.ocr_image(image_bytes)
+        result = await asyncio.to_thread(self.ocr_image, image_bytes)
         return (result or "").strip()
 
     async def perform_ocr_on_crop(self, image_b64: str) -> str:
-        """OCR a cropped region (base64-encoded). Returns plain text.
-        Uses a focused prompt for individual text regions."""
+        """OCR a cropped region (base64-encoded). Returns plain text."""
+        import base64
         image_bytes = base64.b64decode(image_b64)
-        result = await self.ocr_image(image_bytes)
+        result = await asyncio.to_thread(self.ocr_image, image_bytes)
+        return (result or "").strip()
+
+    async def perform_ocr_on_crop(self, image_b64: str) -> str:
+        """OCR a cropped region (base64-encoded). Returns plain text."""
+        image_bytes = base64.b64decode(image_b64)
+        result = await asyncio.to_thread(self.ocr_image, image_bytes)
         return (result or "").strip()
 
     def _build_body(self, data_url: str, lang_hint: str) -> dict[str, Any]:
