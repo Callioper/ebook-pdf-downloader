@@ -2279,6 +2279,19 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             ocr_model = config.get("llm_ocr_model", "qwen3-vl-4b-instruct")
             ocr_concurrency = str(config.get("llm_ocr_concurrency", 1))
             local_ocr_bin = "local-llm-pdf-ocr"
+            import shutil as _shutil
+            dev_bin = _shutil.which("local-llm-pdf-ocr")
+            if not dev_bin:
+                import os as _os
+                uv_bin = _os.path.expanduser(r"~\.local\bin\local-llm-pdf-ocr.exe")
+                if _os.path.exists(uv_bin):
+                    dev_bin = uv_bin
+                else:
+                    pip_bin = _os.path.join(_os.path.dirname(_os.__file__), "Scripts", "local-llm-pdf-ocr.exe")
+                    if _os.path.exists(pip_bin):
+                        dev_bin = pip_bin
+            if dev_bin:
+                local_ocr_bin = dev_bin
             task_store.add_log(task_id, f"LLM OCR: {ocr_model} @ {ocr_endpoint}, concurrency={ocr_concurrency}")
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
             try:
@@ -2303,7 +2316,11 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     err_msg = stderr.decode()[:300] if stderr else "unknown"
                     task_store.add_log(task_id, f"LLM OCR failed (code {proc.returncode}): {err_msg}")
             except FileNotFoundError:
-                task_store.add_log(task_id, "local-llm-pdf-ocr not found. Install: pip install local-llm-pdf-ocr")
+                task_store.add_log(task_id, 
+                    "local-llm-pdf-ocr not found. "
+                    "Install it: cd local-llm-pdf-ocr && uv pip install -e . "
+                    "or install from PyPI: pip install local-llm-pdf-ocr"
+                )
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, "LLM OCR timed out")
             except Exception as e:

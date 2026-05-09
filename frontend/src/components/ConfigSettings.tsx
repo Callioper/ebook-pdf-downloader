@@ -1519,45 +1519,6 @@ export default function ConfigSettings() {
             </div>
           </div>
 
-          {/* Tesseract 语言包状态 */}
-          {form.ocr_engine !== 'llm_ocr' && (
-          <div className="border-t border-gray-200 pt-3">
-            <span className="text-xs font-medium text-gray-600 mb-2 block">Tesseract 语言包</span>
-            <div className="flex items-center gap-2">
-              <StatusDot status={
-                form.ocr_engine === 'tesseract' && (ocrEngines['tesseract'] as any)?.has_chi_sim
-                  ? 'green'
-                  : form.ocr_engine === 'tesseract'
-                    ? 'red'
-                    : null
-              } />
-              <span className="text-xs text-gray-500">
-                {(ocrEngines['tesseract'] as any)?.has_chi_sim
-                  ? 'chi_sim 已安装'
-                  : (ocrEngines['tesseract'] as any)?.languages
-                    ? 'chi_sim 未安装'
-                    : '请先检测 Tesseract'}
-              </span>
-              {!((ocrEngines['tesseract'] as any)?.has_chi_sim) && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await fetch('/api/v1/install-tesseract-lang?lang=chi_sim')
-                      handleDetectOcrEngine('tesseract')
-                    } catch (e) {
-                      console.warn('[ConfigSettings] install tess lang:', e)
-                    }
-                  }}
-                  className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600"
-                >
-                  安装中文语言包
-                </button>
-              )}
-            </div>
-          </div>
-          )}
-
           {/* 引擎切换区 */}
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
@@ -1626,8 +1587,45 @@ export default function ConfigSettings() {
           </div>
           </div>
 
+          {/* Tesseract 语言包状态 */}
           {form.ocr_engine !== 'llm_ocr' && (
-            <>
+          <div className="border-t border-gray-200 pt-3">
+            <span className="text-xs font-medium text-gray-600 mb-2 block">Tesseract 语言包</span>
+            <div className="flex items-center gap-2">
+              <StatusDot status={
+                form.ocr_engine === 'tesseract' && (ocrEngines['tesseract'] as any)?.has_chi_sim
+                  ? 'green'
+                  : form.ocr_engine === 'tesseract'
+                    ? 'red'
+                    : null
+              } />
+              <span className="text-xs text-gray-500">
+                {(ocrEngines['tesseract'] as any)?.has_chi_sim
+                  ? 'chi_sim 已安装'
+                  : (ocrEngines['tesseract'] as any)?.languages
+                    ? 'chi_sim 未安装'
+                    : '请先检测 Tesseract'}
+              </span>
+              {!((ocrEngines['tesseract'] as any)?.has_chi_sim) && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await fetch('/api/v1/install-tesseract-lang?lang=chi_sim')
+                      handleDetectOcrEngine('tesseract')
+                    } catch (e) {
+                      console.warn('[ConfigSettings] install tess lang:', e)
+                    }
+                  }}
+                  className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600"
+                >
+                  安装中文语言包
+                </button>
+              )}
+            </div>
+          </div>
+          )}
+
           <div className="grid grid-cols-4 gap-3 pt-2">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">语言</label>
@@ -1679,10 +1677,9 @@ export default function ConfigSettings() {
               <span className="text-xs text-gray-400">越低越快，150-400，推荐 200</span>
             </div>
           </div>
-            </>
-          )}
 
           {/* ---------- OCR 安装引导 ---------- */}
+          {form.ocr_engine !== 'llm_ocr' && (
           <details className="group">
             <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
               <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1696,6 +1693,7 @@ export default function ConfigSettings() {
               <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
             </div>
           </details>
+          )}
 
           {form.ocr_engine === 'llm_ocr' && (
           <div className="space-y-3 pt-2">
