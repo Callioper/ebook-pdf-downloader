@@ -16,6 +16,7 @@ from PIL import Image
 
 from llmocr.aligner import HybridAligner
 from llmocr.dense import process_dense_pages
+from llmocr.grounded import GroundedOcr
 from llmocr.llm_client import LlmApiClient
 from llmocr.refine import refine_uncertain
 
@@ -46,6 +47,7 @@ class LlmOcrPipeline:
     ):
         self.aligner = HybridAligner()
         self.image_format = image_format
+        self.model = model
         self.client = LlmApiClient(
             endpoint=endpoint, model=model, api_key=api_key, timeout=timeout,
         ) if model else None
@@ -58,6 +60,7 @@ class LlmOcrPipeline:
         dpi: int = 200,
         concurrency: int = 1,
         refine: bool = True,
+        grounded: bool = False,
         max_image_dim: int = 1024,
         dense_threshold: int = 60,
         dense_enabled: bool = True,
@@ -73,6 +76,38 @@ class LlmOcrPipeline:
         page_nums = sorted(images_dict.keys())
         total_pages = len(page_nums)
         await _emit(progress, "convert", 1, 1, f"Converted {total_pages} pages.")
+
+        # Grounded path: bbox-native VLM, skips Surya + DP + refine
+        if grounded and self.client is not None:
+            await _emit(progress, "ocr", 0, total_pages, f"Grounded OCR {total_pages} pages...")
+            grounded_ocr = GroundedOcr(self.client, self.model)
+            pages_data = {}
+            pages_text = {}
+            for i, p_num in enumerate(page_nums):
+                elements = await grounded_ocr.process_page(images_dict[p_num])
+                if elements:
+                    boxes_and_texts = []
+                    texts = []
+                    img_bytes = _data_url_to_bytes(images_dict[p_num])
+                    from PIL import Image
+                    import io
+                    img = Image.open(io.BytesIO(img_bytes))
+                    w, h = img.size
+                    for elem in elements:
+                        bb = elem["bbox_2d"]
+                        nx0, ny0, nx1, ny1 = bb[0]/w, bb[1]/h, bb[2]/w, bb[3]/h
+                        boxes_and_texts.append(([nx0, ny0, nx1, ny1], elem["content"]))
+                        texts.append(elem["content"])
+                    pages_data[p_num] = boxes_and_texts
+                    pages_text[p_num] = texts
+                else:
+                    pages_data[p_num] = []
+                    pages_text[p_num] = []
+                await _emit(progress, "ocr", i + 1, total_pages, f"Grounded ({i + 1}/{total_pages})")
+
+            _embed_sandwich_pdf(input_path, output_path, pages_data, dpi, images_dict)
+            await _emit(progress, "embed", 1, 1, "Done.")
+            return pages_text
 
         # Phase 2: Batch Surya detection
         await _emit(progress, "detect", 0, 1, f"Detecting layout for {total_pages} pages...")
@@ -162,12 +197,26 @@ def _rasterize_pages(path: str, dpi: int, max_dim: int, image_format: str = "jpe
 
     ext = Path(path).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
+        images: dict[int, str] = {}
         with Image.open(path) as src:
-            img = src if not needs_rgb else src.convert("RGB")
-            img.thumbnail((max_dim, max_dim))
-            buf = io.BytesIO()
-            img.save(buf, format=save_format, **save_kwargs)
-            return {0: mime_prefix + base64.b64encode(buf.getvalue()).decode("utf-8")}
+            frame = 0
+            while True:
+                img = src.convert("RGB").copy()
+                img.thumbnail((max_dim, max_dim))
+                buf = io.BytesIO()
+                if image_format == "jpeg":
+                    img.save(buf, format="JPEG", quality=85)
+                    prefix = "data:image/jpeg;base64,"
+                else:
+                    img.save(buf, format="PNG")
+                    prefix = "data:image/png;base64,"
+                images[frame] = prefix + base64.b64encode(buf.getvalue()).decode("utf-8")
+                try:
+                    src.seek(frame + 1)
+                    frame += 1
+                except EOFError:
+                    break
+        return images
 
     images: dict[int, str] = {}
     doc = fitz.open(path)
