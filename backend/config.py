@@ -91,6 +91,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ocr_refine_enabled": True,
     "llm_ocr_dense_threshold": 60,
     "llm_ocr_dense_enabled": True,
+    "llm_ocr_grounded": False,
+    "llm_ocr_cooldown": 0,
 }
 
 

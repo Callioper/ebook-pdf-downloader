@@ -44,10 +44,12 @@ class LlmOcrPipeline:
         api_key: str = "",
         timeout: int = 300,
         image_format: str = "jpeg",
+        cooldown: float = 0.0,
     ):
         self.aligner = HybridAligner()
         self.image_format = image_format
         self.model = model
+        self.cooldown = cooldown
         self.client = LlmApiClient(
             endpoint=endpoint, model=model, api_key=api_key, timeout=timeout,
         ) if model else None
@@ -150,7 +152,8 @@ class LlmOcrPipeline:
         async def process_page(p_num: int):
             async with sem:
                 text = await self.client.perform_ocr_url(images_dict[p_num])
-                await asyncio.sleep(2)  # cooldown between page requests
+                if self.cooldown > 0:
+                    await asyncio.sleep(self.cooldown)
             if text:
                 aligned = await asyncio.to_thread(
                     self.aligner.align, [b for b, _ in pages_data[p_num]], text
