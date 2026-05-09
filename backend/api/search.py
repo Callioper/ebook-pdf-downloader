@@ -761,6 +761,50 @@ async def fetch_models(body: Dict[str, Any]):
         return {"ok": False, "message": str(e)[:200], "models": []}
 
 
+@router.post("/fetch-llm-models")
+async def fetch_llm_models(req: Request):
+    """Fetch available models from the LLM OCR endpoint."""
+    import httpx
+    body = await req.json()
+    endpoint = (body.get("endpoint", "") or "").rstrip("/")
+    if not endpoint:
+        return {"ok": False, "message": "缺少端点地址"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{endpoint}/models")
+            resp.raise_for_status()
+            data = resp.json()
+            models = []
+            for item in data.get("data", data if isinstance(data, list) else []):
+                if isinstance(item, dict):
+                    models.append({"id": item.get("id", ""), "name": item.get("id", "")})
+            return {"ok": True, "models": models, "endpoint": endpoint}
+    except Exception as e:
+        return {"ok": False, "message": str(e)[:200]}
+
+
+@router.post("/check-llm-ocr")
+async def check_llm_ocr(req: Request):
+    """Test LLM OCR endpoint connectivity."""
+    import httpx
+    body = await req.json()
+    endpoint = (body.get("endpoint", "") or "").rstrip("/")
+    model = body.get("model", "")
+    if not endpoint:
+        return {"ok": False, "message": "缺少端点地址"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{endpoint}/models")
+            resp.raise_for_status()
+            data = resp.json()
+            models = [item.get("id", "") for item in data.get("data", [])]
+            if model and model not in models:
+                return {"ok": True, "message": f"端点 OK ({len(models)} 个模型), 但模型'{model}'未加载"}
+            return {"ok": True, "message": f"连接成功 — {len(models)} 个模型可用" + (f", 含'{model}'" if model in models else "")}
+    except Exception as e:
+        return {"ok": False, "message": str(e)[:200]}
+
+
 @router.post("/check-proxy-sources")
 async def check_proxy_sources(body: ProxyRequest):
     proxy_url = body.http_proxy or get_config().get("http_proxy", "")
