@@ -35,6 +35,7 @@ interface AppConfig {
   llm_ocr_model: string
   llm_ocr_concurrency: number
   ocr_confirm_enabled: boolean
+  bookmark_confirm_enabled: boolean
   [key: string]: unknown
 }
 
@@ -165,11 +166,13 @@ const DEFAULT_CONFIG: AppConfig = {
   llm_ocr_model: '',
   llm_ocr_concurrency: 1,
   ocr_confirm_enabled: false,
+  bookmark_confirm_enabled: false,
 }
 
 const OCR_ENGINES = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
+  { key: 'llm_ocr', name: 'LLM OCR', desc: '大模型视觉识别，无需本地引擎' },
 ]
 
 const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
@@ -1558,9 +1561,9 @@ export default function ConfigSettings() {
           {/* 引擎切换区 */}
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {OCR_ENGINES.map((eng) => {
-                const info = ocrEngines[eng.key]
+                const info = ocrEngines[eng.key] || { installed: eng.key === 'llm_ocr', msg: '' }
                 const isSelected = form.ocr_engine === eng.key
                 return (
                   <div
@@ -1574,33 +1577,37 @@ export default function ConfigSettings() {
                       </div>
                     </div>
                     <p className="text-xs text-gray-400 mb-2">{eng.desc}</p>
-                    {info?.msg && (
+                    {eng.key !== 'llm_ocr' && info?.msg && (
                       <p className={`text-xs mb-1.5 ${info.installed ? 'text-green-600' : 'text-red-500'}`}>
                         {info.msg}
                       </p>
                     )}
-                    {eng.key === 'paddleocr' && !info?.installed && (
+                    {eng.key !== 'llm_ocr' && eng.key === 'paddleocr' && !info?.installed && (
                       <p className="text-xs text-gray-400 mb-1.5">需要 Python 3.11 虚拟环境，点击安装自动搭建</p>
                     )}
-                    {eng.key === 'paddleocr' && info?.installed && (info as any)?.venv && (
+                    {eng.key !== 'llm_ocr' && eng.key === 'paddleocr' && info?.installed && (info as any)?.venv && (
                       <p className="text-xs text-green-600 mb-1.5">运行环境: {(info as any).venv}</p>
                     )}
                     <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleDetectOcrEngine(eng.key)}
-                        className="px-2 py-0.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
-                      >
-                        检测
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleInstallOcrEngine(eng.key)}
-                        disabled={info?.installing}
-                        className="px-2 py-0.5 text-xs rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
-                      >
-                        {info?.installing ? '安装中...' : '安装'}
-                      </button>
+                      {eng.key !== 'llm_ocr' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleDetectOcrEngine(eng.key)}
+                            className="px-2 py-0.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
+                          >
+                            检测
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleInstallOcrEngine(eng.key)}
+                            disabled={info?.installing}
+                            className="px-2 py-0.5 text-xs rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+                          >
+                            {info?.installing ? '安装中...' : '安装'}
+                          </button>
+                        </>
+                      )}
                       {eng.key === form.ocr_engine ? (
                         <span className="text-xs text-orange-600 font-medium ml-auto">当前</span>
                       ) : (
@@ -1619,7 +1626,78 @@ export default function ConfigSettings() {
           </div>
           </div>
 
-          {form.ocr_engine === 'llm_ocr' ? (
+          {form.ocr_engine !== 'llm_ocr' && (
+            <>
+          <div className="grid grid-cols-4 gap-3 pt-2">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">语言</label>
+              <select
+                value={form.ocr_languages || 'chi_sim+eng'}
+                onChange={(e) => updateForm({ ocr_languages: e.target.value })}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="chi_sim+eng">chi_sim+eng</option>
+                <option value="chi_sim">chi_sim</option>
+                <option value="eng">eng</option>
+                <option value="chi_sim+eng+jpn">chi_sim+eng+jpn</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">并行线程</label>
+              <select
+                value={form.ocr_jobs ?? 1}
+                onChange={(e) => updateForm({ ocr_jobs: parseInt(e.target.value) || 1 })}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={4}>4</option>
+              </select>
+              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Tesseract 支持多线程，PaddleOCR 仅单线程</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">超时 (秒)</label>
+              <input
+                type="number"
+                value={form.ocr_timeout ?? 1800}
+                  onChange={(e) => updateForm({ ocr_timeout: parseInt(e.target.value) || 3600 })}
+                min={60}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">OCR 采样 DPI</label>
+              <input
+                type="number"
+                min={150}
+                max={400}
+                step={50}
+                value={form.ocr_oversample || 200}
+                onChange={(e) => updateForm({ocr_oversample: parseInt(e.target.value)})}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <span className="text-xs text-gray-400">越低越快，150-400，推荐 200</span>
+            </div>
+          </div>
+            </>
+          )}
+
+          {/* ---------- OCR 安装引导 ---------- */}
+          <details className="group">
+            <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
+              <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              OCR 命令行安装指引
+            </summary>
+            <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
+              <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
+              <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{OCR_INSTALL_GUIDE}</pre>
+              <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
+            </div>
+          </details>
+
+          {form.ocr_engine === 'llm_ocr' && (
           <div className="space-y-3 pt-2">
             <p className="text-xs text-gray-500">
               使用视觉大模型逐框识别文字层（dense mode）。需要运行 lmstudio / ollama 加载对应模型。
@@ -1726,86 +1804,17 @@ export default function ConfigSettings() {
               </div>
             </details>
           </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 pt-3">
-                <input type="checkbox" id="ocr_confirm_enabled"
-                  checked={form.ocr_confirm_enabled ?? false}
-                  onChange={(e) => updateForm({ ocr_confirm_enabled: e.target.checked })}
-                  className="rounded" />
-                <label htmlFor="ocr_confirm_enabled" className="text-xs text-gray-500">
-                  管道执行到 OCR 步骤时弹出确认对话框
-                </label>
-              </div>
-
-          <div className="grid grid-cols-4 gap-3 pt-2">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">语言</label>
-              <select
-                value={form.ocr_languages || 'chi_sim+eng'}
-                onChange={(e) => updateForm({ ocr_languages: e.target.value })}
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="chi_sim+eng">chi_sim+eng</option>
-                <option value="chi_sim">chi_sim</option>
-                <option value="eng">eng</option>
-                <option value="chi_sim+eng+jpn">chi_sim+eng+jpn</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">并行线程</label>
-              <select
-                value={form.ocr_jobs ?? 1}
-                onChange={(e) => updateForm({ ocr_jobs: parseInt(e.target.value) || 1 })}
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={4}>4</option>
-              </select>
-              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Tesseract 支持多线程，PaddleOCR 仅单线程</p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">超时 (秒)</label>
-              <input
-                type="number"
-                value={form.ocr_timeout ?? 1800}
-                  onChange={(e) => updateForm({ ocr_timeout: parseInt(e.target.value) || 3600 })}
-                min={60}
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">OCR 采样 DPI</label>
-              <input
-                type="number"
-                min={150}
-                max={400}
-                step={50}
-                value={form.ocr_oversample || 200}
-                onChange={(e) => updateForm({ocr_oversample: parseInt(e.target.value)})}
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-              <span className="text-xs text-gray-400">越低越快，150-400，推荐 200</span>
-            </div>
-          </div>
-
-          {/* ---------- OCR 安装引导 ---------- */}
-          <details className="group">
-            <summary className="text-xs font-medium text-gray-600 cursor-pointer list-none flex items-center gap-1 select-none hover:text-gray-800">
-              <svg className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-              OCR 命令行安装指引
-            </summary>
-            <div className="mt-2 bg-blue-50 border border-blue-200 rounded p-3">
-              <p className="text-xs text-blue-800 font-medium mb-2">📋 将以下提示词复制并发送给 OpenCode：</p>
-              <pre className="text-xs text-blue-700 bg-blue-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono">{OCR_INSTALL_GUIDE}</pre>
-              <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
-            </div>
-          </details>
-            </>
           )}
+
+          <div className="flex items-center gap-2 pt-3">
+            <input type="checkbox" id="ocr_confirm_enabled"
+              checked={form.ocr_confirm_enabled ?? false}
+              onChange={(e) => updateForm({ ocr_confirm_enabled: e.target.checked })}
+              className="rounded" />
+            <label htmlFor="ocr_confirm_enabled" className="text-xs text-gray-500">
+              管道执行到 OCR 步骤时弹出确认对话框
+            </label>
+          </div>
         </div>
       )}
 
@@ -1983,6 +1992,16 @@ export default function ConfigSettings() {
             阶段1 从 OCR 文字层提取目录（免费），阶段2 用 AI Vision 从目录页图片提取。
             支持 OpenAI 兼容 / Gemini / MiniMax 格式。
           </p>
+
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="bookmark_confirm_enabled"
+              checked={form.bookmark_confirm_enabled ?? false}
+              onChange={(e) => updateForm({ bookmark_confirm_enabled: e.target.checked })}
+              className="rounded" />
+            <label htmlFor="bookmark_confirm_enabled" className="text-xs text-gray-500">
+              管道执行到书签步骤时弹出确认对话框
+            </label>
+          </div>
         </div>
       )}
 
