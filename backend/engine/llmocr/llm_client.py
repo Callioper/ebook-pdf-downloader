@@ -1,4 +1,4 @@
-"""Synchronous HTTP client for OpenAI-compatible vision LLM APIs (Ollama, LM Studio)."""
+﻿"""Synchronous HTTP client for OpenAI-compatible vision LLM APIs (Ollama, LM Studio)."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ class LlmApiClient:
                     )
                     time.sleep(delay)
                     continue
-                log.warning("LLM API error: HTTP %d — %s", resp.status_code, (resp.text or "")[:200])
+                log.warning("LLM API error: HTTP %d \u2014 %s", resp.status_code, (resp.text or "")[:200])
                 return None
             except httpx.TimeoutException:
                 # Timeout means model is too slow — retrying won't help
@@ -161,7 +161,7 @@ class LlmApiClient:
                         delay = min(2**attempt, 30)
                         time.sleep(delay)
                         continue
-                    log.warning("LLM API error: HTTP %d — %s", resp.status_code, (resp.text or "")[:200])
+                    log.warning("LLM API error: HTTP %d \u2014 %s", resp.status_code, (resp.text or "")[:200])
                     return None
                 except httpx.TimeoutException:
                     log.warning("LLM API timeout after %ds", self.timeout)
@@ -178,25 +178,6 @@ class LlmApiClient:
                     log.warning("LLM API error: %s", e)
                     return None
             return None
-
-    async def perform_ocr_on_crop(self, image_b64: str) -> str:
-        """OCR a cropped region (base64-encoded). Returns plain text."""
-        image_bytes = base64.b64decode(image_b64)
-        result = await asyncio.to_thread(self.ocr_image, image_bytes, "Chinese and English")
-        return (result or "").strip()
-
-    async def perform_ocr_on_crop(self, image_b64: str) -> str:
-        """OCR a cropped region (base64-encoded). Returns plain text."""
-        import base64
-        image_bytes = base64.b64decode(image_b64)
-        result = await asyncio.to_thread(self.ocr_image, image_bytes)
-        return (result or "").strip()
-
-    async def perform_ocr_on_crop(self, image_b64: str) -> str:
-        """OCR a cropped region (base64-encoded). Returns plain text."""
-        image_bytes = base64.b64decode(image_b64)
-        result = await asyncio.to_thread(self.ocr_image, image_bytes)
-        return (result or "").strip()
 
     def _build_body(self, data_url: str, lang_hint: str) -> dict[str, Any]:
         return {
