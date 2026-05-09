@@ -156,8 +156,6 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_messages_api: false,
   ai_vision_max_pages: 5,
   ai_vision_dpi: 150,
-  ocr_confirm_enabled: false,
-  bookmark_confirm_enabled: false,
 }
 
 const OCR_ENGINES = [
@@ -1623,7 +1621,7 @@ export default function ConfigSettings() {
                 <option value={2}>2</option>
                 <option value={4}>4</option>
               </select>
-              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Tesseract 支持多线程，PaddleOCR 仅单线程，LLM OCR 推荐单线程</p>
+              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Tesseract 支持多线程，PaddleOCR 仅单线程</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">超时 (秒)</label>
@@ -1647,41 +1645,6 @@ export default function ConfigSettings() {
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
               <span className="text-xs text-gray-400">越低越快，150-400，推荐 200</span>
-            </div>
-
-            {/* --- OCR / Bookmark confirmation toggles --- */}
-            <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-              <div>
-                <span className="text-xs font-medium text-gray-700">OCR 执行前确认</span>
-                <p className="text-[10px] text-gray-400">启用后 OCR 步骤会弹出确认窗口</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input type="checkbox" checked={!!form.ocr_confirm_enabled}
-                  onChange={(e) => updateForm({ ocr_confirm_enabled: e.target.checked })} className="sr-only peer" />
-                <div className="w-8 h-4 bg-gray-200 peer-focus:ring-1 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
-              </label>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-medium text-gray-700">目录处理前确认</span>
-                <p className="text-[10px] text-gray-400">启用后目录/书签步骤会弹出确认窗口</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input type="checkbox" checked={!!form.bookmark_confirm_enabled}
-                  onChange={(e) => updateForm({ bookmark_confirm_enabled: e.target.checked })} className="sr-only peer" />
-                <div className="w-8 h-4 bg-gray-200 peer-focus:ring-1 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
-              </label>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-medium text-gray-700">Surya bbox 对齐（实验性）</span>
-                <p className="text-[10px] text-gray-400">OCR 后重新对齐文字选框，大幅增加耗时（&gt;50页慎用）</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input type="checkbox" checked={!!form.surya_alignment_enabled}
-                  onChange={(e) => updateForm({ surya_alignment_enabled: e.target.checked })} className="sr-only peer" />
-                <div className="w-8 h-4 bg-gray-200 peer-focus:ring-1 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
-              </label>
             </div>
           </div>
 

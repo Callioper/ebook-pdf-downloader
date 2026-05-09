@@ -123,10 +123,6 @@ export interface AppConfig {
   zlib_password: string
   aa_membership_key: string
   ocr_engine: string
-  llm_ocr_endpoint: string
-  llm_ocr_model: string
-  llm_ocr_api_key: string
-  llm_ocr_timeout: number
   [key: string]: unknown
 }
 
