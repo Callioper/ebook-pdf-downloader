@@ -1,6 +1,8 @@
 """HybridAligner — Surya DetectionPredictor + Needleman-Wunsch DP alignment.
 Matches ahnafnafee/local-llm-pdf-ocr src/pdf_ocr/core/aligner.py."""
 
+from llmocr import tqdm_patch  # noqa: F401 — must load before surya imports
+
 import io
 import logging
 from typing import Optional
