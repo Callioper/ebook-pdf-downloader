@@ -2054,7 +2054,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     engine_labels = {
         "tesseract": "Tesseract OCR",
         "paddleocr": "PaddleOCR",
-        "llm_ocr": "LLM OCR",
     }
     config_info = {
         "引擎": engine_labels.get(ocr_engine, ocr_engine),
@@ -2063,9 +2062,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         "超时": f"{ocr_timeout}s",
         "配置已启用": "是" if ocr_enabled else "否（ocr_jobs=0）",
     }
-    if ocr_engine == "llm_ocr":
-        config_info["LLM端点"] = config.get("llm_ocr_endpoint", "")[:80]
-        config_info["LLM模型"] = config.get("llm_ocr_model", "未设置")
 
     confirmed = True  # default skip, controlled by ocr_confirm_enabled
     if config.get("ocr_confirm_enabled", False):
@@ -2083,8 +2079,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         task_store.add_log(task_id, "OCR disabled in config, skipping")
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
         return report
-    if ocr_engine == "llm_ocr":
-        ocr_timeout = max(ocr_timeout, 7200)
     ocr_oversample = str(config.get("ocr_oversample", 200))
     _opt_level = "0"
     if config.get("pdf_compress", False):
@@ -2128,10 +2122,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     # ── Ensure the right OCR plugin is (un)installed ──
     try:
         import subprocess as _sp
-
-        if ocr_engine == "llm_ocr":
-            # No plugin management needed for LLM OCR (uses HTTP API)
-            pass
 
         # ── Detect PaddleOCR Python 3.11 venv ──
         _paddle_venv_py = ""
@@ -2284,83 +2274,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
         elif ocr_engine == "llm_ocr":
-            task_store.add_log(task_id, "Running standalone LLM OCR pipeline...")
-
-            if not _is_scanned(pdf_path, python_cmd=_py_for_ocr):
-                task_store.add_log(task_id, "PDF already has text layer, skipping OCR")
-                report["ocr_done"] = True
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-                return report
-
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
-
-            llm_endpoint = config.get("llm_ocr_endpoint", config.get("llm_api_base", "http://localhost:11434"))
-            llm_model = config.get("llm_ocr_model", config.get("llm_model", ""))
-            llm_api_key = config.get("llm_ocr_api_key", config.get("llm_api_key", ""))
-            llm_timeout = config.get("llm_ocr_timeout", 300)
-            llm_max_image_dim = int(config.get("llm_ocr_max_image_dim", 1024))
-            llm_image_format = config.get("llm_ocr_image_format", "jpeg")
-            llm_concurrency = max(1, ocr_jobs)
-            llm_dense_enabled = config.get("llm_ocr_dense_enabled", True)
-            llm_dense_threshold = int(config.get("llm_ocr_dense_threshold", 60))
-            llm_grounded = config.get("llm_ocr_grounded", False)
-            llm_cooldown = float(config.get("llm_ocr_cooldown", 0))
-
-            if not llm_model:
-                task_store.add_log(task_id, "LLM OCR: model not configured")
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-                return report
-
-            output_pdf = pdf_path.replace(".pdf", "_ocr.pdf")
-
-            try:
-                from llmocr.engine import LlmOcrPipeline
-
-                pipeline = LlmOcrPipeline(
-                    endpoint=llm_endpoint,
-                    model=llm_model,
-                    api_key=llm_api_key,
-                    timeout=llm_timeout,
-                    image_format=llm_image_format,
-                    cooldown=llm_cooldown,
-                )
-
-                async def emit_ocr_progress(stage: str, cur: int, tot: int, msg: str):
-                    stage_offsets = {"convert": 0, "detect": 10, "ocr": 20, "refine": 70, "embed": 90}
-                    base = stage_offsets.get(stage, 0)
-                    pct = min(base + int(cur / max(1, tot) * 20), 100)
-                    await _emit_progress(task_id, "ocr", pct, msg)
-
-                await pipeline.run(
-                    input_path=pdf_path,
-                    output_path=output_pdf,
-                    dpi=int(ocr_oversample),
-                    concurrency=llm_concurrency,
-                    max_image_dim=llm_max_image_dim,
-                    refine=config.get("ocr_refine_enabled", True),
-                    grounded=llm_grounded,
-                    dense_enabled=llm_dense_enabled,
-                    dense_threshold=llm_dense_threshold,
-                    progress=emit_ocr_progress,
-                )
-
-                if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 1024:
-                    if _is_ocr_readable(output_pdf, python_cmd=_py_for_ocr):
-                        os.replace(output_pdf, pdf_path)
-                        task_store.add_log(task_id, "LLM OCR completed, quality check passed")
-                        report["ocr_done"] = True
-                    else:
-                        task_store.add_log(task_id, "LLM OCR quality check failed, keeping original PDF")
-                        try:
-                            os.remove(output_pdf)
-                        except Exception:
-                            pass
-                else:
-                    task_store.add_log(task_id, "LLM OCR failed: no output produced")
-            except ImportError:
-                task_store.add_log(task_id, "LLM OCR pipeline module not available")
-            except Exception as e:
-                task_store.add_log(task_id, f"LLM OCR pipeline error: {e}")
+            task_store.add_log(task_id, "LLM OCR has been removed from this version")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+            return report
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:

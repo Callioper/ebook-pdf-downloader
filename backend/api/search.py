@@ -973,27 +973,6 @@ async def check_ocr(engine: str = Query(default="")):
                 return {"ok": True, "engine": "paddleocr"}
             except ImportError:
                 pass
-        elif engine == "llm_ocr":
-            cfg = get_config()
-            endpoint = cfg.get("llm_ocr_endpoint", "")
-            model = cfg.get("llm_ocr_model", "")
-            api_key = cfg.get("llm_ocr_api_key", "")
-            if not endpoint or not model:
-                return {"ok": False, "engine": "llm_ocr", "message": "未配置端点或模型名"}
-            try:
-                import httpx
-                resp = httpx.post(
-                    f"{endpoint.rstrip('/')}/v1/chat/completions",
-                    json={"model": model, "messages": [{"role": "user", "content": "ping"}]},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    return {"ok": True, "engine": "llm_ocr", "message": f"{model} 已连接"}
-                return {"ok": False, "engine": "llm_ocr", "message": f"连接失败: HTTP {resp.status_code}"}
-            except httpx.ConnectError:
-                return {"ok": False, "engine": "llm_ocr", "message": f"无法连接到 {endpoint}"}
-            except Exception as e:
-                return {"ok": False, "engine": "llm_ocr", "message": str(e)[:100]}
         return {"ok": False, "engine": engine, "message": f"{engine} not found"}
     except FileNotFoundError:
         return {"ok": False, "engine": engine, "message": f"{engine} 未安装或不在 PATH 中"}

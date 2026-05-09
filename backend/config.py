@@ -72,12 +72,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "libgen_enabled": True,
     "download_timeout": 600,
     "pdf_compress": False,
-    "llm_ocr_endpoint": "http://localhost:11434",
-    "llm_ocr_model": "",
-    "llm_ocr_api_key": "",
-    "llm_ocr_timeout": 300,
-    "llm_ocr_max_image_dim": 1024,
-    "llm_ocr_image_format": "jpeg",
     "ai_vision_enabled": True,
     "ai_vision_endpoint": "",
     "ai_vision_model": "",
@@ -85,14 +79,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ai_vision_provider": "openai_compatible",
     "ai_vision_max_pages": 5,
     "ai_vision_dpi": 150,
-    "ocr_confirm_enabled": False,
-    "bookmark_confirm_enabled": False,
-    "surya_alignment_enabled": False,
-    "ocr_refine_enabled": True,
-    "llm_ocr_dense_threshold": 60,
-    "llm_ocr_dense_enabled": True,
-    "llm_ocr_grounded": False,
-    "llm_ocr_cooldown": 0,
 }
 
 

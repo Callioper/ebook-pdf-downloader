@@ -22,10 +22,6 @@ interface AppConfig {
   aa_membership_key: string
   ocr_engine: string
   ocr_oversample: number
-  llm_ocr_endpoint: string
-  llm_ocr_model: string
-  llm_ocr_api_key: string
-  llm_ocr_timeout: number
   ai_vision_enabled: boolean
   ai_vision_endpoint: string
   ai_vision_model: string
@@ -34,9 +30,6 @@ interface AppConfig {
   ai_vision_messages_api: boolean  // custom: use Anthropic Messages API instead of OpenAI
   ai_vision_max_pages: number
   ai_vision_dpi: number
-  ocr_confirm_enabled: boolean
-  bookmark_confirm_enabled: boolean
-  surya_alignment_enabled: boolean
   [key: string]: unknown
 }
 
@@ -155,10 +148,6 @@ const DEFAULT_CONFIG: AppConfig = {
   aa_membership_key: '',
   ocr_engine: 'tesseract',
   ocr_oversample: 200,
-  llm_ocr_endpoint: 'http://localhost:11434',
-  llm_ocr_model: '',
-  llm_ocr_api_key: '',
-  llm_ocr_timeout: 300,
   ai_vision_enabled: true,
   ai_vision_endpoint: '',
   ai_vision_model: '',
@@ -169,13 +158,11 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_dpi: 150,
   ocr_confirm_enabled: false,
   bookmark_confirm_enabled: false,
-  surya_alignment_enabled: false,
 }
 
 const OCR_ENGINES = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
-  { key: 'llm_ocr', name: 'LLM OCR', desc: '本地大模型 OCR (Ollama/LM Studio)' },
 ]
 
 const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
@@ -565,7 +552,7 @@ export default function ConfigSettings() {
   useEffect(() => {
     if (!config || autoOcrRef.current) return
     autoOcrRef.current = true
-    const engines = ['tesseract', 'paddleocr', 'llm_ocr']
+    const engines = ['tesseract', 'paddleocr']
     engines.forEach((eng) => {
       fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
         .then((r) => r.json())
@@ -1610,57 +1597,6 @@ export default function ConfigSettings() {
               })}
           </div>
           </div>
-
-          {/* LLM OCR 设置 */}
-          {form.ocr_engine === 'llm_ocr' && (
-            <div className="border-t border-gray-200 pt-3 space-y-2">
-              <span className="text-xs font-medium text-gray-600 block">LLM OCR 配置</span>
-              <div>
-                <label className="text-xs text-gray-500">API 端点</label>
-                <input
-                  type="text"
-                  value={form.llm_ocr_endpoint || ''}
-                  onChange={(e) => updateForm({ llm_ocr_endpoint: e.target.value })}
-                  placeholder="http://localhost:11434"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-400 mt-0.5">Ollama 默认 11434，LM Studio 默认 1234</p>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">模型名称</label>
-                <input
-                  type="text"
-                  value={form.llm_ocr_model || ''}
-                  onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
-                  placeholder="llama3.2-vision 或 minicpm-v"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">API Key（可选）</label>
-                <input
-                  type="password"
-                  value={form.llm_ocr_api_key || ''}
-                  onChange={(e) => updateForm({ llm_ocr_api_key: e.target.value })}
-                  placeholder="留空则不使用 API Key"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">超时（秒）</label>
-                <input
-                  type="number"
-                  value={form.llm_ocr_timeout ?? 300}
-                  onChange={(e) => updateForm({ llm_ocr_timeout: parseInt(e.target.value) || 300 })}
-                  min={60}
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
-                提示：使用前请确保 Ollama/LM Studio 已运行，且模型为多模态（vision）模型。
-              </p>
-            </div>
-          )}
 
           <div className="grid grid-cols-4 gap-3 pt-2">
             <div>

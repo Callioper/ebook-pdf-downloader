@@ -19,4 +19,3 @@ pluggy==1.6.0
 pypdfium2==5.7.1
 uharfbuzz==0.54.1
 httpx==0.28.1
-surya-ocr==0.17.1
