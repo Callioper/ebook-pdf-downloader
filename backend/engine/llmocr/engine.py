@@ -41,8 +41,10 @@ class LlmOcrPipeline:
         model: str = "",
         api_key: str = "",
         timeout: int = 300,
+        image_format: str = "jpeg",
     ):
         self.aligner = HybridAligner()
+        self.image_format = image_format
         self.client = LlmApiClient(
             endpoint=endpoint, model=model, api_key=api_key, timeout=timeout,
         ) if model else None
@@ -64,7 +66,7 @@ class LlmOcrPipeline:
         """
         # Phase 1: Convert PDF to page images
         await _emit(progress, "convert", 0, 1, "Converting PDF to images...")
-        images_dict = _rasterize_pages(input_path, dpi, max_image_dim)
+        images_dict = _rasterize_pages(input_path, dpi, max_image_dim, self.image_format)
         page_nums = sorted(images_dict.keys())
         total_pages = len(page_nums)
         await _emit(progress, "convert", 1, 1, f"Converted {total_pages} pages.")
@@ -123,16 +125,27 @@ class LlmOcrPipeline:
         return pages_text
 
 
-def _rasterize_pages(path: str, dpi: int, max_dim: int) -> dict[int, str]:
-    """Render PDF pages to data:image/png;base64,... URLs ready for LLM consumption."""
+def _rasterize_pages(path: str, dpi: int, max_dim: int, image_format: str = "jpeg") -> dict[int, str]:
+    """Render PDF pages to data:image/...;base64,... URLs ready for LLM consumption."""
+    if image_format == "jpeg":
+        save_format = "JPEG"
+        mime_prefix = "data:image/jpeg;base64,"
+        save_kwargs = {"quality": 85}
+        needs_rgb = True
+    else:
+        save_format = "PNG"
+        mime_prefix = "data:image/png;base64,"
+        save_kwargs = {}
+        needs_rgb = False
+
     ext = Path(path).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
         with Image.open(path) as src:
-            img = src.convert("RGB").copy()
+            img = src if not needs_rgb else src.convert("RGB")
             img.thumbnail((max_dim, max_dim))
             buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            return {0: "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")}
+            img.save(buf, format=save_format, **save_kwargs)
+            return {0: mime_prefix + base64.b64encode(buf.getvalue()).decode("utf-8")}
 
     images: dict[int, str] = {}
     doc = fitz.open(path)
@@ -140,10 +153,12 @@ def _rasterize_pages(path: str, dpi: int, max_dim: int) -> dict[int, str]:
         for page_num, page in enumerate(doc):
             pix = page.get_pixmap(dpi=dpi)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
+            if needs_rgb:
+                img = img.convert("RGB")
             img.thumbnail((max_dim, max_dim))
             buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            images[page_num] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+            img.save(buf, format=save_format, **save_kwargs)
+            images[page_num] = mime_prefix + base64.b64encode(buf.getvalue()).decode("utf-8")
     finally:
         doc.close()
     return images

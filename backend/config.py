@@ -76,6 +76,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "llm_ocr_model": "",
     "llm_ocr_api_key": "",
     "llm_ocr_timeout": 300,
+    "llm_ocr_max_image_dim": 1024,
+    "llm_ocr_image_format": "jpeg",
     "ai_vision_enabled": True,
     "ai_vision_endpoint": "",
     "ai_vision_model": "",

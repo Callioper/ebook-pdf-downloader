@@ -2298,6 +2298,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             llm_model = config.get("llm_ocr_model", config.get("llm_model", ""))
             llm_api_key = config.get("llm_ocr_api_key", config.get("llm_api_key", ""))
             llm_timeout = config.get("llm_ocr_timeout", 300)
+            llm_max_image_dim = int(config.get("llm_ocr_max_image_dim", 1024))
+            llm_image_format = config.get("llm_ocr_image_format", "jpeg")
             llm_concurrency = max(1, ocr_jobs)
 
             if not llm_model:
@@ -2315,6 +2317,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     model=llm_model,
                     api_key=llm_api_key,
                     timeout=llm_timeout,
+                    image_format=llm_image_format,
                 )
 
                 async def emit_ocr_progress(stage: str, cur: int, tot: int, msg: str):
@@ -2328,6 +2331,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     output_path=output_pdf,
                     dpi=int(ocr_oversample),
                     concurrency=llm_concurrency,
+                    max_image_dim=llm_max_image_dim,
                     refine=config.get("ocr_refine_enabled", True),
                     progress=emit_ocr_progress,
                 )
