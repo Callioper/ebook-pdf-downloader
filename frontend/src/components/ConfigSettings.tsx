@@ -34,6 +34,7 @@ interface AppConfig {
   llm_ocr_endpoint: string
   llm_ocr_model: string
   llm_ocr_concurrency: number
+  ocr_confirm_enabled: boolean
   [key: string]: unknown
 }
 
@@ -163,6 +164,7 @@ const DEFAULT_CONFIG: AppConfig = {
   llm_ocr_endpoint: 'http://127.0.0.1:1234/v1',
   llm_ocr_model: '',
   llm_ocr_concurrency: 1,
+  ocr_confirm_enabled: false,
 }
 
 const OCR_ENGINES = [
@@ -339,7 +341,6 @@ export default function ConfigSettings() {
     download: false,
     proxy: false,
     ocr: false,
-    llm_ocr: true,
     bookmarks: false,
   })
 
@@ -1471,11 +1472,17 @@ export default function ConfigSettings() {
       <SectionHeader
         title="OCR"
         summary={<>
-  <StatusDot status={ocrEngines['ocrmypdf']?.installed ? 'green' : ocrEngines['ocrmypdf']?.msg ? 'red' : null} />
-  <span className="text-xs">OCRmyPDF {ocrEngines['ocrmypdf']?.installed ? (ocrEngines['ocrmypdf']?.msg || '已安装') : '未安装'}</span>
-  <span className="text-xs text-gray-300 mx-1">·</span>
-  <StatusDot status={ocrStatus} />
-  <span className="text-xs">{form.ocr_engine === 'ocrmypdf' ? 'OCRmyPDF' : (OCR_ENGINES.find(e => e.key === form.ocr_engine)?.name || form.ocr_engine)} {ocrStatus === 'green' ? (ocrMsg || '已安装') : '未安装'}</span>
+    {form.ocr_engine === 'llm_ocr' ? (
+      <>
+        <StatusDot status={form.llm_ocr_endpoint ? 'green' : 'red'} />
+        <span className="text-xs">LLM OCR {form.llm_ocr_endpoint ? '已配置' : '未配置'}</span>
+      </>
+    ) : (
+      <>
+        <StatusDot status={form.ocr_engine === 'paddleocr' ? 'green' : ocrEngines['tesseract']?.installed ? 'green' : 'red'} />
+        <span className="text-xs">OCRmyPDF ({OCR_ENGINES.find(e => e.key === form.ocr_engine)?.name || form.ocr_engine}) {ocrStatus === 'green' ? '已安装' : (ocrStatus === null ? '' : '未安装')}</span>
+      </>
+    )}
 </>}
         color="orange"
         expanded={expanded.ocr}
@@ -1510,6 +1517,7 @@ export default function ConfigSettings() {
           </div>
 
           {/* Tesseract 语言包状态 */}
+          {form.ocr_engine !== 'llm_ocr' && (
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">Tesseract 语言包</span>
             <div className="flex items-center gap-2">
@@ -1545,6 +1553,7 @@ export default function ConfigSettings() {
               )}
             </div>
           </div>
+          )}
 
           {/* 引擎切换区 */}
           <div className="border-t border-gray-200 pt-3">
@@ -1610,7 +1619,124 @@ export default function ConfigSettings() {
           </div>
           </div>
 
+          {form.ocr_engine === 'llm_ocr' ? (
+          <div className="space-y-3 pt-2">
+            <p className="text-xs text-gray-500">
+              使用视觉大模型逐框识别文字层（dense mode）。需要运行 lmstudio / ollama 加载对应模型。
+              推荐模型已验证中文 PDF 可用。
+            </p>
 
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">接口地址</label>
+              <div className="flex gap-2">
+                <input value={form.llm_ocr_endpoint || 'http://127.0.0.1:1234/v1'}
+                  onChange={(e) => updateForm({ llm_ocr_endpoint: e.target.value })}
+                  placeholder="http://127.0.0.1:1234/v1"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+                <button onClick={async () => {
+                  setLlmTesting(true); setLlmTestMsg('');
+                  try {
+                    const r = await fetch('/api/v1/check-llm-ocr', {
+                      method: 'POST',
+                      headers: {'Content-Type':'application/json'},
+                      body: JSON.stringify({ endpoint: form.llm_ocr_endpoint, model: form.llm_ocr_model })
+                    });
+                    const d = await r.json();
+                    setLlmTestMsg(d.message || (d.ok ? 'OK' : 'Failed'));
+                  } catch(e) { setLlmTestMsg(String(e)); }
+                  setLlmTesting(false);
+                }} disabled={llmTesting}
+                  className="px-3 py-1.5 text-xs rounded border border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap">
+                  {llmTesting ? '测试中...' : '测试连接'}
+                </button>
+              </div>
+              {llmTestMsg && <p className={`text-xs mt-1 ${llmTestMsg.includes('成功')||llmTestMsg.includes('OK') ? 'text-green-600' : 'text-red-500'}`}>{llmTestMsg}</p>}
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">模型名称</label>
+              <div className="flex gap-2">
+                <input value={form.llm_ocr_model || ''}
+                  onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
+                  placeholder="qwen3-vl-4b-instruct"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+                <button onClick={async () => {
+                  setLlmFetching(true); setLlmFetchMsg('');
+                  try {
+                    const r = await fetch('/api/v1/fetch-llm-models', {
+                      method: 'POST',
+                      headers: {'Content-Type':'application/json'},
+                      body: JSON.stringify({ endpoint: form.llm_ocr_endpoint })
+                    });
+                    const d = await r.json();
+                    if (d.ok && d.models.length > 0) {
+                      setLlmModels(d.models);
+                      setLlmFetchMsg(`${d.models.length} 个模型`);
+                    } else {
+                      setLlmFetchMsg(d.message || '无可用模型');
+                    }
+                  } catch(e) { setLlmFetchMsg(String(e)); }
+                  setLlmFetching(false);
+                }} disabled={llmFetching || !form.llm_ocr_endpoint}
+                  className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
+                  {llmFetching ? '...' : '拉取模型'}
+                </button>
+              </div>
+              {llmModels.length > 0 && (
+                <select value={form.llm_ocr_model || ''}
+                  onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
+                  className="w-full mt-1 rounded border border-blue-300 px-2 py-1 text-xs font-mono"
+                  size={Math.min(llmModels.length + 1, 8)}>
+                  <option value="" disabled>-- 选择模型 --</option>
+                  {llmModels.map((m: any) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              )}
+              {llmFetchMsg && <p className={`text-xs mt-1 ${llmFetchMsg.includes('个模型') ? 'text-green-600' : 'text-red-500'}`}>{llmFetchMsg}</p>}
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">
+                并发数: {form.llm_ocr_concurrency || 1}
+              </label>
+              <input type="range" min="1" max="5" step="1"
+                value={form.llm_ocr_concurrency || 1}
+                onChange={(e) => updateForm({ llm_ocr_concurrency: parseInt(e.target.value) })}
+                className="w-full" />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>1 (默认)</span><span>5 (最快)</span>
+              </div>
+            </div>
+
+            <details className="text-xs">
+              <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
+                推荐模型 (已验证中文 PDF)
+              </summary>
+              <div className="mt-2 space-y-1">
+                {LLM_OCR_RECOMMENDED.map(m => (
+                  <button key={m.model}
+                    onClick={() => updateForm({ llm_ocr_model: m.model })}
+                    title={m.note}
+                    className="block w-full text-left px-2 py-1 rounded hover:bg-blue-100 text-gray-700 text-xs">
+                    <span className="font-mono">{m.model}</span>
+                    <span className="text-gray-400 ml-2">{m.note}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 pt-3">
+                <input type="checkbox" id="ocr_confirm_enabled"
+                  checked={form.ocr_confirm_enabled ?? false}
+                  onChange={(e) => updateForm({ ocr_confirm_enabled: e.target.checked })}
+                  className="rounded" />
+                <label htmlFor="ocr_confirm_enabled" className="text-xs text-gray-500">
+                  管道执行到 OCR 步骤时弹出确认对话框
+                </label>
+              </div>
 
           <div className="grid grid-cols-4 gap-3 pt-2">
             <div>
@@ -1678,127 +1804,9 @@ export default function ConfigSettings() {
               <p className="text-xs text-blue-600 mt-2">安装后返回设置页点击"检测"按钮确认状态。</p>
             </div>
           </details>
-        </div>
-      )}
-
-      {/* ============ LLM OCR ============ */}
-      <SectionHeader
-        title="LLM OCR"
-        summary={<>
-          <StatusDot status={form.llm_ocr_endpoint ? 'green' : null} />
-          <span className="text-xs">{form.llm_ocr_endpoint ? '已配置' : '未配置'}</span>
-        </>}
-        color="blue"
-        expanded={expanded.llm_ocr}
-        onToggle={() => toggleSection('llm_ocr')}
-      />
-      {expanded.llm_ocr && (
-      <div className="space-y-3">
-        <p className="text-xs text-gray-500">
-          使用视觉大模型逐框识别文字层（dense mode）。需要运行 lmstudio / ollama 加载对应模型。
-          推荐模型已验证中文 PDF 可用。
-        </p>
-
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">接口地址</label>
-          <div className="flex gap-2">
-            <input value={form.llm_ocr_endpoint || 'http://127.0.0.1:1234/v1'}
-              onChange={(e) => updateForm({ llm_ocr_endpoint: e.target.value })}
-              placeholder="http://127.0.0.1:1234/v1"
-              className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
-            <button onClick={async () => {
-              setLlmTesting(true); setLlmTestMsg('');
-              try {
-                const r = await fetch('/api/v1/check-llm-ocr', {
-                  method: 'POST',
-                  headers: {'Content-Type':'application/json'},
-                  body: JSON.stringify({ endpoint: form.llm_ocr_endpoint, model: form.llm_ocr_model })
-                });
-                const d = await r.json();
-                setLlmTestMsg(d.message || (d.ok ? 'OK' : 'Failed'));
-              } catch(e) { setLlmTestMsg(String(e)); }
-              setLlmTesting(false);
-            }} disabled={llmTesting}
-              className="px-3 py-1.5 text-xs rounded border border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap">
-              {llmTesting ? '测试中...' : '测试连接'}
-            </button>
-          </div>
-          {llmTestMsg && <p className={`text-xs mt-1 ${llmTestMsg.includes('成功')||llmTestMsg.includes('OK') ? 'text-green-600' : 'text-red-500'}`}>{llmTestMsg}</p>}
-        </div>
-
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">模型名称</label>
-          <div className="flex gap-2">
-            <input value={form.llm_ocr_model || ''}
-              onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
-              placeholder="qwen3-vl-4b-instruct"
-              className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
-            <button onClick={async () => {
-              setLlmFetching(true); setLlmFetchMsg('');
-              try {
-                const r = await fetch('/api/v1/fetch-llm-models', {
-                  method: 'POST',
-                  headers: {'Content-Type':'application/json'},
-                  body: JSON.stringify({ endpoint: form.llm_ocr_endpoint })
-                });
-                const d = await r.json();
-                if (d.ok && d.models.length > 0) {
-                  setLlmModels(d.models);
-                  setLlmFetchMsg(`${d.models.length} 个模型`);
-                } else {
-                  setLlmFetchMsg(d.message || '无可用模型');
-                }
-              } catch(e) { setLlmFetchMsg(String(e)); }
-              setLlmFetching(false);
-            }} disabled={llmFetching || !form.llm_ocr_endpoint}
-              className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
-              {llmFetching ? '...' : '拉取模型'}
-            </button>
-          </div>
-          {llmModels.length > 0 && (
-            <select value={form.llm_ocr_model || ''}
-              onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
-              className="w-full mt-1 rounded border border-blue-300 px-2 py-1 text-xs font-mono"
-              size={Math.min(llmModels.length + 1, 8)}>
-              <option value="" disabled>-- 选择模型 --</option>
-              {llmModels.map((m: any) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
+            </>
           )}
-          {llmFetchMsg && <p className={`text-xs mt-1 ${llmFetchMsg.includes('个模型') ? 'text-green-600' : 'text-red-500'}`}>{llmFetchMsg}</p>}
         </div>
-
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">
-            并发数: {form.llm_ocr_concurrency || 1}
-          </label>
-          <input type="range" min="1" max="5" step="1"
-            value={form.llm_ocr_concurrency || 1}
-            onChange={(e) => updateForm({ llm_ocr_concurrency: parseInt(e.target.value) })}
-            className="w-full" />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>1 (默认)</span><span>5 (最快)</span>
-          </div>
-        </div>
-
-        <details className="text-xs">
-          <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
-            推荐模型 (已验证中文 PDF)
-          </summary>
-          <div className="mt-2 space-y-1">
-            {LLM_OCR_RECOMMENDED.map(m => (
-              <button key={m.model}
-                onClick={() => updateForm({ llm_ocr_model: m.model })}
-                title={m.note}
-                className="block w-full text-left px-2 py-1 rounded hover:bg-blue-100 text-gray-700 text-xs">
-                <span className="font-mono">{m.model}</span>
-                <span className="text-gray-400 ml-2">{m.note}</span>
-              </button>
-            ))}
-          </div>
-        </details>
-      </div>
       )}
 
       {/* ============ 书签 ============ */}
