@@ -2301,6 +2301,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             llm_max_image_dim = int(config.get("llm_ocr_max_image_dim", 1024))
             llm_image_format = config.get("llm_ocr_image_format", "jpeg")
             llm_concurrency = max(1, ocr_jobs)
+            llm_dense_enabled = config.get("llm_ocr_dense_enabled", True)
+            llm_dense_threshold = int(config.get("llm_ocr_dense_threshold", 60))
 
             if not llm_model:
                 task_store.add_log(task_id, "LLM OCR: model not configured")
@@ -2333,6 +2335,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     concurrency=llm_concurrency,
                     max_image_dim=llm_max_image_dim,
                     refine=config.get("ocr_refine_enabled", True),
+                    dense_enabled=llm_dense_enabled,
+                    dense_threshold=llm_dense_threshold,
                     progress=emit_ocr_progress,
                 )
 
