@@ -19,7 +19,7 @@ Ebook PDF Downloader 的核心目标是**将任意电子书转化为可搜索、
 
 -   **🔍 多源检索**: 本地 SQLite 双库并行搜索，Anna's Archive title/ISBN 匹配，Z-Library eAPI 三层检索（ISBN 精确 → 书名+作者 → 书名），自动 ISBN + SS 码去重
 -   **📥 智能下载**: Stacks 队列管理 Anna's Archive 下载，FlareSolverr 自动绕过 Cloudflare/DDoS-Guard，Z-Library 邮箱登录直达下载链接，LibGen torrent hash 回退
--   **⚙️ OCR 三引擎**: PaddleOCR（PP-OCRv5, 中文主力 ~24min/217 页）、Tesseract 默认引擎、LLM OCR（ocrmypdf 插件，支持任意 OpenAI 兼容端点）
+-   **⚙️ OCR 三引擎**: PaddleOCR（PP-OCRv5, 中文主力 ~24min/217 页）、Tesseract 默认引擎、LLM OCR（视觉大模型 dense-mode，逐框识别，支持 6 种已验证模型）
 -   **🎯 OCR 可选确认**: 管道执行到 OCR/目录步骤时弹出确认对话框，显示当前引擎和配置，用户可选择跳过
 -   **📑 智能目录**: 书葵网 + 豆瓣 + NLC 三源书签合并，AI Vision 智能 TOC 提取（支持 OpenAI/Anthropic 本地 LLM），自动注入 PDF 书签
 -   **🎨 现代化 Web UI**: React 18 + TypeScript + Tailwind CSS，WebSocket 实时进度更新，步骤进度条，日志流查看，深色模式
@@ -346,6 +346,21 @@ python main.py
 
 > PaddleOCR 需要独立 Python 3.11 venv（PaddlePaddle MKL 冲突）。设置页提供一键安装脚本。  
 > LLM OCR 配置任意 OpenAI 兼容端点即可使用，支持 LM Studio / Ollama / vLLM / 云端 API。
+
+### LLM OCR 推荐模型
+
+使用 `--dense-mode always` 模式在 lmstudio 中验证通过的视觉大模型:
+
+| 模型 | 速度 (10页) | 说明 |
+|------|:--:|------|
+| `jamepeng2023/paddleocr-vl-1.5` | 44s | 最快, PaddleOCR 变体 |
+| `glm-ocr` | 47s | 智谱 GLM-OCR |
+| `mineru2.5-pro-2604-1.2b@q8_0` | 50s | MinerU Pro 量化版 |
+| `noctrex/paddleocr-vl-1.5` | 60s | PaddleOCR VL |
+| `qwen3-vl-4b-instruct` | 1m25s | 通义千问, 综合推荐 |
+| `qwen/qwen3-vl-8b` | 1m54s | 更大参数, 更高精度 |
+
+> **前提**: 需要安装 [local-llm-pdf-ocr](https://github.com/ahnafnafee/local-llm-pdf-ocr) 并在 lmstudio / ollama 中加载对应视觉模型。OCR 配置中选择 "LLM OCR" 引擎即可使用。
 
 ---
 
