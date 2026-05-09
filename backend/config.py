@@ -56,6 +56,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ocr_languages": "chi_sim+eng",
     "ocr_timeout": 3600,
     "ocr_oversample": 200,  # DPI for rendering pages before OCR, lower = faster, 150-400
+    "llm_ocr_endpoint": "http://127.0.0.1:1234/v1",
+    "llm_ocr_model": "qwen3-vl-4b-instruct",
+    "llm_ocr_concurrency": 1,
     "nlc_max_workers": 5,
     "ebook_data_geter_path": "",
     "ebook_db_path": "",

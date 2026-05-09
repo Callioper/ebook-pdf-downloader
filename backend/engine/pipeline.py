@@ -2274,9 +2274,40 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     task_store.add_log(task_id, f"PaddleOCR failed with exit code {exit_code}")
 
         elif ocr_engine == "llm_ocr":
-            task_store.add_log(task_id, "LLM OCR has been removed from this version")
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
-            return report
+            output_pdf_tmp = pdf_path + ".llmocr.pdf"
+            ocr_endpoint = config.get("llm_ocr_endpoint", "http://127.0.0.1:1234/v1")
+            ocr_model = config.get("llm_ocr_model", "qwen3-vl-4b-instruct")
+            ocr_concurrency = str(config.get("llm_ocr_concurrency", 1))
+            local_ocr_bin = "local-llm-pdf-ocr"
+            task_store.add_log(task_id, f"LLM OCR: {ocr_model} @ {ocr_endpoint}, concurrency={ocr_concurrency}")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    local_ocr_bin,
+                    pdf_path, output_pdf_tmp,
+                    "--api-base", ocr_endpoint,
+                    "--model", ocr_model,
+                    "--dense-mode", "always",
+                    "--concurrency", ocr_concurrency,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=int(config.get("ocr_timeout", 7200))
+                )
+                if proc.returncode == 0 and os.path.exists(output_pdf_tmp) and os.path.getsize(output_pdf_tmp) > 1024:
+                    os.replace(output_pdf_tmp, pdf_path)
+                    report["ocr_done"] = True
+                    task_store.add_log(task_id, "LLM OCR completed successfully")
+                else:
+                    err_msg = stderr.decode()[:300] if stderr else "unknown"
+                    task_store.add_log(task_id, f"LLM OCR failed (code {proc.returncode}): {err_msg}")
+            except FileNotFoundError:
+                task_store.add_log(task_id, "local-llm-pdf-ocr not found. Install: pip install local-llm-pdf-ocr")
+            except asyncio.TimeoutError:
+                task_store.add_log(task_id, "LLM OCR timed out")
+            except Exception as e:
+                task_store.add_log(task_id, f"LLM OCR error: {str(e)[:200]}")
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
