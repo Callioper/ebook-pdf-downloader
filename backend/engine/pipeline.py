@@ -2051,17 +2051,25 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     ocr_enabled = config.get("ocr_jobs", 0) > 0
 
     # Build config summary for the confirmation dialog
-    engine_labels = {
-        "tesseract": "Tesseract OCR",
-        "paddleocr": "PaddleOCR",
-    }
-    config_info = {
-        "引擎": engine_labels.get(ocr_engine, ocr_engine),
-        "语言": ocr_lang,
-        "线程数": str(ocr_jobs),
-        "超时": f"{ocr_timeout}s",
-        "配置已启用": "是" if ocr_enabled else "否（ocr_jobs=0）",
-    }
+    if ocr_engine == "llm_ocr":
+        config_info = {
+            "引擎": "LLM OCR (视觉大模型)",
+            "模型": config.get("llm_ocr_model", ""),
+            "端点": config.get("llm_ocr_endpoint", ""),
+            "并发数": str(config.get("llm_ocr_concurrency", 1)),
+        }
+    else:
+        engine_labels = {
+            "tesseract": "Tesseract OCR",
+            "paddleocr": "PaddleOCR",
+        }
+        config_info = {
+            "引擎": engine_labels.get(ocr_engine, ocr_engine),
+            "语言": ocr_lang,
+            "线程数": str(ocr_jobs),
+            "超时": f"{ocr_timeout}s",
+            "配置已启用": "是" if ocr_enabled else "否（ocr_jobs=0）",
+        }
 
     confirmed = True  # default skip, controlled by ocr_confirm_enabled
     if config.get("ocr_confirm_enabled", False):
@@ -2091,7 +2099,11 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     else:
         task_store.add_log(task_id, "PDF compression disabled")
 
-    task_store.add_log(task_id, f"OCR engine: {ocr_engine}, languages: {ocr_lang}, jobs: {ocr_jobs}")
+    if ocr_engine == "llm_ocr":
+        task_store.add_log(task_id, f"OCR engine: llm_ocr (model: {config.get('llm_ocr_model', '')}, concurrency: {config.get('llm_ocr_concurrency', 1)})")
+        task_store.add_log(task_id, "LLM OCR uses dense-mode visual recognition; ocrmypdf settings above are ignored")
+    else:
+        task_store.add_log(task_id, f"OCR engine: {ocr_engine}, languages: {ocr_lang}, jobs: {ocr_jobs}")
 
     # ── In frozen/PyInstaller exe, find system Python for ocrmypdf ──
     _py_for_ocr = sys.executable
@@ -2278,30 +2290,41 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             ocr_endpoint = config.get("llm_ocr_endpoint", "http://127.0.0.1:1234/v1")
             ocr_model = config.get("llm_ocr_model", "qwen3-vl-4b-instruct")
             ocr_concurrency = str(config.get("llm_ocr_concurrency", 1))
-            local_ocr_bin = "local-llm-pdf-ocr"
-            import shutil as _shutil
-            dev_bin = _shutil.which("local-llm-pdf-ocr")
-            if not dev_bin:
-                import os as _os
-                uv_bin = _os.path.expanduser(r"~\.local\bin\local-llm-pdf-ocr.exe")
-                if _os.path.exists(uv_bin):
-                    dev_bin = uv_bin
-                else:
-                    pip_bin = _os.path.join(_os.path.dirname(_os.__file__), "Scripts", "local-llm-pdf-ocr.exe")
-                    if _os.path.exists(pip_bin):
-                        dev_bin = pip_bin
-            if dev_bin:
-                local_ocr_bin = dev_bin
             task_store.add_log(task_id, f"LLM OCR: {ocr_model} @ {ocr_endpoint}, concurrency={ocr_concurrency}")
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10})
+
+            local_ocr_bin = "local-llm-pdf-ocr"
+
+            # Resolve the local-llm-pdf-ocr tool via uv (it lives in its own venv
+            # with resolved dependencies including surya/torch).
+            import shutil as _shutil2
+            uv_bin = _shutil2.which("uv") or _shutil2.which("uv.exe")
+            if not uv_bin:
+                uv_candidate = os.path.expanduser(r"~\.local\bin\uv.exe")
+                uv_bin = uv_candidate if os.path.exists(uv_candidate) else None
+            llm_ocr_project = os.path.join(
+                os.environ.get("TEMP", os.path.expanduser("~")),
+                "local-llm-pdf-ocr"
+            )
+            cmd = [local_ocr_bin, pdf_path, output_pdf_tmp,
+                   "--api-base", ocr_endpoint, "--model", ocr_model,
+                   "--dense-mode", "always", "--concurrency", ocr_concurrency]
+
+            if uv_bin and os.path.isdir(llm_ocr_project):
+                cmd = [uv_bin, "run", "--project", llm_ocr_project,
+                       "local-llm-pdf-ocr", pdf_path, output_pdf_tmp,
+                       "--api-base", ocr_endpoint, "--model", ocr_model,
+                       "--dense-mode", "always", "--concurrency", ocr_concurrency]
+                task_store.add_log(task_id, f"LLM OCR: running via uv from {llm_ocr_project}")
+            else:
+                # Fallback: try bare command (only works if installed globally)
+                cmd = [local_ocr_bin, pdf_path, output_pdf_tmp,
+                       "--api-base", ocr_endpoint, "--model", ocr_model,
+                       "--dense-mode", "always", "--concurrency", ocr_concurrency]
+
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    local_ocr_bin,
-                    pdf_path, output_pdf_tmp,
-                    "--api-base", ocr_endpoint,
-                    "--model", ocr_model,
-                    "--dense-mode", "always",
-                    "--concurrency", ocr_concurrency,
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

@@ -128,7 +128,7 @@ B）源码版：克隆仓库，手动搭建所有依赖
 
 - **PaddleOCR 中文引擎**：创建独立 Python 3.11 venv（路径如 `venv-paddle311`），在其中安装 PaddlePaddle + PaddleOCR。设置页 OCR 面板提供一键安装脚本
 - **stacks（Anna's Archive 下载服务器）**：克隆 https://github.com/zelestcarlyone/stacks ，执行 Docker Compose 构建并启动容器（默认端口 7788）。stacks 内已集成 FlareSolverr，无需单独安装
-- **LLM OCR**：配置 OpenAI 兼容端点（LM Studio / Ollama / vLLM），在设置页填入 API 地址和模型名（推荐 `allenai/olmocr-2-7b` 或 `qwen/qwen3-vl-8b`）
+- **LLM OCR**：需要 lmstudio / ollama 加载视觉模型 + 安装 [local-llm-pdf-ocr](https://github.com/ahnafnafee/local-llm-pdf-ocr) 工具。在设置页填入 API 地址和模型名（推荐 `qwen3-vl-4b-instruct` 或 `qwen/qwen3-vl-8b`）
 - **AI Vision TOC**：配置 OpenAI/Anthropic 兼容端点，用于智能 PDF 目录提取。设置页中填入端点和模型名，建议先用本地模型测试（如 Ollama glm-ocr）
 - **aria2c**：（exe 已内置，源码版需单独下载）BT/IPFS 下载引擎，用于 LibGen 回退下载
 

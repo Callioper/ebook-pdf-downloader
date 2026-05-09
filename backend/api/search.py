@@ -771,7 +771,8 @@ async def fetch_llm_models(req: Request):
         return {"ok": False, "message": "缺少端点地址"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{endpoint}/models")
+            url = f"{endpoint}/v1/models"
+            resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
             models = []
@@ -794,7 +795,8 @@ async def check_llm_ocr(req: Request):
         return {"ok": False, "message": "缺少端点地址"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{endpoint}/models")
+            url = f"{endpoint}/v1/models"
+            resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
             models = [item.get("id", "") for item in data.get("data", [])]

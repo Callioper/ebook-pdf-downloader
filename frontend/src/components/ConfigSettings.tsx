@@ -1522,8 +1522,8 @@ export default function ConfigSettings() {
           {/* 引擎切换区 */}
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
-            <div className="grid grid-cols-3 gap-2">
-              {OCR_ENGINES.map((eng) => {
+            <div className="grid grid-cols-2 gap-2">
+              {OCR_ENGINES.filter(eng => eng.key !== 'llm_ocr').map((eng) => {
                 const info = ocrEngines[eng.key] || { installed: eng.key === 'llm_ocr', msg: '' }
                 const isSelected = form.ocr_engine === eng.key
                 return (
@@ -1694,6 +1694,30 @@ export default function ConfigSettings() {
             </div>
           </details>
           )}
+
+          {/* ---------- LLM OCR 启用/停用 ---------- */}
+          <div className="border-t border-gray-200 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-700">
+                {form.ocr_engine === 'llm_ocr' ? (
+                  <span className="text-blue-600">LLM OCR 已启用 (视觉大模型 dense-mode)</span>
+                ) : (
+                  <span className="text-gray-500">LLM OCR (视觉大模型 dense-mode)</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateForm({ ocr_engine: form.ocr_engine === 'llm_ocr' ? 'tesseract' : 'llm_ocr' })}
+                className={`px-3 py-1 text-xs rounded ${
+                  form.ocr_engine === 'llm_ocr'
+                    ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                }`}
+              >
+                {form.ocr_engine === 'llm_ocr' ? '停用并回到 OCRmyPDF' : '启用 LLM OCR'}
+              </button>
+            </div>
+          </div>
 
           {form.ocr_engine === 'llm_ocr' && (
           <div className="space-y-3 pt-2">
