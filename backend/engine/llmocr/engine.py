@@ -265,6 +265,12 @@ def _embed_sandwich_pdf(
     src = fitz.open(input_path)
     dst = fitz.open()
     try:
+        md = src.metadata
+        if md:
+            dst.set_metadata(md)
+        toc = src.get_toc(simple=False)
+        if toc:
+            dst.set_toc(toc)
         for page_num in range(len(src)):
             old = src[page_num]
             w = old.rect.width
