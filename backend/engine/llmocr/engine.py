@@ -15,6 +15,7 @@ import fitz
 from PIL import Image
 
 from llmocr.aligner import HybridAligner
+from llmocr.dense import process_dense_pages
 from llmocr.llm_client import LlmApiClient
 from llmocr.refine import refine_uncertain
 
@@ -58,6 +59,8 @@ class LlmOcrPipeline:
         concurrency: int = 1,
         refine: bool = True,
         max_image_dim: int = 1024,
+        dense_threshold: int = 60,
+        dense_enabled: bool = True,
         progress: Optional[ProgressCallback] = None,
     ) -> dict[int, list[str]]:
         """Execute the full hybrid OCR pipeline.
@@ -86,8 +89,27 @@ class LlmOcrPipeline:
             log.warning("No LLM model configured — output will have empty text layer")
             return {p: [] for p in page_nums}
 
-        sem = asyncio.Semaphore(max(1, concurrency))
         pages_text: dict[int, list[str]] = {}
+
+        # Dense-page mode: per-box OCR for pages above threshold
+        if dense_enabled and self.client is not None:
+            dense_page_nums = [p for p in page_nums if len(pages_data[p]) > dense_threshold and p in images_dict]
+            if dense_page_nums:
+                await _emit(progress, "ocr", 0, total_pages,
+                    f"Dense pages detected: {len(dense_page_nums)} above {dense_threshold} boxes")
+                await process_dense_pages(
+                    images_dict, pages_data, self.client,
+                    threshold=dense_threshold,
+                    concurrency=concurrency,
+                    progress_cb=progress,
+                )
+                for p in dense_page_nums:
+                    pages_text[p] = [t for _, t in pages_data[p] if t]
+
+        # Phase 3: LLM full-page OCR for remaining (sparse) pages
+        remaining = [p for p in page_nums if p not in pages_text]
+
+        sem = asyncio.Semaphore(max(1, concurrency))
         completed = 0
 
         async def process_page(p_num: int):
@@ -103,7 +125,7 @@ class LlmOcrPipeline:
             return p_num, text.split("\n") if text else [], aligned
 
         await _emit(progress, "ocr", 0, total_pages, f"OCR (0/{total_pages})...")
-        for coro in asyncio.as_completed([process_page(p) for p in page_nums]):
+        for coro in asyncio.as_completed([process_page(p) for p in remaining]):
             p_num, llm_lines, aligned = await coro
             pages_text[p_num] = llm_lines
             pages_data[p_num] = aligned

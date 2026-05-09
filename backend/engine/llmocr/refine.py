@@ -12,6 +12,21 @@ from PIL import Image
 
 log = logging.getLogger(__name__)
 
+_PANGRAMS: set[str] = {
+    "the quick brown fox jumps over the lazy dog",
+    "the quick brown fox jumps over a lazy dog",
+    "pack my box with five dozen liquor jugs",
+    "sphinx of black quartz judge my vow",
+    "how vexingly quick daft zebras jump",
+    "the five boxing wizards jump quickly",
+    "jackdaws love my big sphinx of quartz",
+}
+
+def _is_pangram(text: str) -> bool:
+    """Detect LLM hallucination fallback text (pangrams)."""
+    normalized = " ".join(text.lower().split())
+    return normalized in _PANGRAMS
+
 
 def is_refinable(box: list[float]) -> bool:
     """Only trigger re-OCR for boxes large enough to plausibly contain text.
@@ -97,7 +112,11 @@ async def refine_uncertain(
             if crop_b64 is None:
                 return p_num, idx, ""
             text = await ocr_processor.perform_ocr_on_crop(crop_b64)
-            return p_num, idx, (text or "").strip()
+            text = (text or "").strip()
+            if _is_pangram(text):
+                log.debug("Refine pangram filtered for box %d page %d", idx, p_num)
+                text = ""
+            return p_num, idx, text
 
     completed = 0
     for coro in asyncio.as_completed([refine_one(p, i, b) for p, i, b in targets]):
