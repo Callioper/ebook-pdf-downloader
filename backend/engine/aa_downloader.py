@@ -69,6 +69,7 @@ async def _get_page_with_flare(url: str, proxy: str = "", timeout: int = 30) -> 
             kwargs["proxies"] = {"http": proxy, "https": proxy}
         r = _req.get(url, **kwargs)
         if r.status_code == 200:
+            r.encoding = 'utf-8'
             return r.text
     except Exception:
         pass
@@ -157,6 +158,24 @@ def _parse_file_size(label: str) -> int:
     unit = m.group(2)
     mul = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
     return int(val * mul.get(unit, 1))
+
+
+async def batch_get_md5_details(
+    md5_list: List[str],
+    proxy: str = "",
+    base_url: str = AA_BASE_URLS[0],
+) -> List[Dict[str, Any]]:
+    """Fetch details for multiple MD5s in parallel with per-task exception handling."""
+    async def _fetch_one(md5: str) -> Dict[str, Any]:
+        try:
+            return await get_md5_details(md5, proxy, base_url)
+        except Exception as e:
+            logger.warning(f"Failed to fetch MD5 details for {md5}: {e}")
+            return {"md5": md5}
+
+    tasks = [_fetch_one(md5) for md5 in md5_list]
+    results = await asyncio.gather(*tasks)
+    return list(results)
 
 
 async def get_md5_details(

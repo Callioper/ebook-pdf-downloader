@@ -822,7 +822,7 @@ async def _download_via_aa_and_stacks(
     if title and not search_queries:
         search_queries.append(("title", title))
 
-    from engine.aa_downloader import search_aa, get_md5_details, get_stacks_api_key, _calc_title_relevance, verify_md5, resolve_download_url
+    from engine.aa_downloader import search_aa, get_md5_details, batch_get_md5_details, get_stacks_api_key, _calc_title_relevance, verify_md5, resolve_download_url
 
     all_md5_entries = []
     for qtype, qval in search_queries:
@@ -890,13 +890,18 @@ async def _download_via_aa_and_stacks(
             except Exception as e:
                 task_store.add_log(task_id, f"AA: stacks login error: {e}")
 
-        # Step C: 遍历 MD5 尝试下载
+        # Step C: 批量获取所有 MD5 详情（并行），然后遍历
+        md5_list = [e["md5"] for e in all_md5_entries[:10]]
+        task_store.add_log(task_id, f"AA: fetching details for {len(md5_list)} MD5 entries in parallel...")
+        details_list = await batch_get_md5_details(md5_list, proxy)
+        details_by_md5 = {d["md5"]: d for d in details_list}
+
         for i, entry in enumerate(all_md5_entries[:10]):
             md5 = entry["md5"]
             task_store.add_log(task_id, f"AA [{i+1}/{min(len(all_md5_entries), 10)}]: trying MD5={md5}")
 
             # 获取 MD5 详情（zlib_id, title, isbn 等）
-            details = await get_md5_details(md5, proxy)
+            details = details_by_md5.get(md5, {"md5": md5})
             filesize_bytes = details.get("filesize_bytes", entry.get("size_bytes", 0))
             md5_title = details.get("title", "")
 
@@ -2311,32 +2316,59 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                    "--dense-mode", "always", "--concurrency", ocr_concurrency]
 
             if uv_bin and os.path.isdir(llm_ocr_project):
-                cmd = [uv_bin, "run", "--project", llm_ocr_project,
+                cmd = [uv_bin, "run",
                        "local-llm-pdf-ocr", pdf_path, output_pdf_tmp,
                        "--api-base", ocr_endpoint, "--model", ocr_model,
-                       "--dense-mode", "always", "--concurrency", ocr_concurrency]
+                       "--dense-mode", "always", "--concurrency", ocr_concurrency,
+                       "--no-verify-model"]
+                _ocr_cwd = llm_ocr_project
                 task_store.add_log(task_id, f"LLM OCR: running via uv from {llm_ocr_project}")
             else:
-                # Fallback: try bare command (only works if installed globally)
                 cmd = [local_ocr_bin, pdf_path, output_pdf_tmp,
                        "--api-base", ocr_endpoint, "--model", ocr_model,
-                       "--dense-mode", "always", "--concurrency", ocr_concurrency]
+                       "--dense-mode", "always", "--concurrency", ocr_concurrency,
+                       "--no-verify-model"]
+                _ocr_cwd = None
 
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    cwd=_ocr_cwd,
                 )
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=int(config.get("ocr_timeout", 7200))
-                )
+                task_store.add_log(task_id, f"LLM OCR: streaming output from {os.path.basename(cmd[0])}...")
+
+                stdout_bytes = bytearray()
+                stderr_bytes = bytearray()
+
+                async def _read_stream(stream, buf):
+                    while True:
+                        line = await stream.readline()
+                        if not line:
+                            break
+                        buf.extend(line)
+                        text = line.decode(errors='replace').strip()
+                        if text:
+                            task_store.add_log(task_id, f"  {text[:200]}")
+
+                stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_bytes))
+                stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_bytes))
+
+                await asyncio.wait_for(proc.wait(), timeout=int(config.get("ocr_timeout", 7200)))
+                await stdout_task
+                await stderr_task
+
+                stdout = bytes(stdout_bytes)
+                stderr = bytes(stderr_bytes)
+
                 if proc.returncode == 0 and os.path.exists(output_pdf_tmp) and os.path.getsize(output_pdf_tmp) > 1024:
                     os.replace(output_pdf_tmp, pdf_path)
                     report["ocr_done"] = True
                     task_store.add_log(task_id, "LLM OCR completed successfully")
                 else:
-                    err_msg = stderr.decode()[:300] if stderr else "unknown"
+                    stdout_str = stdout.decode()[:300] if stdout else ""
+                    err_msg = (stderr.decode()[:300] if stderr else stdout_str or "unknown")
                     task_store.add_log(task_id, f"LLM OCR failed (code {proc.returncode}): {err_msg}")
             except FileNotFoundError:
                 task_store.add_log(task_id, 
