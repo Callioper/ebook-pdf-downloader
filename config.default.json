@@ -22,6 +22,7 @@
   "llm_ocr_model": "qwen3-vl-4b-instruct",
   "llm_ocr_concurrency": 1,
   "pdf_compress": false,
+  "pdf_compress_half": true,
   "ai_vision_enabled": true,
   "ai_vision_endpoint": "",
   "ai_vision_model": "",

@@ -75,6 +75,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "libgen_enabled": True,
     "download_timeout": 600,
     "pdf_compress": False,
+    "pdf_compress_half": True,
     "ai_vision_enabled": True,
     "ai_vision_endpoint": "",
     "ai_vision_model": "",
