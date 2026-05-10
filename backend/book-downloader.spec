@@ -47,6 +47,7 @@ a = Analysis(
         'config', 'search_engine', 'task_store', 'ws_manager', 'version',
         'curl_cffi',
         'httpx', 'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
+        'pikepdf',
     ],
     hookspath=[],
     hooksconfig={},
