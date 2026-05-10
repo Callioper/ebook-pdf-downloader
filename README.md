@@ -19,12 +19,14 @@ Ebook PDF Downloader 的核心目标是**将任意电子书转化为可搜索、
 
 -   **🔍 多源检索**: 本地 SQLite 双库并行搜索，Anna's Archive title/ISBN 匹配，Z-Library eAPI 三层检索（ISBN 精确 → 书名+作者 → 书名），自动 ISBN + SS 码去重
 -   **📥 智能下载**: Stacks 队列管理 Anna's Archive 下载，FlareSolverr 自动绕过 Cloudflare/DDoS-Guard，Z-Library 邮箱登录直达下载链接，LibGen torrent hash 回退
--   **⚙️ OCR 三引擎**: PaddleOCR（PP-OCRv5, 中文主力 ~24min/217 页）、Tesseract 默认引擎、LLM OCR（视觉大模型 dense-mode，逐框识别，支持 6 种已验证模型）
+-   **⚙️ OCR 三引擎**: PaddleOCR（PP-OCRv5, 中文主力 ~24min/217 页）、Tesseract 默认引擎、LLM OCR（视觉大模型 dense-mode always，逐框独立识别，支持 6 种已验证模型，异步暂停/恢复）
 -   **🎯 OCR 可选确认**: 管道执行到 OCR/目录步骤时弹出确认对话框，显示当前引擎和配置，用户可选择跳过
+-   **📦 PDF 压缩**: OCR 后黑白二值化压缩（pikepdf + FlateDecode，文字层完整保留），可选全/半分辨率，同时保留未压缩 OCR 原稿
 -   **📑 智能目录**: 书葵网 + 豆瓣 + NLC 三源书签合并，AI Vision 智能 TOC 提取（支持 OpenAI/Anthropic 本地 LLM），自动注入 PDF 书签
--   **🎨 现代化 Web UI**: React 18 + TypeScript + Tailwind CSS，WebSocket 实时进度更新，步骤进度条，日志流查看，深色模式
--   **⏯️ 任务控制**: 暂停/恢复/重试/取消，子进程挂起恢复，已完成任务自动清理
+-   **🎨 现代化 Web UI**: React 18 + TypeScript + Tailwind CSS，WebSocket 实时进度更新，OCR 阶段/逐页进度条，日志流查看，深色模式
+-   **⏯️ 任务控制**: 暂停/恢复/重试/取消，LLM OCR 暂停时终止子进程树（恢复后重新 OCR，LM Studio 资源释放），任务完成提示音
 -   **🔒 100% 本地优先**: 所有核心功能无需云 API，LLM OCR 可选配置本地/远程端点，数据完全私有
+-   **🖥️ OCR 实时进度**: LLM OCR 分阶段进度显示（PDF 光栅化 → 版面检测 → 逐框识别 → 嵌入文字层），逐页进度 (`36/217 页`)，Surya 批处理大小可调
 
 ---
 
@@ -44,7 +46,7 @@ graph TD
 
     E --> E1[PaddleOCR<br/>PP-OCRv5 中文主力]
     E --> E2[Tesseract OCR<br/>默认引擎]
-    E --> E3[LLM OCR<br/>ocrmypdf 插件]
+    E --> E3[LLM OCR<br/>local-llm-pdf-ocr CLI<br/>Surya 检测 + SimSun CJK]
 
     F --> F1[书葵网]
     F --> F2[豆瓣]
@@ -58,7 +60,7 @@ graph TD
 2. **获取 ISBN**: NLC 元数据爬虫 + 豆瓣 search by title → 补全 ISBN/作者/出版社/年份
 3. **下载 PDF**: Stacks 队列下载（优先） → Z-Library eAPI → LibGen 兜底，FlareSolverr 自动绕过 Cloudflare
 4. **转换**: 下载的页面/压缩包自动封装为 PDF
-5. **OCR 识别** (可选): 弹出确认对话框 → 选引擎（PaddleOCR / Tesseract / LLM OCR）→ ocrmypdf 执行 → 自动检测扫描页 → CJK 可读性校验
+5. **OCR 识别** (可选): 弹出确认对话框 → 选引擎（PaddleOCR / Tesseract / LLM OCR）→ LLM OCR 调用 `local-llm-pdf-ocr` CLI（Surya 分批次版面检测 → dense-mode 逐框 LLM 识别 → SimSun CJK 字体嵌入）→ 可选 BW 压缩 → 保留未压缩原稿
 6. **目录处理** (可选): 书葵网 + 豆瓣 + NLC 三源书签合并 → AI Vision 智能 TOC 提取 → 自动注入 PDF
 7. **完成**: 保存到 finished_dir → 生成任务报告 → 打开 PDF
 
@@ -128,7 +130,7 @@ B）源码版：克隆仓库，手动搭建所有依赖
 
 - **PaddleOCR 中文引擎**：创建独立 Python 3.11 venv（路径如 `venv-paddle311`），在其中安装 PaddlePaddle + PaddleOCR。设置页 OCR 面板提供一键安装脚本
 - **stacks（Anna's Archive 下载服务器）**：克隆 https://github.com/zelestcarlyone/stacks ，执行 Docker Compose 构建并启动容器（默认端口 7788）。stacks 内已集成 FlareSolverr，无需单独安装
-- **LLM OCR**：需要 lmstudio / ollama 加载视觉模型 + 安装 [local-llm-pdf-ocr](https://github.com/ahnafnafee/local-llm-pdf-ocr) 工具。在设置页填入 API 地址和模型名（推荐 `qwen3-vl-4b-instruct` 或 `qwen/qwen3-vl-8b`）
+- **LLM OCR**：需要 lmstudio / ollama 加载视觉模型 + `local-llm-pdf-ocr` 工具。设置页填入 API 地址和模型名（推荐 `jamepeng2023/paddleocr-vl-1.5` 或 `qwen3-vl-4b-instruct`），可选开启 PDF 黑白二值化压缩
 - **AI Vision TOC**：配置 OpenAI/Anthropic 兼容端点，用于智能 PDF 目录提取。设置页中填入端点和模型名，建议先用本地模型测试（如 Ollama glm-ocr）
 - **aria2c**：（exe 已内置，源码版需单独下载）BT/IPFS 下载引擎，用于 LibGen 回退下载
 
@@ -219,9 +221,12 @@ python main.py
 | 并发线程 | 同时处理页数 | `1` |
 | 识别语言 | Tesseract 语言包 | `chi_sim+eng` |
 | 超时时间 | 单任务最大 OCR 分钟 | `3600s` |
-| LLM OCR 端点 | OpenAI 兼容 API | （可选） |
-| LLM OCR 模型 | 模型名称 | （可选） |
-| LLM OCR API Key | 认证密钥 | （可选） |
+| LLM OCR 端点 | OpenAI 兼容 API | `http://127.0.0.1:1234/v1` |
+| LLM OCR 模型 | 模型名称 | `qwen3-vl-4b-instruct` |
+| LLM OCR 并发 | LLM 同时请求数 (1-5) | `1` |
+| 检测批次大小 | Surya 每批处理页数 (5-50) | `20` |
+| PDF 压缩 | 启用 BW 二值化压缩 | `关闭` |
+| 压缩分辨率 | `全分辨率` / `半分辨率` | `半分辨率` |
 | **AI Vision TOC** | | |
 | AI Vision 启用 | 智能目录提取 | `关闭` |
 | 端点/模型/Key | OpenAI/Anthropic 兼容 | （可选） |
@@ -250,8 +255,8 @@ python main.py
 | 操作 | 说明 |
 |------|------|
 | **开始任务** | 创建并立即启动 7 步管道 |
-| **暂停** | 挂起当前子进程，保留进度 |
-| **恢复** | 恢复子进程，继续执行 |
+| **暂停** | 终止 OCR 子进程树（LLM OCR），恢复后重新开始（已处理进度丢失），释放 LM Studio 资源 |
+| **恢复** | 重新启动 OCR，其他步骤保留进度 |
 | **重试** | 重置并重新运行管道 |
 | **取消** | 终止任务，标记为已取消 |
 | **清除已完成** | 批量删除已完成/失败/取消的任务 |
@@ -294,11 +299,11 @@ python main.py
 │   │   └── ws.py            # WebSocket 端点
 │   ├── engine/              # 核心处理引擎
 │   │   ├── pipeline.py      # 7 步处理管道编排（fetch_metadata → ... → finalize）
+│   │   ├── pdf_bw_compress.py # PDF 黑白二值化压缩（pikepdf + Pillow）
 │   │   ├── aa_downloader.py # Anna's Archive 搜索 + 元数据
 │   │   ├── stacks_client.py # Stacks Docker 队列下载
 │   │   ├── flaresolverr.py  # FlareSolverr 集成（Cloudflare 绕过）
-│   │   ├── zlib_downloader.py # Z-Library curl_cffi eAPI
-│   │   └── llmocr/          # LLM OCR ocrmypdf 插件
+│   │   └── zlib_downloader.py # Z-Library curl_cffi eAPI
 │   ├── nlc/                 # NLC 国家图书馆元数据爬虫
 │   ├── book_sources/        # 豆瓣等外部书源
 │   ├── addbookmark/         # 书签/目录模块
@@ -327,11 +332,11 @@ python main.py
 |----|------|
 | **前端** | React 18, TypeScript, Tailwind CSS, Vite, Zustand |
 | **后端** | FastAPI (async), uvicorn, Pydantic |
-| **PDF 处理** | PyMuPDF (fitz), OCRmyPDF |
-| **OCR 引擎** | PaddleOCR (PP-OCRv5), Tesseract, LLM OCR (OpenAI Vision API) |
+| **PDF 处理** | PyMuPDF (fitz), pikepdf, Pillow |
+| **OCR 引擎** | PaddleOCR (PP-OCRv5), Tesseract, LLM OCR (local-llm-pdf-ocr CLI + Surya 检测) |
 | **下载引擎** | FlareSolverr (Cloudflare bypass), curl_cffi (TLS fingerprint), aria2c (BT) |
 | **数据源** | SQLite (本地), Anna's Archive, Z-Library eAPI, NLC, 豆瓣, 书葵网 |
-| **字体嵌入** | SimHei (fontTools 子集化), PyMuPDF insert_font |
+| **字体嵌入** | SimSun CJK (fontTools 子集化), PyMuPDF insert_font + Identity-H |
 | **WebSocket** | FastAPI WebSocket, 实时进度 + 任务确认 |
 
 ---
@@ -342,7 +347,7 @@ python main.py
 |------|------|-----------|---------|---------|
 | **PaddleOCR** | ~24min / 217 页 | ★★★★★ | 中等，CPU | 中文文档主力 |
 | **Tesseract** | ~15min / 217 页 | ★★★☆☆ | 低，CPU | 英文/轻量使用 |
-| **LLM OCR** | 取决于 API | ★★★★☆ | 远端 | 高质量需求，支持任意 OpenAI 兼容端点 |
+| **LLM OCR** | 取决于 API/并发 | ★★★★☆ | 大模型推理+CPU版面检测 | 高质量需求，支持 LM Studio/Ollama/vLLM |
 
 > PaddleOCR 需要独立 Python 3.11 venv（PaddlePaddle MKL 冲突）。设置页提供一键安装脚本。  
 > LLM OCR 配置任意 OpenAI 兼容端点即可使用，支持 LM Studio / Ollama / vLLM / 云端 API。
@@ -360,7 +365,18 @@ python main.py
 | `qwen3-vl-4b-instruct` | 1m25s | 通义千问, 综合推荐 |
 | `qwen/qwen3-vl-8b` | 1m54s | 更大参数, 更高精度 |
 
-> **前提**: 需要安装 [local-llm-pdf-ocr](https://github.com/ahnafnafee/local-llm-pdf-ocr) 并在 lmstudio / ollama 中加载对应视觉模型。OCR 配置中选择 "LLM OCR" 引擎即可使用。
+> **前提**: 克隆 `local-llm-pdf-ocr` 到项目目录并安装依赖（`uv sync`）。LLM OCR 使用 Surya 进行版面检测（支持 `--detect-batch-size` 控制内存），SimSun CJK 字体嵌入简体中文文字层，`dense-mode always` 逐框独立 LLM 识别，跳过 DP 对齐器。设置页 LLM OCR 面板中填入 LM Studio/Ollama 端点和模型名即可使用。支持异步暂停/恢复（暂停时终止子进程树，恢复后重新开始 OCR）。
+
+### PDF 黑白二值化压缩
+
+启用后 OCR 完成后自动进行 BW 压缩（pikepdf + Pillow），将彩色扫描页转为 1-bit 黑白 + FlateDecode：
+
+| 分辨率 | 压缩率 (217页参考) | 大小 |
+|--------|:--:|------|
+| 全分辨率 (~300 DPI) | 78.4% | 26.5 MB |
+| 半分辨率 (~150 DPI) | 86.3% | 16.0 MB |
+
+> 压缩只替换 `Page.Resources.XObject` 中的图片流，不修改 `Contents` 内容流，OCR 文字层完整保留。启用后 finished_dir 同时保存压缩版 (`_ocr_bw.pdf`) 和 OCR 未压缩原稿 (`_ocr.pdf`)。
 
 ---
 
@@ -408,6 +424,13 @@ python main.py
 1. 确认 Tesseract 已安装且包含中英文语言包
 2. 推荐使用 PaddleOCR（设置页 OCR 面板一键安装，中文识别最佳）
 3. 检查 OCR 语言设置是否为 `chi_sim+eng`
+4. LLM OCR 中文文字层不可见/不可选：确认 `local-llm-pdf-ocr` 已更新到最新（需含 SimSun CJK 字体嵌入修复：`page.insert_font + fontname="F1"`），可 `git pull` 后重新运行
+</details>
+
+<details>
+<summary><b>LLM OCR 内存占用过高</b></summary>
+
+Surya 版面检测模型在 CPU 上消耗 2-5GB 内存。在设置页 LLM OCR 面板调整"检测批次大小"滑块（5-50，默认 20），降低即可减少峰值内存。
 </details>
 
 <details>
