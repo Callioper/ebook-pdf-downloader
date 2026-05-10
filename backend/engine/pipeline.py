@@ -2542,17 +2542,19 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 half_res = config.get("pdf_compress_half", True)
                 output_path = report["pdf_path"] + ".bw"
 
+                loop = asyncio.get_event_loop()
+
                 def _compress_progress(page, total):
                     pct = int(page * 100 / total)
-                    asyncio.ensure_future(
+                    asyncio.run_coroutine_threadsafe(
                         _emit(task_id, "step_progress", {
                             "step": "compress",
                             "progress": pct,
                             "detail": f"BW compress: {page}/{total} pages",
-                        })
+                        }),
+                        loop,
                     )
 
-                loop = asyncio.get_event_loop()
                 before, after = await loop.run_in_executor(
                     None,
                     bw_compress_pdf_blocking,
