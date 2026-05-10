@@ -2572,6 +2572,10 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     128,
                     _compress_progress,
                 )
+                # Save OCR original before replacing with compressed version
+                ocr_original = report["pdf_path"] + ".ocr"
+                shutil.copy2(report["pdf_path"], ocr_original)
+                task_store.add_log(task_id, f"OCR original preserved: {ocr_original}")
                 os.replace(output_path, report["pdf_path"])
                 saved_pct = round((1 - after / before) * 100, 1)
                 task_store.add_log(
@@ -2715,6 +2719,14 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
                     task_store.add_log(task_id, f"PDF saved: {dest_pdf}")
                 if moved or os.path.abspath(pdf_path) == os.path.abspath(dest_pdf):
                     task_store.add_log(task_id, f"任务输出: {dest_pdf}")
+                # Also move the preserved OCR original if exists
+                ocr_copy = pdf_path + ".ocr"
+                if os.path.exists(ocr_copy):
+                    ocr_dest = os.path.join(target_dir, new_name.replace(ext, "_ocr" + ext))
+                    if os.path.exists(ocr_dest):
+                        os.remove(ocr_dest)
+                    shutil.move(ocr_copy, ocr_dest)
+                    task_store.add_log(task_id, f"OCR 原稿已保存: {ocr_dest}")
             except Exception as e:
                 task_store.add_log(task_id, f"Finalize move error: {e}")
 
