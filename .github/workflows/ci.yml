@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Compile check backend
+        run: |
+          python -c "
+          import ast, os, sys
+          errors = 0
+          for root, dirs, files in os.walk('backend'):
+              dirs[:] = [d for d in dirs if d not in ('__pycache__', '.pytest_cache', 'venv', '.venv', 'dist', 'build')]
+              for f in files:
+                  if f.endswith('.py'):
+                      path = os.path.join(root, f)
+                      try:
+                          with open(path, 'rb') as fh:
+                              ast.parse(fh.read())
+                      except SyntaxError as e:
+                          print(f'SyntaxError in {path}: {e}')
+                          errors = 1
+          sys.exit(errors)
+          "
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: TypeScript check
+        run: |
+          cd frontend
+          npm install
+          npx tsc --noEmit
