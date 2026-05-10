@@ -2703,7 +2703,14 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
                 ss_code = report.get("ss_code", "")
                 title = report.get("title", "book")
                 safe_title = re.sub(r'[<>:"/\\|?*]', '_', title).strip()[:80]
-                ocr_suffix = "_ocr" if report.get("ocr_done") else ""
+                ocr_done = report.get("ocr_done")
+                bw_done = ocr_done and config.get("pdf_compress", False)
+                if bw_done:
+                    ocr_suffix = "_ocr_bw"
+                elif ocr_done:
+                    ocr_suffix = "_ocr"
+                else:
+                    ocr_suffix = ""
                 if ss_code:
                     new_name = f"{ss_code}_{safe_title}{ocr_suffix}{ext}"
                 else:
@@ -2719,10 +2726,11 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
                     task_store.add_log(task_id, f"PDF saved: {dest_pdf}")
                 if moved or os.path.abspath(pdf_path) == os.path.abspath(dest_pdf):
                     task_store.add_log(task_id, f"任务输出: {dest_pdf}")
-                # Also move the preserved OCR original if exists
+                # Also move the preserved OCR original if BW compression was used
                 ocr_copy = pdf_path + ".ocr"
                 if os.path.exists(ocr_copy):
-                    ocr_dest = os.path.join(target_dir, new_name.replace(ext, "_ocr" + ext))
+                    ocr_name = f"{ss_code}_{safe_title}_ocr{ext}" if ss_code else f"{safe_title}_ocr{ext}"
+                    ocr_dest = os.path.join(target_dir, ocr_name)
                     if os.path.exists(ocr_dest):
                         os.remove(ocr_dest)
                     shutil.move(ocr_copy, ocr_dest)
