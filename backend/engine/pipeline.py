@@ -9,7 +9,6 @@ import asyncio
 import logging
 import os
 import re
-from engine.pdf_bw_compress import bw_compress_pdf_blocking
 import shutil
 import subprocess
 import sys
@@ -22,6 +21,7 @@ logger = logging.getLogger(__name__)
 from config import get_config
 from task_store import task_store, STATUS_COMPLETED, STATUS_RUNNING, STATUS_PAUSED, STATUS_CANCELLED, STATUS_FAILED
 from ws_manager import ws_manager
+from engine.pdf_bw_compress import bw_compress_pdf_blocking
 
 PIPELINE_STEPS = [
     "fetch_metadata",
@@ -2459,11 +2459,26 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             try:
                 half_res = config.get("pdf_compress_half", True)
                 output_path = report["pdf_path"] + ".bw"
-                before, after = bw_compress_pdf_blocking(
-                    input_path=report["pdf_path"],
-                    output_path=output_path,
-                    half_res=half_res,
-                    threshold=128,
+
+                def _compress_progress(page, total):
+                    pct = int(page * 100 / total)
+                    asyncio.ensure_future(
+                        _emit(task_id, "step_progress", {
+                            "step": "compress",
+                            "progress": pct,
+                            "detail": f"BW compress: {page}/{total} pages",
+                        })
+                    )
+
+                loop = asyncio.get_event_loop()
+                before, after = await loop.run_in_executor(
+                    None,
+                    bw_compress_pdf_blocking,
+                    report["pdf_path"],
+                    output_path,
+                    half_res,
+                    128,
+                    _compress_progress,
                 )
                 os.replace(output_path, report["pdf_path"])
                 saved_pct = round((1 - after / before) * 100, 1)
