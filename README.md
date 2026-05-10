@@ -191,7 +191,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-> **前端已预编译** `backend/static/` 目录中包含最新前端构建产物，无需安装 Node.js 或运行 npm。如需修改前端代码，才需要 `cd ../frontend && npm install && npm run build`。
+> **前端已预编译** `frontend/dist/` 目录中包含最新前端构建产物，无需安装 Node.js 或运行 npm。如需修改前端代码，才需要 `cd ../frontend && npm install && npm run build`。
 
 > PaddleOCR 需要独立 Python 3.11 venv（PaddlePaddle MKL 冲突）。进入设置页 → OCR 面板 → 一键安装 PaddleOCR。
 
@@ -206,8 +206,8 @@ cd ebook-pdf-downloader
 cd backend
 pip install -r requirements.txt
 
-# 安装 Tesseract（Homebrew）
-brew install tesseract tesseract-lang
+# 安装 Tesseract 和 GhostScript（Homebrew）
+brew install tesseract tesseract-lang ghostscript
 
 # 启动
 python main.py
@@ -227,7 +227,7 @@ python main.py
 | SQLite 数据库目录 | `DX_2.0-5.0.db` / `DX_6.0.db` 所在路径 | 自动检测 |
 | **下载** | | |
 | 下载目录 | 临时存放 | `~/Downloads/book-downloader` |
-| 保存目录 | 最终输出 | `Downloads/finished` |
+| 保存目录 | 最终输出 | `~/Downloads/book-downloader/finished` |
 | HTTP 代理 | 访问外网 | （可选） |
 | Stacks 地址 | AA 下载服务器 | `http://localhost:7788` |
 | Stacks 用户名/密码 | Docker 容器凭证 | （可选） |
