@@ -4,6 +4,7 @@
 import io
 import os
 import zlib
+from typing import Callable, Optional
 
 import pikepdf
 from PIL import Image
@@ -14,11 +15,14 @@ def bw_compress_pdf_blocking(
     output_path: str,
     half_res: bool = False,
     threshold: int = 128,
-    progress_callback=None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> tuple[int, int]:
     """
     将 PDF 内嵌图片转为 1-bit 黑白并用 FlateDecode 重新压缩。
     完整保留 OCR 文字层（只替换 Resources.XObject，不动 Contents）。
+
+    注意: 新图片流仅保留 Width/Height/ColorSpace/BitsPerComponent/Filter，
+    丢弃 SMask/Mask/DecodeParms 等元数据。对于扫描版 PDF 无影响。
 
     Args:
         input_path:  输入 PDF 路径
@@ -30,59 +34,69 @@ def bw_compress_pdf_blocking(
     Returns:
         (原始大小字节数, 压缩后大小字节数)
     """
-    pdf = pikepdf.open(input_path)
-    total = len(pdf.pages)
+    failed_pages = []
 
-    for i, page in enumerate(pdf.pages):
-        xobjects = page.Resources.get(
-            pikepdf.Name.XObject, pikepdf.Dictionary()
-        )
-        img_name = None
-        img_obj = None
-        for name, obj in xobjects.items():
-            if obj.get(pikepdf.Name.Subtype) == pikepdf.Name.Image:
-                img_name = str(name)
-                img_obj = obj
-                break
+    with pikepdf.open(input_path) as pdf:
+        total = len(pdf.pages)
 
-        if img_obj is None:
-            continue
+        for i, page in enumerate(pdf.pages):
+            if not hasattr(page, 'Resources') or page.Resources is None:
+                continue
 
-        raw = img_obj.read_raw_bytes()
-        img = Image.open(io.BytesIO(raw))
+            xobjects = page.Resources.get(
+                pikepdf.Name.XObject, pikepdf.Dictionary()
+            )
 
-        if half_res:
-            target_w = img.width // 2
-            target_h = img.height // 2
-            img = img.resize((target_w, target_h), Image.LANCZOS)
+            for name, obj in xobjects.items():
+                if obj.get(pikepdf.Name.Subtype) != pikepdf.Name.Image:
+                    continue
 
-        gray = img.convert("L")
-        bw = gray.point(lambda x: 0 if x < threshold else 255, "1")
+                try:
+                    raw = obj.read_raw_bytes()
+                    img = Image.open(io.BytesIO(raw))
 
-        raw_bits = bw.tobytes()
-        compressed = zlib.compress(raw_bits, 9)
+                    if half_res:
+                        target_w = img.width // 2
+                        target_h = img.height // 2
+                        img = img.resize((target_w, target_h), Image.LANCZOS)
 
-        new_stream = pdf.make_stream(compressed)
-        new_stream.Type = pikepdf.Name.XObject
-        new_stream.Subtype = pikepdf.Name.Image
-        new_stream.Width = pikepdf.Integer(bw.width)
-        new_stream.Height = pikepdf.Integer(bw.height)
-        new_stream.ColorSpace = pikepdf.Name.DeviceGray
-        new_stream.BitsPerComponent = pikepdf.Integer(1)
-        new_stream.Filter = pikepdf.Name.FlateDecode
+                    gray = img.convert("L")
+                    bw = gray.point(lambda x: 0 if x < threshold else 255, "1")
 
-        page.Resources.XObject[pikepdf.Name(img_name)] = new_stream
+                    raw_bits = bw.tobytes()
+                    compressed = zlib.compress(raw_bits, 9)
 
-        if (i + 1) % 20 == 0 and progress_callback:
-            progress_callback(i + 1, total)
+                    new_stream = pdf.make_stream(compressed)
+                    new_stream.Type = pikepdf.Name.XObject
+                    new_stream.Subtype = pikepdf.Name.Image
+                    new_stream.Width = pikepdf.Integer(bw.width)
+                    new_stream.Height = pikepdf.Integer(bw.height)
+                    new_stream.ColorSpace = pikepdf.Name.DeviceGray
+                    new_stream.BitsPerComponent = pikepdf.Integer(1)
+                    new_stream.Filter = pikepdf.Name.FlateDecode
 
-    pdf.save(output_path, compress_streams=True)
-    pdf.close()
+                    page.Resources.XObject[pikepdf.Name(name)] = new_stream
+                except Exception:
+                    failed_pages.append(i + 1)
+
+            if (i + 1) % 10 == 0 and progress_callback:
+                progress_callback(i + 1, total)
+
+        if progress_callback:
+            progress_callback(total, total)
+
+        pdf.save(output_path, compress_streams=True)
 
     before = os.path.getsize(input_path)
     after = os.path.getsize(output_path)
 
-    if progress_callback:
-        progress_callback(total, total)
+    if failed_pages:
+        raise RuntimeError(
+            f"BW compression: {len(failed_pages)} page(s) with unprocessable images: "
+            f"{','.join(str(p) for p in failed_pages[:10])}"
+        ) if len(failed_pages) < total // 2 else RuntimeError(
+            f"BW compression: {len(failed_pages)}/{total} pages failed, "
+            f"likely unsupported PDF format"
+        )
 
     return before, after
