@@ -208,7 +208,7 @@ python main.py
 | **数据库** | | |
 | SQLite 数据库目录 | `DX_2.0-5.0.db` / `DX_6.0.db` 所在路径 | 自动检测 |
 | **下载** | | |
-| 下载目录 | 临时存放 | `Downloads` |
+| 下载目录 | 临时存放 | `~/Downloads/book-downloader` |
 | 保存目录 | 最终输出 | `Downloads/finished` |
 | HTTP 代理 | 访问外网 | （可选） |
 | Stacks 地址 | AA 下载服务器 | `http://localhost:7788` |
@@ -218,9 +218,9 @@ python main.py
 | ZFile 地址/密钥 | ZFile 网盘下载 | （可选） |
 | **OCR** | | |
 | OCR 引擎 | `tesseract` / `paddleocr` / `llm_ocr` | `tesseract` |
-| 并发线程 | 同时处理页数 | `1` |
+| 并发线程 | 同时处理页数 | `4` |
 | 识别语言 | Tesseract 语言包 | `chi_sim+eng` |
-| 超时时间 | 单任务最大 OCR 分钟 | `3600s` |
+| 超时时间 | 单任务最大 OCR 分钟 | `7200s` |
 | LLM OCR 端点 | OpenAI 兼容 API | `http://127.0.0.1:1234/v1` |
 | LLM OCR 模型 | 模型名称 | `qwen3-vl-4b-instruct` |
 | LLM OCR 并发 | LLM 同时请求数 (1-5) | `1` |

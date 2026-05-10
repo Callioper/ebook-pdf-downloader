@@ -26,7 +26,7 @@ assignees: ''
 
 ## 版本信息
 
-- 软件版本：v1.0.0（exe 内置 / 源码运行）
+- 软件版本：v1.2.0（exe 内置 / 源码运行）
 - 操作系统：Windows 10 / 11
 - OCR 引擎：Tesseract / PaddleOCR / LLM OCR
 
