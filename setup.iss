@@ -22,6 +22,9 @@ OutputDir=.\dist
 Source: "backend\dist\ebook-pdf-downloader.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "config.default.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "local-llm-pdf-ocr\src\*"; DestDir: "{app}\local-llm-pdf-ocr\src"; Flags: ignoreversion recursesubdirs
+Source: "local-llm-pdf-ocr\pyproject.toml"; DestDir: "{app}\local-llm-pdf-ocr"; Flags: ignoreversion
+Source: "local-llm-pdf-ocr\main.py"; DestDir: "{app}\local-llm-pdf-ocr"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\ebook-pdf-downloader"; Filename: "{app}\ebook-pdf-downloader.exe"

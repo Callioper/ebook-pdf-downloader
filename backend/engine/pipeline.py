@@ -2312,12 +2312,14 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             if not uv_bin:
                 uv_candidate = os.path.expanduser(r"~\.local\bin\uv.exe")
                 uv_bin = uv_candidate if os.path.exists(uv_candidate) else None
-            # Resolve project root: for frozen exe (dist/ebook-pdf-downloader.exe)
-            # go up 2 levels; for dev mode (backend/engine/pipeline.py) go up 2 levels
-            _llm_ocr_base = Path(__file__).resolve().parent.parent  # backend/
+            # Resolve project root: dev mode goes up from backend/engine/pipeline.py,
+            # frozen mode uses the directory containing the exe
             if getattr(sys, 'frozen', False):
-                _llm_ocr_base = Path(sys.executable).resolve().parent.parent  # backend/
-            llm_ocr_project = str(_llm_ocr_base.parent / "local-llm-pdf-ocr")
+                _llm_ocr_base = Path(sys.executable).resolve().parent  # exe directory
+                llm_ocr_project = str(_llm_ocr_base / "local-llm-pdf-ocr")
+            else:
+                _llm_ocr_base = Path(__file__).resolve().parent.parent  # backend/
+                llm_ocr_project = str(_llm_ocr_base.parent / "local-llm-pdf-ocr")
             cmd = [local_ocr_bin, pdf_path, output_pdf_tmp,
                    "--api-base", ocr_endpoint, "--model", ocr_model,
                    "--dense-mode", "always", "--concurrency", ocr_concurrency]
@@ -2527,8 +2529,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             except FileNotFoundError:
                 task_store.add_log(task_id, 
                     "local-llm-pdf-ocr not found. "
-                    "Install it: cd local-llm-pdf-ocr && uv pip install -e . "
-                    "or install from PyPI: pip install local-llm-pdf-ocr"
+                    "安装方法: git clone https://github.com/Callioper/local-llm-pdf-ocr.git "
+                    + llm_ocr_project + " && cd " + llm_ocr_project + " && uv sync"
                 )
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, "LLM OCR timed out")
