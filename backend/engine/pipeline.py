@@ -2132,8 +2132,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     break
         if _found_py and _found_py != sys.executable:
             _py_for_ocr = _found_py
-            task_store.add_log(task_id, f"OCR: using system Python at {_py_for_ocr}")
-        else:
+            if ocr_engine != "llm_ocr":
+                task_store.add_log(task_id, f"OCR: using system Python at {_py_for_ocr}")
+        elif ocr_engine != "llm_ocr":
             task_store.add_log(task_id, "OCR: no system Python found for ocrmypdf — please install: python -m pip install ocrmypdf")
 
     # ── Ensure the right OCR plugin is (un)installed ──
@@ -2292,7 +2293,10 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
         elif ocr_engine == "llm_ocr":
             output_pdf_tmp = pdf_path + ".llmocr.pdf"
-            ocr_endpoint = config.get("llm_ocr_endpoint", "http://127.0.0.1:1234/v1")
+            ocr_endpoint = config.get("llm_ocr_endpoint", "http://127.0.0.1:1234/v1").rstrip("/")
+            # Auto-append /v1 for lmstudio-style endpoints (user may type just host:port)
+            if not ocr_endpoint.endswith("/v1"):
+                ocr_endpoint += "/v1"
             ocr_model = config.get("llm_ocr_model", "qwen3-vl-4b-instruct")
             ocr_concurrency = str(config.get("llm_ocr_concurrency", 1))
             task_store.add_log(task_id, f"LLM OCR: {ocr_model} @ {ocr_endpoint}, concurrency={ocr_concurrency}")
@@ -2338,9 +2342,16 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     cwd=_ocr_cwd,
                 )
                 task_store.add_log(task_id, f"LLM OCR: streaming output from {os.path.basename(cmd[0])}...")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 10,
+                                 "stage": "convert", "stage_progress": 0,
+                                 "stage_total": 4, "message": "转换 PDF 页面..."})
 
                 stdout_bytes = bytearray()
                 stderr_bytes = bytearray()
+
+                _stage_names = {"convert": "PDF 光栅化", "detect": "版面检测", "ocr": "LLM 逐框 OCR", "refine": "补漏重识别", "embed": "嵌入文字层"}
+                _stage_order = {"convert": 0, "detect": 1, "ocr": 2, "refine": 3, "embed": 4}
+                _total_stages = 5
 
                 async def _read_stream(stream, buf):
                     while True:
@@ -2349,15 +2360,67 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                             break
                         buf.extend(line)
                         text = line.decode(errors='replace').strip()
-                        if text:
+                        if not text:
+                            continue
+                        # Parse progress: "  Converted 217 pages.  --- 100% ..." → stage=convert, pct=100
+                        # Parse progress: "  OCR (217 dense / 0 sparse) (3/217) 1% ..." → stage=ocr, pct=1
+                        # Parse progress: "  Refining boxes (X/Y)  --- 50% ..." → stage=refine, pct=50
+                        text_lower = text.lstrip()
+                        parsed = False
+                        for key, label in _stage_names.items():
+                            for prefix in (f"{label}", key.capitalize(), key.title(), 
+                                           f"OCR (", "OCR(", f"Refining boxes (", f"Refining boxes",
+                                           f"Layout detection complete", "Detect",
+                                           f"Converted ", "Converting", f"Done", "Layout",
+                                           f"Grounded OCR (", "Grounded OCR"):
+                                if text_lower.startswith(prefix.lower()):
+                                    # Try to extract percentage
+                                    import re as _re
+                                    pct_match = _re.search(r'(\d+)%', text)
+                                    if pct_match:
+                                        pct = int(pct_match.group(1))
+                                        stage_idx = _stage_order.get(key, 0)
+                                        overall = 10 + int((stage_idx + pct / 100.0) / _total_stages * 80)
+                                        await _emit(task_id, "step_progress", {
+                                            "step": "ocr", "progress": overall,
+                                            "stage": key, "stage_progress": pct,
+                                            "stage_total": _total_stages,
+                                            "message": f"{label}: {pct}%",
+                                        })
+                                        parsed = True
+                                    elif any(w in text_lower for w in ("complete", "done", "detection complete", "converted")):
+                                        stage_idx = _stage_order.get(key, 0)
+                                        pct = 100
+                                        overall = 10 + int((stage_idx + 1) / _total_stages * 80)
+                                        await _emit(task_id, "step_progress", {
+                                            "step": "ocr", "progress": overall,
+                                            "stage": key, "stage_progress": pct,
+                                            "stage_total": _total_stages,
+                                            "message": f"{label}: 完成",
+                                        })
+                                        parsed = True
+                                    break
+                            if parsed:
+                                break
+                        if not parsed:
+                            # Log non-progress lines (errors, summaries)
                             task_store.add_log(task_id, f"  {text[:200]}")
 
                 stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_bytes))
                 stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_bytes))
 
                 await asyncio.wait_for(proc.wait(), timeout=int(config.get("ocr_timeout", 7200)))
-                await stdout_task
-                await stderr_task
+                # Give stream readers a brief window to flush remaining data,
+                # then cancel them — uv's subprocess may inherit pipes and
+                # never close them, causing the reader tasks to block forever.
+                try:
+                    await asyncio.wait_for(stdout_task, timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    stdout_task.cancel()
+                try:
+                    await asyncio.wait_for(stderr_task, timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    stderr_task.cancel()
 
                 stdout = bytes(stdout_bytes)
                 stderr = bytes(stderr_bytes)

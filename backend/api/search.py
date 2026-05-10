@@ -771,10 +771,7 @@ async def fetch_llm_models(req: Request):
         return {"ok": False, "message": "缺少端点地址"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            url = f"{endpoint}/v1/models"
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+            data, used_url = await _try_fetch_models(client, endpoint)
             models = []
             for item in data.get("data", data if isinstance(data, list) else []):
                 if isinstance(item, dict):
@@ -795,16 +792,26 @@ async def check_llm_ocr(req: Request):
         return {"ok": False, "message": "缺少端点地址"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            url = f"{endpoint}/v1/models"
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+            data, used_url = await _try_fetch_models(client, endpoint)
             models = [item.get("id", "") for item in data.get("data", [])]
             if model and model not in models:
                 return {"ok": True, "message": f"端点 OK ({len(models)} 个模型), 但模型'{model}'未加载"}
             return {"ok": True, "message": f"连接成功 — {len(models)} 个模型可用" + (f", 含'{model}'" if model in models else "")}
     except Exception as e:
         return {"ok": False, "message": str(e)[:200]}
+
+
+async def _try_fetch_models(client, endpoint: str):
+    """Try GET /v1/models. If that fails, retry without /v1 (auto-correct endpoint)."""
+    for suffix in ("/v1/models", "/models"):
+        url = f"{endpoint}{suffix}"
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.json(), url
+        except Exception:
+            pass
+    raise RuntimeError("无法连接到 LLM 端点")
 
 
 @router.post("/check-proxy-sources")
