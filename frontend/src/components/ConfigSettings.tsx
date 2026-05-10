@@ -2096,7 +2096,7 @@ export default function ConfigSettings() {
           </span>
         )}
         {updateResult && (
-          <span className={`text-xs ${updateResult.includes('失败') ? 'text-red-500' : updateResult.includes('新版本') ? 'text-blue-600' : 'text-green-600'}`}>
+          <span className={`text-xs px-2 py-1 rounded ${updateResult.includes('失败') ? 'text-red-600 bg-red-50' : updateResult.includes('新版本') ? 'text-blue-600 bg-blue-50 font-semibold' : 'text-green-600 bg-green-50'}`}>
             {updateResult}
           </span>
         )}
