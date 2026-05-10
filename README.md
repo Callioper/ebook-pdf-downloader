@@ -95,8 +95,8 @@ B）源码版：克隆仓库，手动搭建所有依赖
 ---
 
 如果选择 A（便携版）：
-1. 从 Releases 下载 `ebook-pdf-downloader.exe`（便携版）或 `ebook-pdf-downloader-setup.exe`（安装版，带卸载程序）
-2. 便携版解压即用，安装版安装到 Program Files。双击启动，浏览器自动打开 http://localhost:8000
+1. 从 Releases 下载 `ebook-pdf-downloader.exe`（便携版，单文件直接运行）或 `ebook-pdf-downloader-setup.exe`（安装版，含桌面快捷方式和卸载程序）
+2. 便携版双击即启动，安装版安装到 Program Files。浏览器自动打开 http://localhost:8000
 3. 帮我检查以下外部依赖（逐一确认是否需要）：
    - **Tesseract OCR**（OCR 默认引擎）：Windows `winget install UB-Mannheim.TesseractOCR`（安装时勾选中文语言包）；macOS `brew install tesseract tesseract-lang`
    - **GhostScript**（PDF 优化）：Windows 下载安装 https://ghostscript.com/releases/gsdnld.html；macOS `brew install ghostscript`
