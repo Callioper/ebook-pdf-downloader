@@ -2356,6 +2356,15 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 _stage_order = {"convert": 0, "detect": 1, "ocr": 2, "refine": 3, "embed": 4}
                 _total_stages = 5
 
+                # Stage-specific prefix mapping (lowercase) for progress line detection
+                _stage_prefixes = {
+                    "convert": ("converting", "converted "),
+                    "detect": ("detecting layout", "layout detection complete"),
+                    "ocr": ("ocr (", "grounded ocr ("),
+                    "refine": ("refining boxes",),
+                    "embed": ("done", "writing output"),
+                }
+
                 async def _read_stream(stream, buf):
                     while True:
                         line = await stream.readline()
@@ -2365,18 +2374,13 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         text = line.decode(errors='replace').strip()
                         if not text:
                             continue
-                        # Parse progress: "  Converted 217 pages.  --- 100% ..." → stage=convert, pct=100
-                        # Parse progress: "  OCR (217 dense / 0 sparse) (3/217) 1% ..." → stage=ocr, pct=1
-                        # Parse progress: "  Refining boxes (X/Y)  --- 50% ..." → stage=refine, pct=50
-                        text_lower = text.lstrip()
+                        text_lower = text.lstrip().lower()
                         parsed = False
+                        # Match stage by prefixes
                         for key, label in _stage_names.items():
-                            for prefix in (f"{label}", key.capitalize(), key.title(), 
-                                           f"OCR (", "OCR(", f"Refining boxes (", f"Refining boxes",
-                                           f"Layout detection complete", "Detect",
-                                           f"Converted ", "Converting", f"Done", "Layout",
-                                           f"Grounded OCR (", "Grounded OCR"):
-                                if text_lower.startswith(prefix.lower()):
+                            prefixes = _stage_prefixes.get(key, ())
+                            for prefix in prefixes:
+                                if text_lower.startswith(prefix):
                                     # Try to extract percentage
                                     import re as _re
                                     pct_match = _re.search(r'(\d+)%', text)
