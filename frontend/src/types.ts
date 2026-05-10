@@ -46,6 +46,8 @@ export interface TaskItem {
   progress: number
   step_detail?: string
   step_eta?: string
+  stage?: string
+  stage_progress?: number
   logs: string[]
   error: string
   report: TaskReport

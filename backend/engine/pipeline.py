@@ -2384,23 +2384,27 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                                         pct = int(pct_match.group(1))
                                         stage_idx = _stage_order.get(key, 0)
                                         overall = 10 + int((stage_idx + pct / 100.0) / _total_stages * 80)
+                                        _detail = f"{label}: {pct}%"
                                         await _emit(task_id, "step_progress", {
                                             "step": "ocr", "progress": overall,
                                             "stage": key, "stage_progress": pct,
                                             "stage_total": _total_stages,
-                                            "message": f"{label}: {pct}%",
+                                            "detail": _detail,
                                         })
+                                        task_store.add_log(task_id, f"[OCR] {_detail}")
                                         parsed = True
                                     elif any(w in text_lower for w in ("complete", "done", "detection complete", "converted")):
                                         stage_idx = _stage_order.get(key, 0)
                                         pct = 100
                                         overall = 10 + int((stage_idx + 1) / _total_stages * 80)
+                                        _detail = f"{label}: 完成"
                                         await _emit(task_id, "step_progress", {
                                             "step": "ocr", "progress": overall,
                                             "stage": key, "stage_progress": pct,
                                             "stage_total": _total_stages,
-                                            "message": f"{label}: 完成",
+                                            "detail": _detail,
                                         })
+                                        task_store.add_log(task_id, f"[OCR] {_detail}")
                                         parsed = True
                                     break
                             if parsed:

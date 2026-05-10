@@ -74,9 +74,22 @@ export default function StepProgressBar({ task }: StepProgressBarProps) {
 
       {task.status === 'running' && currentStepIdx >= 0 && (
         <div className="mt-3">
+          {task.stage && (
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] text-gray-500">
+                {task.stage === 'convert' ? 'PDF 光栅化' : task.stage === 'detect' ? '版面检测' : task.stage === 'ocr' ? 'LLM 逐框识别' : task.stage === 'refine' ? '补漏重识别' : task.stage === 'embed' ? '嵌入文字层' : task.stage}
+              </span>
+              <span className="text-[11px] text-gray-400">{task.stage_progress ?? 0}%</span>
+            </div>
+          )}
+          {task.stage && (
+            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
+              <div className="h-full bg-blue-400 rounded-full transition-all duration-300" style={{ width: `${task.stage_progress ?? 0}%` }} />
+            </div>
+          )}
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] text-gray-500">
-              {PIPELINE_STEPS[currentStepIdx]?.label} 进度
+              {task.stage ? '总体进度' : `${PIPELINE_STEPS[currentStepIdx]?.label} 进度`}
             </span>
             <span className="text-[11px] text-gray-400">{stepProgress(currentStepIdx)}%</span>
           </div>

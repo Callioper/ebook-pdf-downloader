@@ -68,6 +68,8 @@ export default function TaskDetailPage() {
               progress: msg.progress || prev.progress,
               step_detail: (msg.detail as string) || prev.step_detail,
               step_eta: (msg.eta as string) || prev.step_eta,
+              stage: (msg.stage as string) || prev.stage,
+              stage_progress: (msg.stage_progress as number) ?? prev.stage_progress,
             }
           : prev
       )
