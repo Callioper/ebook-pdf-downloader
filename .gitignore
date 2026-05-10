@@ -32,6 +32,9 @@ config.json
 .DS_Store
 Thumbs.db
 
+# External tools
+local-llm-pdf-ocr/
+
 # Temp
 tmp/
 *.log

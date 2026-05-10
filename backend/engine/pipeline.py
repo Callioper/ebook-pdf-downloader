@@ -2312,10 +2312,12 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             if not uv_bin:
                 uv_candidate = os.path.expanduser(r"~\.local\bin\uv.exe")
                 uv_bin = uv_candidate if os.path.exists(uv_candidate) else None
-            llm_ocr_project = os.path.join(
-                os.environ.get("TEMP", os.path.expanduser("~")),
-                "local-llm-pdf-ocr"
-            )
+            # Resolve project root: for frozen exe (dist/ebook-pdf-downloader.exe)
+            # go up 2 levels; for dev mode (backend/engine/pipeline.py) go up 2 levels
+            _llm_ocr_base = Path(__file__).resolve().parent.parent  # backend/
+            if getattr(sys, 'frozen', False):
+                _llm_ocr_base = Path(sys.executable).resolve().parent.parent  # backend/
+            llm_ocr_project = str(_llm_ocr_base.parent / "local-llm-pdf-ocr")
             cmd = [local_ocr_bin, pdf_path, output_pdf_tmp,
                    "--api-base", ocr_endpoint, "--model", ocr_model,
                    "--dense-mode", "always", "--concurrency", ocr_concurrency]
