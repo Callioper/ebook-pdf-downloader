@@ -1397,9 +1397,34 @@ export default function ConfigSettings() {
                         onChange={(e) => setForm((prev) => ({ ...prev, pdf_compress: e.target.checked }))}
                         className="rounded border-gray-300"
                       />
-                      <span className="text-xs font-medium text-gray-600">PDF 压缩（OCR 后执行 qpdf 结构压缩）</span>
+                      <span className="text-xs font-medium text-gray-600">PDF 黑白二值化压缩（OCR 后执行）</span>
                     </label>
-                    <p className="text-xs text-gray-400 mt-0.5 ml-5">使用 qpdf 纯结构压缩，零文字层损失。</p>
+                    <p className="text-xs text-gray-400 mt-0.5 ml-5">将彩色扫描页转为 1-bit 黑白，大幅减小体积，完整保留 OCR 文字层。</p>
+                    {form.pdf_compress && (
+                      <div className="mt-2 ml-5 flex items-center gap-3">
+                        <span className="text-xs text-gray-500">分辨率:</span>
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="pdf_compress_half"
+                            checked={!form.pdf_compress_half}
+                            onChange={() => setForm((prev) => ({ ...prev, pdf_compress_half: false }))}
+                            className="border-gray-300"
+                          />
+                          <span className="text-xs text-gray-600">全分辨率 (~300 DPI)</span>
+                        </label>
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="pdf_compress_half"
+                            checked={!!form.pdf_compress_half}
+                            onChange={() => setForm((prev) => ({ ...prev, pdf_compress_half: true }))}
+                            className="border-gray-300"
+                          />
+                          <span className="text-xs text-gray-600">半分辨率 (~150 DPI, 体积更小)</span>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
       )}
