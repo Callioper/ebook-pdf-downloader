@@ -172,7 +172,22 @@ def main():
         db_path = config.get("ebook_db_path", "")
         if db_path:
             search_engine.set_db_dir(db_path)
-        uvicorn.run(app, host=host, port=port, reload=False, log_level="info")
+
+        # Retry on port conflict (stale process may still be releasing socket)
+        import socket as _socket
+        for attempt in range(1, 6):
+            try:
+                uvicorn.run(app, host=host, port=port, reload=False, log_level="info")
+                break
+            except SystemExit:
+                break
+            except Exception as e:
+                err_str = str(e)
+                if "10048" in err_str or "address already in use" in err_str.lower():
+                    logger.warning(f"Port {port} in use, retrying ({attempt}/5)...")
+                    time.sleep(2)
+                    continue
+                raise
     except KeyboardInterrupt:
         pass
     except Exception:
