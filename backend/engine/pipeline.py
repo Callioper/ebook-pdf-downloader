@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import re
+from engine.pdf_bw_compress import bw_compress_pdf_blocking
 import shutil
 import subprocess
 import sys
@@ -2098,11 +2099,11 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         import shutil as _opt_sh
         if _opt_sh.which("gswin64c") or _opt_sh.which("gs"):
             _opt_level = "1"
-            task_store.add_log(task_id, "PDF compression enabled (GhostScript found)")
+            task_store.add_log(task_id, "PDF optimization enabled (GhostScript found for ocrmypdf --optimize)")
         else:
-            task_store.add_log(task_id, "PDF compression requested but GhostScript not found, skipping")
+            task_store.add_log(task_id, "PDF optimization requested but GhostScript not found; ocrmypdf will skip --optimize")
     else:
-        task_store.add_log(task_id, "PDF compression disabled")
+        task_store.add_log(task_id, "PDF optimization disabled")
 
     if ocr_engine == "llm_ocr":
         task_store.add_log(task_id, f"OCR engine: llm_ocr (model: {config.get('llm_ocr_model', '')}, concurrency: {config.get('llm_ocr_concurrency', 1)})")
@@ -2451,42 +2452,32 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     except Exception as e:
         task_store.add_log(task_id, f"OCR error: {e}")
 
-    # PDF compression (qpdf, optional)
+    # PDF compression (pikepdf BW binarization, replaces qpdf structural compression)
     if report.get("ocr_done") and config.get("pdf_compress", False):
         if report.get("pdf_path") and os.path.exists(report["pdf_path"]):
-            task_store.add_log(task_id, "Compressing PDF with qpdf...")
+            task_store.add_log(task_id, "Compressing PDF (BW binarization)...")
             try:
-                qpdf_cmd = [
-                    "qpdf",
-                    "--recompress-flate",
-                    "--object-streams=generate",
-                    report["pdf_path"],
-                    report["pdf_path"] + ".compressed",
-                ]
-                qp = await asyncio.create_subprocess_exec(
-                    *qpdf_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                half_res = config.get("pdf_compress_half", True)
+                output_path = report["pdf_path"] + ".bw"
+                before, after = bw_compress_pdf_blocking(
+                    input_path=report["pdf_path"],
+                    output_path=output_path,
+                    half_res=half_res,
+                    threshold=128,
                 )
-                _, qe = await asyncio.wait_for(qp.communicate(), timeout=300)
-                if qp.returncode == 0:
-                    before = os.path.getsize(report["pdf_path"])
-                    after = os.path.getsize(report["pdf_path"] + ".compressed")
-                    os.replace(report["pdf_path"] + ".compressed", report["pdf_path"])
-                    task_store.add_log(task_id, f"qpdf compression: {before/1024/1024:.1f}MB → {after/1024/1024:.1f}MB ({after*100//before}%)")
-                else:
-                    err = qe.decode()[:200] if qe else "unknown"
-                    task_store.add_log(task_id, f"qpdf compression skipped: {err}")
-                    try:
-                        os.remove(report["pdf_path"] + ".compressed")
-                    except Exception:
-                        pass
-            except FileNotFoundError:
-                task_store.add_log(task_id, "qpdf not installed, skipping compression")
-            except asyncio.TimeoutError:
-                task_store.add_log(task_id, "qpdf compression timed out")
+                os.replace(output_path, report["pdf_path"])
+                saved_pct = round((1 - after / before) * 100, 1)
+                task_store.add_log(
+                    task_id,
+                    f"BW compression: {before/1024/1024:.1f}MB → {after/1024/1024:.1f}MB "
+                    f"({saved_pct}% saved, {'half' if half_res else 'full'} resolution)",
+                )
             except Exception as e:
-                task_store.add_log(task_id, f"qpdf compression error: {str(e)[:100]}")
+                task_store.add_log(task_id, f"BW compression failed: {str(e)[:200]}")
+                try:
+                    os.remove(report["pdf_path"] + ".bw")
+                except Exception:
+                    pass
 
     return report
 
