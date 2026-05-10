@@ -8,6 +8,28 @@ import { useTaskWebSocket } from '../hooks/useTaskWebSocket'
 import StepProgressBar from '../components/StepProgressBar'
 import LogStream from '../components/LogStream'
 import TaskReport from '../components/TaskReport'
+
+function playCompletionSound() {
+  try {
+    const ctx = new AudioContext()
+    const now = ctx.currentTime
+    // Two-tone ascending chime: C5 → E5
+    ;[523.25, 659.25].forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.3, now + i * 0.15)
+      gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.3)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now + i * 0.15)
+      osc.stop(now + i * 0.15 + 0.3)
+    })
+  } catch {
+    // Audio not available (e.g. autoplay blocked) — silently ignore
+  }
+}
 import TaskListPanel from '../components/TaskListPanel'
 
 export default function TaskDetailPage() {
@@ -77,9 +99,11 @@ export default function TaskDetailPage() {
       )
     }
     if (msg.type === 'task_completed') {
+      playCompletionSound()
       fetchTask()
     }
     if (msg.type === 'task_failed') {
+      playCompletionSound()
       fetchTask()
     }
   }, [fetchTask])
