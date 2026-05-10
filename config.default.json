@@ -21,6 +21,7 @@
   "llm_ocr_endpoint": "http://127.0.0.1:1234/v1",
   "llm_ocr_model": "qwen3-vl-4b-instruct",
   "llm_ocr_concurrency": 1,
+  "llm_ocr_detect_batch": 20,
   "pdf_compress": false,
   "pdf_compress_half": true,
   "ai_vision_enabled": true,

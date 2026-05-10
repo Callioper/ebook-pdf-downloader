@@ -2322,11 +2322,14 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                    "--api-base", ocr_endpoint, "--model", ocr_model,
                    "--dense-mode", "always", "--concurrency", ocr_concurrency]
 
+            ocr_detect_batch = str(config.get("llm_ocr_detect_batch", 20))
+
             if uv_bin and os.path.isdir(llm_ocr_project):
                 cmd = [uv_bin, "run",
                        "local-llm-pdf-ocr", pdf_path, output_pdf_tmp,
                        "--api-base", ocr_endpoint, "--model", ocr_model,
                        "--dense-mode", "always", "--concurrency", ocr_concurrency,
+                       "--detect-batch-size", ocr_detect_batch,
                        "--no-verify-model"]
                 _ocr_cwd = llm_ocr_project
                 task_store.add_log(task_id, f"LLM OCR: running via uv from {llm_ocr_project}")
@@ -2334,6 +2337,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 cmd = [local_ocr_bin, pdf_path, output_pdf_tmp,
                        "--api-base", ocr_endpoint, "--model", ocr_model,
                        "--dense-mode", "always", "--concurrency", ocr_concurrency,
+                       "--detect-batch-size", ocr_detect_batch,
                        "--no-verify-model"]
                 _ocr_cwd = None
 

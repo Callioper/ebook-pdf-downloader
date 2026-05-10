@@ -34,6 +34,7 @@ interface AppConfig {
   llm_ocr_endpoint: string
   llm_ocr_model: string
   llm_ocr_concurrency: number
+  llm_ocr_detect_batch: number
   ocr_confirm_enabled: boolean
   bookmark_confirm_enabled: boolean
   pdf_compress: boolean
@@ -167,6 +168,7 @@ const DEFAULT_CONFIG: AppConfig = {
   llm_ocr_endpoint: 'http://127.0.0.1:1234/v1',
   llm_ocr_model: '',
   llm_ocr_concurrency: 1,
+  llm_ocr_detect_batch: 20,
   ocr_confirm_enabled: false,
   bookmark_confirm_enabled: false,
   pdf_compress: false,
@@ -1836,6 +1838,20 @@ export default function ConfigSettings() {
               <div className="flex justify-between text-xs text-gray-400">
                 <span>1 (默认)</span><span>5 (最快)</span>
               </div>
+            </div>
+
+            <div className="mt-2">
+              <label className="text-xs text-gray-500 block mb-1">
+                版面检测批次: {form.llm_ocr_detect_batch || 20} 页/批
+              </label>
+              <input type="range" min="5" max="50" step="5"
+                value={form.llm_ocr_detect_batch || 20}
+                onChange={(e) => updateForm({ llm_ocr_detect_batch: parseInt(e.target.value) })}
+                className="w-full" />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>5 页 (低内存)</span><span>50 页 (更快)</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">Surya 版面检测每批处理页数。内存不足时降低。</p>
             </div>
 
             <details className="text-xs">
