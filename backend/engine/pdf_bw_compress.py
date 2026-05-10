@@ -78,6 +78,7 @@ def bw_compress_pdf_blocking(
                     page.Resources.XObject[pikepdf.Name(name)] = new_stream
                 except Exception:
                     failed_pages.append(i + 1)
+                break  # only replace first Image XObject, matches spec
 
             if (i + 1) % 10 == 0 and progress_callback:
                 progress_callback(i + 1, total)
