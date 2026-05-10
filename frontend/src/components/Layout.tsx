@@ -27,6 +27,8 @@ export default function Layout() {
   const [downloading, setDownloading] = useState(false)
   const [downloadingPct, setDownloadingPct] = useState(0)
   const [installing, setInstalling] = useState(false)
+  const [checkResult, setCheckResult] = useState('')
+  const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const checkUpdate = () => {
@@ -42,14 +44,20 @@ export default function Layout() {
           if (lastSeen !== data.latest) {
             setUpdateInfo(data)
             setDismissed(false)
-          } else {
-            setUpdateInfo(null)
           }
+          setCheckResult(`新版本 v${data.latest} 可用`)
         } else {
           setUpdateInfo(null)
+          setCheckResult(`已是最新 v${cachedVersion}`)
         }
+        if (resultTimerRef.current) clearTimeout(resultTimerRef.current)
+        resultTimerRef.current = setTimeout(() => setCheckResult(''), 3000)
       })
-      .catch(() => {})
+      .catch(() => {
+        setCheckResult('检查失败')
+        if (resultTimerRef.current) clearTimeout(resultTimerRef.current)
+        resultTimerRef.current = setTimeout(() => setCheckResult(''), 3000)
+      })
       .finally(() => setChecking(false))
   }
 
@@ -247,6 +255,11 @@ export default function Layout() {
               </svg>
             </button>
             <span>v{version || '...'}</span>
+            {checkResult && (
+              <span className={`text-xs ${checkResult.includes('失败') ? 'text-red-400' : checkResult.includes('新版本') ? 'text-blue-500 font-semibold' : 'text-green-400'}`}>
+                {checkResult}
+              </span>
+            )}
           </div>
             <a href="https://github.com/Callioper/ebook-pdf-downloader" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">
               github.com/Callioper/ebook-pdf-downloader
