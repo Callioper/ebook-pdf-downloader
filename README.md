@@ -255,7 +255,7 @@ python main.py
 | 操作 | 说明 |
 |------|------|
 | **开始任务** | 创建并立即启动 7 步管道 |
-| **暂停** | 终止 OCR 子进程树（LLM OCR），恢复后重新开始（已处理进度丢失），释放 LM Studio 资源 |
+| **暂停** | LLM OCR：终止子进程树，恢复后重新 OCR。Tesseract/PaddleOCR：挂起子进程，恢复后继续 |
 | **恢复** | 重新启动 OCR，其他步骤保留进度 |
 | **重试** | 重置并重新运行管道 |
 | **取消** | 终止任务，标记为已取消 |
@@ -289,6 +289,8 @@ python main.py
 ├── backend/
 │   ├── main.py              # FastAPI 入口，uvicorn 启动
 │   ├── config.py            # 配置管理（APPDATA 持久化）
+│   ├── requirements.txt     # Python 依赖列表
+│   ├── platform_utils.py    # 跨平台进程管理（挂起/恢复/杀进程树）
 │   ├── version.py           # 版本号 + GitHub repo 标识
 │   ├── search_engine.py     # SQLite 双库并行检索引擎
 │   ├── task_store.py        # 任务内存字典 + JSON 持久化
@@ -394,6 +396,8 @@ python main.py
 | [书葵网](https://www.shukui.net/) | 图书目录/书签数据 |
 | [Anna's Archive](https://annas-archive.org/) | 开放图书元数据与下载 |
 | [Z-Library](https://z-lib.sk/) | 图书在线下载源 |
+| [local-llm-pdf-ocr](https://github.com/ahnafnafee/local-llm-pdf-ocr) | LLM OCR 管道（Surya 检测 + LLM 识别 + PyMuPDF 嵌入） |
+| [Surya](https://github.com/VikParuchuri/surya) | 文档版面检测模型（DetectionPredictor） |
 
 ---
 
