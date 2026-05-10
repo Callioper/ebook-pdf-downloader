@@ -14,9 +14,6 @@ a = Analysis(
     datas=[
         (str(FRONTEND_DIST), "frontend/dist"),
         (str(NLC_DIR / "nlc_isbn.py"), "nlc/nlc_isbn.py"),
-        (str(NLC_DIR / "bookmarkget.py"), "nlc/bookmarkget.py"),
-        (str(NLC_DIR / "headers.py"), "nlc/headers.py"),
-        (str(NLC_DIR / "formatting.py"), "nlc/formatting.py"),
         (str(ADD_BOOKMARK_DIR), "addbookmark"),
         (str(BACKEND_DIR / "book_sources"), "book_sources"),
         (str(BACKEND_DIR / "engine"), "engine"),
