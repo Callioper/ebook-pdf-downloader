@@ -38,6 +38,5 @@
   "zlib_password": "",
   "aa_membership_key": "",
   "libgen_enabled": true,
-  "flaresolverr_port": 8191,
-  "flaresolverr_binary": ""
+  "flaresolverr_port": 8191
 }
