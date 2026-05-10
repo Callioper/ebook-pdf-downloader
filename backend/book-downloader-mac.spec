@@ -15,12 +15,13 @@ a = Analysis(
         (str(BACKEND_DIR / 'addbookmark'), 'addbookmark'),
     ],
     hiddenimports=[
-        'engine.pipeline', 'engine.aa_downloader', 'engine.stacks_client',
+        'engine.pipeline', 'engine.aa_downloader',
         'engine.flaresolverr', 'engine.zlib_downloader',
+        'engine.pdf_bw_compress',
         'api.search', 'api.tasks', 'api.ws',
         'nlc', 'book_sources', 'addbookmark',
         'task_store', 'ws_manager', 'search_engine', 'config',
-        'platform_utils',
+        'platform_utils', 'pikepdf',
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -59,7 +60,7 @@ app = BUNDLE(
     bundle_identifier='com.ebook-pdf-downloader',
     info_plist={
         'NSHighResolutionCapable': True,
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1.0.0',
+        'CFBundleShortVersionString': '1.2.0',
+        'CFBundleVersion': '1.2.0',
     },
 )
