@@ -84,62 +84,80 @@ graph TD
 将以下提示词发送给 [opencode](https://github.com/anomalyco/opencode) 或任意 AI 编程助手，即可自动完成环境搭建：
 
 ````
-请帮我安装并配置 Ebook PDF Downloader（https://github.com/Callioper/ebook-pdf-downloader）：
+请帮我安装并配置 Ebook PDF Downloader（https://github.com/Callioper/ebook-pdf-downloader）。
 
 首先询问我选择哪种安装方式：
-A）便携版：下载 exe 直接运行（推荐，无需安装依赖）
+A）便携版：下载 exe 直接运行（推荐，无需安装 Python/Node.js）
 B）源码版：克隆仓库，手动搭建所有依赖
 
 ---
 
 如果选择 A（便携版）：
-1. 从 Releases（https://github.com/Callioper/ebook-pdf-downloader/releases/latest）下载 `ebook-pdf-downloader.exe`
-2. 双击运行，确认浏览器自动打开 http://localhost:8000
-3. 帮我检查是否需要以下外部工具，缺失则指引下载：
-   - Tesseract OCR：`winget install UB-Mannheim.TesseractOCR`（OCR 默认引擎，安装时勾选中英文语言包）
-   - 数据库文件：从 EbookDatabase 项目下载 `DX_2.0-5.0.db` 和 `DX_6.0.db`，在设置页配置路径
+1. 从 Releases 下载 `ebook-pdf-downloader.exe`（便携版）或 `ebook-pdf-downloader-setup.exe`（安装版，带卸载程序）
+2. 便携版解压即用，安装版安装到 Program Files。双击启动，浏览器自动打开 http://localhost:8000
+3. 帮我检查以下外部依赖（逐一确认是否需要）：
+   - **Tesseract OCR**（OCR 默认引擎）：Windows `winget install UB-Mannheim.TesseractOCR`（安装时勾选中文语言包）；macOS `brew install tesseract tesseract-lang`
+   - **GhostScript**（PDF 优化）：Windows 下载安装 https://ghostscript.com/releases/gsdnld.html；macOS `brew install ghostscript`
+   - **数据库文件**：从 EbookDatabase 项目下载 `DX_2.0-5.0.db` / `DX_6.0.db`，在设置页配置路径
 
 ---
 
 如果选择 B（源码版）：
-1. 克隆仓库：`git clone https://github.com/Callioper/ebook-pdf-downloader.git`
-2. 检查并安装前置条件：
-   - Python 3.10+：`python --version`
-   - Node.js 18+：`node --version`（编译前端需要）
-   - Tesseract OCR：`winget install UB-Mannheim.TesseractOCR`（勾选中英文语言包）
-   - 数据库文件：放入 `backend/data/` 目录，缺失则从 EbookDatabase 项目下载
+1. 前置条件检查（缺失则指引安装）：
+   - **git**：`git --version`（克隆仓库必需）
+   - **Python 3.10+**：`python --version`（推荐 3.10-3.12）
+   - **Node.js ≥18**：`node --version`（编译前端）
+   - **Tesseract OCR**：同上
+   - **GhostScript**：同上
+   - **uv**（Python 包管理器，LLM OCR 必需）：Windows `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`；macOS/Linux `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+2. 克隆仓库：
+   ```
+   git clone https://github.com/Callioper/ebook-pdf-downloader.git
+   cd ebook-pdf-downloader
+   ```
 
 3. 安装后端依赖：
    ```
-   cd ebook-pdf-downloader/backend
-   pip install -r requirements.txt
+   cd backend
+   pip install -r requirements.txt   # 含 fastapi/pikepdf/PyMuPDF/ocrmypdf 等 22 个包
    ```
 
-4. 编译前端：
+4. 编译前端（如已有预编译的 `frontend/dist/` 可跳过此步）：
    ```
    cd ../frontend
-   npm install
-   npm run build
+   npm install         # React/TypeScript/Tailwind CSS/Vite
+   npm run build       # 输出到 frontend/dist/
    ```
 
-5. 启动：`cd ../backend && python main.py`
+5. 启动：
+   ```
+   cd ../backend
+   python main.py      # 自动检测 frontend/dist/ 作为静态文件
+   ```
 
 ---
 
-无论哪种方式，选配安装以下功能（逐一询问我是否需要）：
+无论哪种方式，选配安装以下功能（**逐一询问我是否需要，不要全部默认安装**）：
 
-- **PaddleOCR 中文引擎**：创建独立 Python 3.11 venv（路径如 `venv-paddle311`），在其中安装 PaddlePaddle + PaddleOCR。设置页 OCR 面板提供一键安装脚本
-- **stacks（Anna's Archive 下载服务器）**：克隆 https://github.com/zelestcarlyone/stacks ，执行 Docker Compose 构建并启动容器（默认端口 7788）。stacks 内已集成 FlareSolverr，无需单独安装
-- **LLM OCR**：需要 lmstudio / ollama 加载视觉模型 + [local-llm-pdf-ocr](https://github.com/Callioper/local-llm-pdf-ocr)（fork，含 CJK 修复）。设置页填入 API 地址和模型名（推荐 `jamepeng2023/paddleocr-vl-1.5` 或 `qwen3-vl-4b-instruct`），可选开启 PDF 黑白二值化压缩
-- **AI Vision TOC**：配置 OpenAI/Anthropic 兼容端点，用于智能 PDF 目录提取。设置页中填入端点和模型名，建议先用本地模型测试（如 Ollama glm-ocr）
-- **aria2c**：（exe 已内置，源码版需单独下载）BT/IPFS 下载引擎，用于 LibGen 回退下载
+- **PaddleOCR 中文引擎**：需独立 Python 3.11 venv（PaddlePaddle MKL 与 3.12+ 冲突）。`python3.11 -m venv venv-paddle311 && venv-paddle311\Scripts\pip install paddlepaddle paddleocr`。设置页 OCR 面板有一键安装脚本
+- **stacks（Anna's Archive 下载服务器）**：需 Docker。`git clone https://github.com/zelestcarlyone/stacks && cd stacks && docker compose up -d`。默认端口 7788，内置 FlareSolverr。设置页填入地址和 API 密钥
+- **LLM OCR（视觉大模型 OCR）**：
+  - 需要 **uv**（Python 包管理器，步骤 B.1 已安装）
+  - 需要 **LM Studio** 或 **Ollama** 加载视觉模型
+  - 克隆 `git clone https://github.com/Callioper/local-llm-pdf-ocr.git` 到项目目录或 exe 同级目录
+  - 首次 OCR 时 `uv run` 会自动安装依赖（surya/torch/transformers 等 64 个包，约需 2 分钟）
+  - 设置页填入端点（如 `http://127.0.0.1:1234`）和模型名。推荐 `jamepeng2023/paddleocr-vl-1.5`（最快）或 `qwen3-vl-4b-instruct`（综合推荐）
+  - 可选开启"PDF 黑白二值化压缩"缩小文件体积 80%+
+- **AI Vision TOC（智能目录提取）**：需 OpenAI/Anthropic 兼容 API（本地 LM Studio/Ollama 或云端均可）。设置页填入端点、模型、API Key
+- **aria2c**（LibGen BT 下载引擎）：便携版 exe 已内置；源码版从 https://github.com/aria2/aria2/releases 下载放入 PATH
 
-最后：打开设置页（右上角 ⚙️），检查并补全以下关键配置：
-- 数据库路径（如有）
-- HTTP 代理（如需要）
-- stacks 地址和密钥（如已安装）
-- Z-Library 邮箱/密码（如需要）
-- OCR 引擎偏好
+最后：打开设置页（右上角 ⚙️），检查并补全关键配置：
+- 数据库路径（如有 EbookDatabase）
+- HTTP 代理（如在国内网络环境）
+- stacks 地址和 API 密钥（如已安装 Docker）
+- Z-Library 邮箱/密码（如需 Z-Library 搜索）
+- OCR 引擎选择（默认 Tesseract，中文推荐 PaddleOCR 或 LLM OCR）
 ````
 
 将上述提示词复制发送给 AI 助手，它会逐步引导完成安装和配置。
