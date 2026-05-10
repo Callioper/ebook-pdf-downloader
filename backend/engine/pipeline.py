@@ -2385,12 +2385,19 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                                         stage_idx = _stage_order.get(key, 0)
                                         overall = 10 + int((stage_idx + pct / 100.0) / _total_stages * 80)
                                         _detail = f"{label}: {pct}%"
-                                        await _emit(task_id, "step_progress", {
+                                        # Try to extract (current/total) page numbers
+                                        _pg_match = _re.search(r'\((\d+)/(\d+)\)', text)
+                                        _emit_data = {
                                             "step": "ocr", "progress": overall,
                                             "stage": key, "stage_progress": pct,
                                             "stage_total": _total_stages,
                                             "detail": _detail,
-                                        })
+                                        }
+                                        if _pg_match:
+                                            _emit_data["current_page"] = int(_pg_match.group(1))
+                                            _emit_data["total_pages"] = int(_pg_match.group(2))
+                                            _detail += f" ({_pg_match.group(1)}/{_pg_match.group(2)} 页)"
+                                        await _emit(task_id, "step_progress", _emit_data)
                                         task_store.add_log(task_id, f"[OCR] {_detail}")
                                         parsed = True
                                     elif any(w in text_lower for w in ("complete", "done", "detection complete", "converted")):
@@ -2416,18 +2423,87 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_bytes))
                 stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_bytes))
 
-                await asyncio.wait_for(proc.wait(), timeout=int(config.get("ocr_timeout", 7200)))
-                # Give stream readers a brief window to flush remaining data,
-                # then cancel them — uv's subprocess may inherit pipes and
-                # never close them, causing the reader tasks to block forever.
-                try:
-                    await asyncio.wait_for(stdout_task, timeout=5.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    stdout_task.cancel()
-                try:
-                    await asyncio.wait_for(stderr_task, timeout=5.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    stderr_task.cancel()
+                # ── Poll subprocess, checking pause/cancel every 2s ──
+                ocr_timeout = int(config.get("ocr_timeout", 7200))
+                _started_at = time.time()
+                _ocr_done = False
+                while not _ocr_done:
+                    done, pending = await asyncio.wait(
+                        [stdout_task, stderr_task, asyncio.ensure_future(proc.wait())],
+                        timeout=2.0,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    # Check if subprocess finished
+                    if proc.returncode is not None:
+                        _ocr_done = True
+                        # Drain remaining stream data
+                        try:
+                            await asyncio.wait_for(stdout_task, timeout=5.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            stdout_task.cancel()
+                        try:
+                            await asyncio.wait_for(stderr_task, timeout=5.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            stderr_task.cancel()
+                        break
+                    # Check timeout
+                    if time.time() - _started_at > ocr_timeout:
+                        task_store.add_log(task_id, "LLM OCR timed out")
+                        _kill_proc_tree(proc.pid)
+                        stdout_task.cancel()
+                        stderr_task.cancel()
+                        break
+                    # Check pause/cancel
+                    _t = task_store.get(task_id)
+                    if not _t:
+                        _kill_proc_tree(proc.pid)
+                        stdout_task.cancel()
+                        stderr_task.cancel()
+                        break
+                    if _t.get("status") == STATUS_CANCELLED:
+                        task_store.add_log(task_id, "LLM OCR cancelled")
+                        _kill_proc_tree(proc.pid)
+                        stdout_task.cancel()
+                        stderr_task.cancel()
+                        return report
+                    if _t.get("status") == STATUS_PAUSED:
+                        task_store.add_log(task_id, "⏸ OCR 已暂停。注意：恢复后将重新开始整个 OCR（已处理进度丢失）。")
+                        await _emit(task_id, "step_progress", {
+                            "step": "ocr", "progress": 10,
+                            "detail": "OCR 已暂停，恢复后重新开始",
+                        })
+                        _kill_proc_tree(proc.pid)
+                        stdout_task.cancel()
+                        stderr_task.cancel()
+                        # Block until resumed or cancelled
+                        _cancelled = await _check_paused(task_id)
+                        if _cancelled:
+                            task_store.add_log(task_id, "Task cancelled during OCR pause")
+                            return report
+                        # ── Resume: restart OCR from scratch ──
+                        task_store.add_log(task_id, "↩ 恢复任务，重新开始 OCR（已处理进度丢失）...")
+                        await _emit(task_id, "step_progress", {
+                            "step": "ocr", "progress": 10,
+                            "detail": "重新开始 OCR...",
+                        })
+                        # Clean up partial output
+                        try:
+                            os.remove(output_pdf_tmp)
+                        except Exception:
+                            pass
+                        # Re-spawn subprocess
+                        proc = await asyncio.create_subprocess_exec(
+                            *cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=_ocr_cwd,
+                        )
+                        stdout_bytes = bytearray()
+                        stderr_bytes = bytearray()
+                        stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_bytes))
+                        stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_bytes))
+                        _started_at = time.time()
+                        continue
 
                 stdout = bytes(stdout_bytes)
                 stderr = bytes(stderr_bytes)

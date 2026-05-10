@@ -70,6 +70,8 @@ export default function TaskDetailPage() {
               step_eta: (msg.eta as string) || prev.step_eta,
               stage: (msg.stage as string) || prev.stage,
               stage_progress: (msg.stage_progress as number) ?? prev.stage_progress,
+              current_page: (msg.current_page as number) || prev.current_page,
+              total_pages: (msg.total_pages as number) || prev.total_pages,
             }
           : prev
       )
@@ -231,6 +233,9 @@ export default function TaskDetailPage() {
                 >
                   暂停
                 </button>
+                {task.current_step === 'ocr' && (
+                  <span className="text-[11px] text-yellow-700 self-center">⚠ 暂停后恢复将重新开始 OCR</span>
+                )}
                 <button
                   onClick={handleCancel}
                   className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"
@@ -247,6 +252,7 @@ export default function TaskDetailPage() {
                 >
                   继续
                 </button>
+                <span className="text-[11px] text-orange-600 self-center">⚠ 恢复后将重新开始 OCR（已处理进度丢失）</span>
                 <button
                   onClick={handleCancel}
                   className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"

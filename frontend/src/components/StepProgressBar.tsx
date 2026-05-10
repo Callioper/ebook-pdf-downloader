@@ -78,6 +78,7 @@ export default function StepProgressBar({ task }: StepProgressBarProps) {
             <div className="flex items-center justify-between mb-1">
               <span className="text-[11px] text-gray-500">
                 {task.stage === 'convert' ? 'PDF 光栅化' : task.stage === 'detect' ? '版面检测' : task.stage === 'ocr' ? 'LLM 逐框识别' : task.stage === 'refine' ? '补漏重识别' : task.stage === 'embed' ? '嵌入文字层' : task.stage}
+                {task.current_page && task.total_pages ? ` (${task.current_page}/${task.total_pages} 页)` : ''}
               </span>
               <span className="text-[11px] text-gray-400">{task.stage_progress ?? 0}%</span>
             </div>
