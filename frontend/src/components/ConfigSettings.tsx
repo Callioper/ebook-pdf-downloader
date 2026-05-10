@@ -36,6 +36,7 @@ interface AppConfig {
   llm_ocr_concurrency: number
   ocr_confirm_enabled: boolean
   bookmark_confirm_enabled: boolean
+  pdf_compress: boolean
   pdf_compress_half: boolean
   [key: string]: unknown
 }
