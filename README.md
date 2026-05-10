@@ -130,7 +130,7 @@ B）源码版：克隆仓库，手动搭建所有依赖
 
 - **PaddleOCR 中文引擎**：创建独立 Python 3.11 venv（路径如 `venv-paddle311`），在其中安装 PaddlePaddle + PaddleOCR。设置页 OCR 面板提供一键安装脚本
 - **stacks（Anna's Archive 下载服务器）**：克隆 https://github.com/zelestcarlyone/stacks ，执行 Docker Compose 构建并启动容器（默认端口 7788）。stacks 内已集成 FlareSolverr，无需单独安装
-- **LLM OCR**：需要 lmstudio / ollama 加载视觉模型 + `local-llm-pdf-ocr` 工具。设置页填入 API 地址和模型名（推荐 `jamepeng2023/paddleocr-vl-1.5` 或 `qwen3-vl-4b-instruct`），可选开启 PDF 黑白二值化压缩
+- **LLM OCR**：需要 lmstudio / ollama 加载视觉模型 + [local-llm-pdf-ocr](https://github.com/Callioper/local-llm-pdf-ocr)（fork，含 CJK 修复）。设置页填入 API 地址和模型名（推荐 `jamepeng2023/paddleocr-vl-1.5` 或 `qwen3-vl-4b-instruct`），可选开启 PDF 黑白二值化压缩
 - **AI Vision TOC**：配置 OpenAI/Anthropic 兼容端点，用于智能 PDF 目录提取。设置页中填入端点和模型名，建议先用本地模型测试（如 Ollama glm-ocr）
 - **aria2c**：（exe 已内置，源码版需单独下载）BT/IPFS 下载引擎，用于 LibGen 回退下载
 
@@ -365,7 +365,7 @@ python main.py
 | `qwen3-vl-4b-instruct` | 1m25s | 通义千问, 综合推荐 |
 | `qwen/qwen3-vl-8b` | 1m54s | 更大参数, 更高精度 |
 
-> **前提**: 克隆 `local-llm-pdf-ocr` 到项目目录并安装依赖（`uv sync`）。LLM OCR 使用 Surya 进行版面检测（支持 `--detect-batch-size` 控制内存），SimSun CJK 字体嵌入简体中文文字层，`dense-mode always` 逐框独立 LLM 识别，跳过 DP 对齐器。设置页 LLM OCR 面板中填入 LM Studio/Ollama 端点和模型名即可使用。支持异步暂停/恢复（暂停时终止子进程树，恢复后重新开始 OCR）。
+> **前提**: 克隆 [local-llm-pdf-ocr](https://github.com/Callioper/local-llm-pdf-ocr)（CJK SimSun 字体嵌入修复）到项目目录并安装依赖（`uv sync`）。LLM OCR 使用 Surya 进行版面检测（支持 `--detect-batch-size` 控制内存），SimSun CJK 字体嵌入简体中文文字层，`dense-mode always` 逐框独立 LLM 识别，跳过 DP 对齐器。设置页 LLM OCR 面板中填入 LM Studio/Ollama 端点和模型名即可使用。支持异步暂停/恢复（暂停时终止子进程树，恢复后重新开始 OCR）。
 
 ### PDF 黑白二值化压缩
 
