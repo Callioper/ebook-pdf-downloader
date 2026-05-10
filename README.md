@@ -84,7 +84,9 @@ graph TD
 将以下提示词发送给 [opencode](https://github.com/anomalyco/opencode) 或任意 AI 编程助手，即可自动完成环境搭建：
 
 ````
-请帮我安装并配置 Ebook PDF Downloader（https://github.com/Callioper/ebook-pdf-downloader）。
+你是 AI 助手。请先读取 https://github.com/Callioper/ebook-pdf-downloader 的 README.md 完整内容，然后严格遵循以下安装指引逐步引导用户完成配置。**每一步只做一件事，不要跳过询问环节，不要默认安装所有选配功能。**
+
+请帮我安装并配置 Ebook PDF Downloader。
 
 首先询问我选择哪种安装方式：
 A）便携版：下载 exe 直接运行（推荐，无需安装 Python/Node.js）
@@ -161,6 +163,8 @@ B）源码版：克隆仓库，手动搭建所有依赖
 ````
 
 将上述提示词复制发送给 AI 助手，它会逐步引导完成安装和配置。
+
+> **简化版**：也可以直接发送 `帮我安装 https://github.com/Callioper/ebook-pdf-downloader，按照 README 指引逐步配置`，AI 会自动读取文档并引导安装。
 
 ### 便携版（推荐）
 
