@@ -1,7 +1,8 @@
 """Embed text layer into PDF from online API layout results (MinerU/PaddleOCR).
 
-Uses PyMuPDF (fitz) with page.insert_text() for precise per-block positioning,
-matching the LLM OCR pipeline's approach (not insert_textbox which auto-fits).
+Uses PyMuPDF (fitz) with page.insert_textbox() for block-level bbox positioning.
+MinerU's model.json bboxes are region/block-level (not line-level), so insert_textbox
+naturally handles multi-line text within each bbox without excessive horizontal scaling.
 """
 
 from pathlib import Path
@@ -14,36 +15,15 @@ PageTextBlocks = Dict[int, List[Dict[str, Any]]]
 _SIMSUN_PATH = r"C:\Windows\Fonts\simsun.ttc"
 
 
-def _ensure_cjk_font(page):
-    """Embed CJK font in page if available. Returns fontname."""
-    if Path(_SIMSUN_PATH).exists():
-        try:
-            page.insert_font(fontname="F1", fontfile=_SIMSUN_PATH)
-            return fitz.Font(fontfile=_SIMSUN_PATH), "F1"
-        except Exception:
-            pass
-    return fitz.Font("helv"), "helv"
-
-
-def _has_cjk(text: str) -> bool:
-    for ch in text:
-        cp = ord(ch)
-        if any(lo <= cp <= hi for lo, hi in (
-            (0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0xF900, 0xFAFF),
-            (0x3040, 0x309F), (0x30A0, 0x30FF), (0x3000, 0x303F),
-            (0xFF00, 0xFFEF),
-        )):
-            return True
-    return False
-
-
 def embed_api_text_layer(
     input_path: str,
     output_path: str,
     layout: PageTextBlocks,
-    font_size: float = 9.0,
+    font_size: float = 6.0,
 ) -> None:
     doc = fitz.open(input_path)
+
+    has_simsun = Path(_SIMSUN_PATH).exists()
 
     for pg in range(len(doc)):
         page = doc[pg]
@@ -53,7 +33,11 @@ def embed_api_text_layer(
         if not blocks:
             continue
 
-        font, fontname = _ensure_cjk_font(page)
+        if has_simsun:
+            try:
+                page.insert_font(fontname="F1", fontfile=_SIMSUN_PATH)
+            except Exception:
+                has_simsun = False
 
         for block in blocks:
             text = (block.get("text") or "").strip()
@@ -65,43 +49,27 @@ def embed_api_text_layer(
                 continue
 
             # Normalized coordinates → PDF points
-            x0 = bbox[0] * pw
-            y0 = bbox[1] * ph
-            x1 = bbox[2] * pw
-            y1 = bbox[3] * ph
+            rect = fitz.Rect(
+                bbox[0] * pw,
+                bbox[1] * ph,
+                bbox[2] * pw,
+                bbox[3] * ph,
+            )
 
-            box_w = x1 - x0
-            box_h = y1 - y0
-            if box_w <= 1 or box_h <= 1:
+            if rect.width < 2 or rect.height < 2:
                 continue
 
-            # Auto-size font to fit within box height
-            ascender = getattr(font, "ascender", 1.075)
-            descender = getattr(font, "descender", -0.299)
-            extent_em = max(0.01, ascender - descender)
-            fs = max(3.0, min(72.0, box_h / extent_em))
-
-            # Baseline at box bottom, shifted up by descender
-            baseline = fitz.Point(x0, y1 + descender * fs)
-
-            # Horizontal scaling: stretch text to fill box width (matching LLM OCR pipeline)
-            natural_width = font.text_length(text, fontsize=fs)
-            if natural_width > 0:
-                target_width = max(1.0, box_w * 0.98)
-                scale_x = target_width / natural_width
-                morph = (baseline, fitz.Matrix(scale_x, 1.0))
-            else:
-                morph = None
-
             try:
-                kwargs = {"fontsize": fs, "render_mode": 3}
-                if _has_cjk(text):
+                kwargs = {
+                    "fontsize": font_size,
+                    "render_mode": 3,
+                    "align": 0,
+                }
+                if has_simsun:
                     kwargs["fontname"] = "F1"
                 else:
-                    kwargs["fontname"] = fontname
-                if morph:
-                    kwargs["morph"] = morph
-                page.insert_text(baseline, text, **kwargs)
+                    kwargs["fontname"] = "helv"
+                page.insert_textbox(rect, text, **kwargs)
             except Exception:
                 pass
 
