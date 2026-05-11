@@ -2556,91 +2556,99 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 return report
 
             mineru_model = config.get("mineru_model", "vlm")
-            task_store.add_log(task_id, f"MinerU OCR: uploading to MinerU v4 API (model={mineru_model})")
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Uploading to MinerU..."})
+            task_store.add_log(task_id, f"MinerU OCR (hybrid): Surya detection + MinerU API (model={mineru_model})")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Running Surya detection..."})
 
             try:
-                import httpx
-
-                # Diagnostic: call same code path that works in debug-mineru-httpx endpoint
-                task_store.add_log(task_id, "MinerU: testing httpx connectivity via same pattern as debug endpoint...")
-                async with httpx.AsyncClient(
-                    base_url="https://mineru.net",
-                    headers={"Authorization": f"Bearer {mineru_token}", "Content-Type": "application/json"},
-                    timeout=30,
-                    trust_env=False,
-                ) as diag_client:
-                    diag_resp = await diag_client.post("/api/v4/file-urls/batch", json={
-                        "files": [{"name": os.path.basename(pdf_path), "is_ocr": True}],
-                        "model_version": mineru_model,
-                        "language": "ch",
-                        "enable_table": True,
-                        "enable_formula": True,
-                    })
-                    diag_data = diag_resp.json()
-                    task_store.add_log(task_id, f"MinerU: diagnostic HTTP {diag_resp.status_code}, code={diag_data.get('code')}")
-                    if diag_data.get("code") != 0:
-                        raise RuntimeError(f"diagnostic submit failed: {diag_data.get('msg')}")
-                    batch_id = diag_data["data"]["batch_id"]
-                    file_urls = diag_data["data"]["file_urls"]
-                    task_store.add_log(task_id, f"MinerU: diagnostic batch_id={batch_id}")
-
-                # Now use MinerUClient for the rest (upload, poll, download, parse, embed)
+                from backend.engine.surya_detect import run_surya_detect, SuryaDetectError as SuryaErr
                 from backend.engine.mineru_client import MinerUClient, parse_layout_from_zip
-                from backend.engine.pdf_api_embed import embed_api_text_layer
+                from backend.engine.pdf_api_embed import embed_with_surya_boxes
 
-                _mineru_last_progress = [0]
-                _mineru_poll_count = [0]
-
-                def _mineru_progress(extracted, total, state):
-                    if total > 0:
-                        pct = min(5 + int(extracted / total * 85), 90)
-                        detail = f"MinerU: {state} ({extracted}/{total} pages)"
-                    else:
-                        pct = min(5 + _mineru_poll_count[0] * 2, 80)
-                        detail = f"MinerU: {state}..."
-                    _mineru_poll_count[0] += 1
-                    if pct != _mineru_last_progress[0]:
-                        _mineru_last_progress[0] = pct
-                        asyncio.run_coroutine_threadsafe(
-                            _emit(task_id, "step_progress", {"step": "ocr", "progress": pct, "detail": detail}),
-                            asyncio.get_event_loop(),
-                        )
-
-                client = MinerUClient(token=mineru_token)
-
-                async def _run_mineru():
+                # Step 1: Surya detection (subprocess via local-llm-pdf-ocr)
+                task_store.add_log(task_id, "MinerU: running Surya detection...")
+                try:
+                    surya_boxes = await run_surya_detect(pdf_path, dpi=200)
+                except SuryaErr as e:
+                    task_store.add_log(task_id, f"MinerU: Surya detection failed — {e}. Falling back to insert_textbox method.")
+                    # Fallback: use original embed_api_text_layer (block-level bboxes from MinerU)
+                    from backend.engine.pdf_api_embed import embed_api_text_layer
+                    client = MinerUClient(token=mineru_token)
                     try:
                         with open(pdf_path, "rb") as f:
                             pdf_bytes = f.read()
-
-                        # Skip submit_batch (done via diagnostic above), start from upload
-                        await client.upload_file(file_urls[0], pdf_bytes)
-                        task_store.add_log(task_id, "MinerU: uploaded OK, polling...")
-
-                        result = await client.poll_until_done(batch_id, progress_callback=_mineru_progress)
-                        zip_bytes = await client.download_zip(result["full_zip_url"])
-                        task_store.add_log(task_id, f"MinerU: downloaded {len(zip_bytes)} bytes")
-
+                        zip_bytes = await client.process_pdf(
+                            pdf_bytes, file_name=os.path.basename(pdf_path),
+                            model_version=mineru_model,
+                        )
                         layout = parse_layout_from_zip(zip_bytes)
-                        task_store.add_log(task_id, f"MinerU: parsed {len(layout)} pages with text")
-
-                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 92, "detail": "Embedding text layer..."})
-
-                        output_pdf = pdf_path + ".mineru.pdf"
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, embed_api_text_layer, pdf_path, output_pdf, layout)
-
-                        if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
-                            os.replace(output_pdf, pdf_path)
-                            report["ocr_done"] = True
-                            task_store.add_log(task_id, "MinerU OCR complete")
-                        else:
-                            raise RuntimeError("MinerU: embedding produced empty file")
                     finally:
                         await client.close()
+                    task_store.add_log(task_id, f"MinerU fallback: parsed {len(layout)} pages")
+                    output_pdf = pdf_path + ".mineru.pdf"
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, embed_api_text_layer, pdf_path, output_pdf, layout)
+                    if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                        os.replace(output_pdf, pdf_path)
+                        report["ocr_done"] = True
+                        task_store.add_log(task_id, "MinerU OCR complete (fallback: block-level layout)")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                    return report
 
-                await asyncio.wait_for(_run_mineru(), timeout=config.get("ocr_timeout", 3600))
+                total_boxes = sum(len(v) for v in surya_boxes.values())
+                task_store.add_log(task_id, f"MinerU: Surya detected {total_boxes} boxes across {len(surya_boxes)} pages")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": f"Surya: {total_boxes} boxes"})
+
+                # Step 2: MinerU API for text content
+                task_store.add_log(task_id, "MinerU: calling API for text content...")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "MinerU API OCR..."})
+
+                client = MinerUClient(token=mineru_token)
+                try:
+                    with open(pdf_path, "rb") as f:
+                        pdf_bytes = f.read()
+                    zip_bytes = await client.process_pdf(
+                        pdf_bytes, file_name=os.path.basename(pdf_path),
+                        model_version=mineru_model,
+                    )
+                    task_store.add_log(task_id, f"MinerU: API returned {len(zip_bytes)} bytes")
+                    all_pages_text = parse_layout_from_zip(zip_bytes)
+                finally:
+                    await client.close()
+
+                # Step 3: Pair Surya boxes with MinerU text by page (both in reading order)
+                page_texts = {}
+                for pg in sorted(surya_boxes.keys()):
+                    boxes = surya_boxes[pg]
+                    mineru_items = all_pages_text.get(pg, [])
+                    mineru_texts = [item["text"].strip() for item in mineru_items if item.get("text", "").strip()]
+
+                    paired = []
+                    for i in range(len(boxes)):
+                        if i < len(mineru_texts):
+                            paired.append(mineru_texts[i])
+                        else:
+                            paired.append("")
+                    page_texts[pg] = paired
+
+                    matched = sum(1 for t in paired if t)
+                    task_store.add_log(task_id, f"MinerU: page {pg} — {matched}/{len(boxes)} boxes matched with text")
+
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 90, "detail": "Embedding text layer..."})
+
+                # Step 4: Embed using Surya bboxes
+                output_pdf = pdf_path + ".mineru.pdf"
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, embed_with_surya_boxes,
+                    pdf_path, output_pdf, surya_boxes, page_texts,
+                )
+
+                if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                    os.replace(output_pdf, pdf_path)
+                    report["ocr_done"] = True
+                    task_store.add_log(task_id, "MinerU OCR complete (hybrid: Surya boxes + MinerU text)")
+                else:
+                    raise RuntimeError("MinerU: embedding produced empty file")
 
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, "MinerU OCR timed out")
