@@ -54,8 +54,8 @@ def embed_api_text_layer(
             if rect.width < 2 or rect.height < 2:
                 continue
 
-            # Auto-size font based on bbox height: 6pt floor, 10pt ceiling
-            fs = max(6.0, min(10.0, rect.height / 15.0))
+            # Auto-size font: 9pt minimum, 14pt maximum
+            fs = max(9.0, min(14.0, rect.height / 12.0))
 
             try:
                 page.insert_textbox(
