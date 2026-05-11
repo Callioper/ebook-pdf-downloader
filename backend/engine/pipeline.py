@@ -2064,10 +2064,22 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             "端点": config.get("llm_ocr_endpoint", ""),
             "并发数": str(config.get("llm_ocr_concurrency", 1)),
         }
+    elif ocr_engine == "mineru":
+        config_info = {
+            "引擎": "MinerU 线上 API",
+            "模型": config.get("mineru_model", "vlm"),
+        }
+    elif ocr_engine == "paddleocr_online":
+        config_info = {
+            "引擎": "PaddleOCR-VL-1.5 线上 API",
+            "端点": config.get("paddleocr_online_endpoint", ""),
+        }
     else:
         engine_labels = {
             "tesseract": "Tesseract OCR",
             "paddleocr": "PaddleOCR",
+            "mineru": "MinerU 线上 API",
+            "paddleocr_online": "PaddleOCR-VL-1.5 线上 API",
         }
         config_info = {
             "引擎": engine_labels.get(ocr_engine, ocr_engine),
@@ -2536,6 +2548,148 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 task_store.add_log(task_id, "LLM OCR timed out")
             except Exception as e:
                 task_store.add_log(task_id, f"LLM OCR error: {str(e)[:200]}")
+
+        elif ocr_engine == "mineru":
+            mineru_token = config.get("mineru_token", "")
+            if not mineru_token:
+                task_store.add_log(task_id, "MinerU: no token configured, skipping")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            mineru_model = config.get("mineru_model", "vlm")
+            task_store.add_log(task_id, f"MinerU OCR: uploading to MinerU v4 API (model={mineru_model})")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Uploading to MinerU..."})
+
+            try:
+                from backend.engine.mineru_client import MinerUClient, parse_layout_from_zip
+                from backend.engine.pdf_api_embed import embed_api_text_layer
+
+                _mineru_last_progress = [0]
+                _mineru_poll_count = [0]
+
+                def _mineru_progress(extracted, total, state):
+                    if total > 0:
+                        pct = min(5 + int(extracted / total * 85), 90)
+                        detail = f"MinerU: {state} ({extracted}/{total} pages)"
+                    else:
+                        pct = min(5 + _mineru_poll_count[0] * 2, 80)
+                        detail = f"MinerU: {state}..."
+                    _mineru_poll_count[0] += 1
+                    if pct != _mineru_last_progress[0]:
+                        _mineru_last_progress[0] = pct
+                        asyncio.run_coroutine_threadsafe(
+                            _emit(task_id, "step_progress", {"step": "ocr", "progress": pct, "detail": detail}),
+                            asyncio.get_event_loop(),
+                        )
+
+                client = MinerUClient(token=mineru_token)
+
+                async def _run_mineru():
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+
+                        zip_bytes = await client.process_pdf(
+                            pdf_bytes,
+                            file_name=os.path.basename(pdf_path),
+                            model_version=mineru_model,
+                            progress_callback=_mineru_progress,
+                        )
+
+                        layout = parse_layout_from_zip(zip_bytes)
+                        task_store.add_log(task_id, f"MinerU: parsed {len(layout)} pages with text")
+
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 92, "detail": "Embedding text layer..."})
+
+                        output_pdf = pdf_path + ".mineru.pdf"
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None,
+                            embed_api_text_layer,
+                            pdf_path,
+                            output_pdf,
+                            layout,
+                        )
+
+                        if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                            os.replace(output_pdf, pdf_path)
+                            report["ocr_done"] = True
+                            task_store.add_log(task_id, "MinerU OCR complete")
+                        else:
+                            raise RuntimeError("MinerU: embedding produced empty file")
+                    finally:
+                        await client.close()
+
+                await asyncio.wait_for(_run_mineru(), timeout=config.get("ocr_timeout", 3600))
+
+            except asyncio.TimeoutError:
+                task_store.add_log(task_id, "MinerU OCR timed out")
+            except Exception as e:
+                task_store.add_log(task_id, f"MinerU OCR error: {str(e)[:200]}")
+
+        elif ocr_engine == "paddleocr_online":
+            paddle_token = config.get("paddleocr_online_token", "")
+            paddle_endpoint = config.get("paddleocr_online_endpoint", "")
+            if not paddle_token or not paddle_endpoint:
+                task_store.add_log(task_id, "PaddleOCR online: no token/endpoint configured, skipping")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                return report
+
+            task_store.add_log(task_id, f"PaddleOCR-VL-1.5 online: sending PDF to {paddle_endpoint}")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Sending PDF to PaddleOCR..."})
+
+            try:
+                from backend.engine.paddleocr_online_client import PaddleOCRClient
+                from backend.engine.pdf_api_embed import embed_api_text_layer
+
+                client = PaddleOCRClient(token=paddle_token, endpoint=paddle_endpoint, timeout=config.get("ocr_timeout", 3600))
+
+                async def _run_paddleocr():
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": "PaddleOCR processing PDF..."})
+
+                        pages = await client.process_pdf(pdf_bytes)
+                        task_store.add_log(task_id, f"PaddleOCR-VL-1.5: got {len(pages)} pages")
+
+                        layout = {}
+                        for i, page in enumerate(pages):
+                            md_text = page.get("markdown", "")
+                            lines = [line.strip() for line in md_text.split("\n") if line.strip()]
+                            layout[i] = [
+                                {"text": line, "bbox": None, "category_id": 2}
+                                for line in lines
+                            ]
+
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 85, "detail": "Embedding text layer..."})
+
+                        output_pdf = pdf_path + ".paddleocr.pdf"
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None,
+                            embed_api_text_layer,
+                            pdf_path,
+                            output_pdf,
+                            layout,
+                        )
+
+                        if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                            os.replace(output_pdf, pdf_path)
+                            report["ocr_done"] = True
+                            task_store.add_log(task_id, "PaddleOCR-VL-1.5 online OCR complete")
+                        else:
+                            raise RuntimeError("PaddleOCR: embedding produced empty file")
+                    finally:
+                        await client.close()
+
+                await asyncio.wait_for(_run_paddleocr(), timeout=config.get("ocr_timeout", 3600))
+
+            except asyncio.TimeoutError:
+                task_store.add_log(task_id, "PaddleOCR online timed out")
+            except Exception as e:
+                task_store.add_log(task_id, f"PaddleOCR online error: {str(e)[:200]}")
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
