@@ -31,7 +31,7 @@ async def test_submit_batch_returns_batch_id(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(client, "_make_client", return_value=mock_client):
+    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
         batch_id, file_urls = await client.submit_batch(file_names=["test.pdf"], model_version="vlm")
 
     assert batch_id == "batch-abc-123"
@@ -84,7 +84,7 @@ async def test_poll_until_done_returns_zip_url(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(client, "_make_client", return_value=mock_client):
+    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
         result = await client.poll_until_done("batch-abc", poll_interval=0.01)
 
     assert result["full_zip_url"] == "https://cdn.example.com/result.zip"
@@ -104,7 +104,7 @@ async def test_poll_raises_on_failed(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(client, "_make_client", return_value=mock_client):
+    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(MinerUAPIError, match="file too large"):
             await client.poll_until_done("batch-abc", poll_interval=0.01)
 
@@ -123,7 +123,7 @@ async def test_poll_raises_timeout(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.object(client, "_make_client", return_value=mock_client):
+    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(MinerUTimeoutError):
             await client.poll_until_done("batch-abc", timeout=0.1, poll_interval=0.01)
 

@@ -57,12 +57,14 @@ class MinerUClient:
             "enable_table": enable_table,
             "enable_formula": enable_formula,
         }
-        logger.info(f"submit_batch: files={file_names}, model={model_version}")
         try:
-            async with self._make_client(30) as client:
+            async with httpx.AsyncClient(
+                base_url=MINERU_BASE,
+                headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+                timeout=30,
+            ) as client:
                 resp = await client.post("/api/v4/file-urls/batch", json=payload)
                 data = resp.json()
-                logger.info(f"submit_batch response: code={data.get('code')}, batch_id={data.get('data',{}).get('batch_id','?')}")
                 if data.get("code") != 0:
                     raise MinerUAPIError(data.get("msg", "unknown error"), data.get("code", -1))
                 return data["data"]["batch_id"], data["data"]["file_urls"]
@@ -99,40 +101,44 @@ class MinerUClient:
         progress_callback=None,
     ) -> Dict[str, Any]:
         deadline = time.monotonic() + timeout
-        async with self._make_client(30) as client:
-            while time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            async with httpx.AsyncClient(
+                base_url=MINERU_BASE,
+                headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+                timeout=30,
+            ) as client:
                 resp = await client.get(f"/api/v4/extract-results/batch/{batch_id}")
                 data = resp.json()
-                if data.get("code") != 0:
-                    raise MinerUAPIError(data.get("msg", "query failed"))
+            if data.get("code") != 0:
+                raise MinerUAPIError(data.get("msg", "query failed"))
 
-                extract = data.get("data", {})
-                items = extract.get("extract_result", [])
+            extract = data.get("data", {})
+            items = extract.get("extract_result", [])
 
-                if not items:
-                    await asyncio.sleep(poll_interval)
-                    continue
-
-                if isinstance(items, dict):
-                    items = [items]
-
-                file_result = items[0]
-                state = file_result.get("state", "unknown")
-
-                if state == "done":
-                    full_zip = file_result.get("full_zip_url", "")
-                    if not full_zip:
-                        raise MinerUAPIError(f"done but no full_zip_url: {json.dumps(file_result)[:300]}")
-                    return file_result
-                if state == "failed":
-                    raise MinerUAPIError(file_result.get("err_msg", "parse failed"))
-                if state in ("running", "pending", "waiting-file") and progress_callback:
-                    progress = file_result.get("extract_progress", {})
-                    extracted = progress.get("extracted_pages", 0)
-                    total = progress.get("total_pages", 0)
-                    progress_callback(extracted, total, state)
-
+            if not items:
                 await asyncio.sleep(poll_interval)
+                continue
+
+            if isinstance(items, dict):
+                items = [items]
+
+            file_result = items[0]
+            state = file_result.get("state", "unknown")
+
+            if state == "done":
+                full_zip = file_result.get("full_zip_url", "")
+                if not full_zip:
+                    raise MinerUAPIError(f"done but no full_zip_url: {json.dumps(file_result)[:300]}")
+                return file_result
+            if state == "failed":
+                raise MinerUAPIError(file_result.get("err_msg", "parse failed"))
+            if state in ("running", "pending", "waiting-file") and progress_callback:
+                progress = file_result.get("extract_progress", {})
+                extracted = progress.get("extracted_pages", 0)
+                total = progress.get("total_pages", 0)
+                progress_callback(extracted, total, state)
+
+            await asyncio.sleep(poll_interval)
 
         raise MinerUTimeoutError(f"batch {batch_id} did not complete within {timeout}s")
 
