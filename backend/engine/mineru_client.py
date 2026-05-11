@@ -33,14 +33,6 @@ class MinerUClient:
     async def close(self):
         pass  # no persistent client to close
 
-    def _make_client(self, timeout=None):
-        t = timeout or self._timeout
-        return httpx.AsyncClient(
-            base_url=MINERU_BASE,
-            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
-            timeout=t,
-        )
-
     async def submit_batch(
         self,
         file_names: List[str],
