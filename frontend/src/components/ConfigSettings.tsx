@@ -1093,14 +1093,14 @@ export default function ConfigSettings() {
               disabled={dbDetecting}
               className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {dbDetecting ? '检测中...' : '智能检测路径'}
+              {dbDetecting ? '检测中...' : '智能检测'}
             </button>
             <button
               type="button"
               onClick={checkDbConnectivity}
               className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600"
             >
-              重新检测连接
+              重新检测
             </button>
           </div>
 
@@ -1124,7 +1124,7 @@ export default function ConfigSettings() {
 
       {/* ============ 下载 ============ */}
       <SectionHeader
-        title="下载"
+        title="下载与来源"
         summary={<><StatusDot status={form.download_dir && form.finished_dir ? 'green' : 'yellow'} /> {form.download_dir && form.finished_dir ? '配置完成' : '请设置下载目录和完成目录'}</>}
         color="green"
         expanded={expanded.download}
@@ -1165,7 +1165,7 @@ export default function ConfigSettings() {
           </div>
 
           <div className="border-t border-gray-200 pt-3">
-            <span className="text-xs font-medium text-gray-600">Z-Library 账户</span>
+            <span className="text-xs font-medium text-gray-600">Z-Library</span>
             <div className="grid grid-cols-2 gap-2 mt-1.5">
               <input
                 type="text"
@@ -1211,7 +1211,7 @@ export default function ConfigSettings() {
           {/* ============ stacks ============ */}
           <div className="border-t border-gray-200 pt-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-600">stacks 下载管理器（Anna's Archive）</span>
+              <span className="text-xs font-medium text-gray-600">Stacks（Anna's Archive）</span>
               <StatusDot status={stacksChecking ? 'yellow' : stacksStatus} />
             </div>
             {/* Service URL + health check */}
@@ -1438,7 +1438,7 @@ export default function ConfigSettings() {
                     </div>
                   </details>
                   {/* PDF 压缩 */}
-                  <div className="border-t border-gray-200 pt-2 mt-2">
+                  <div className="border-t border-gray-200 pt-3">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1617,7 +1617,7 @@ export default function ConfigSettings() {
                 return (
                   <div
                     key={eng.key}
-                    className={`rounded border p-2.5 ${isSelected ? 'border-orange-400 bg-orange-50' : 'border-gray-200 bg-white'}`}
+                    className={`rounded border p-2.5 ${isSelected ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-medium text-gray-700">{eng.name}</span>
@@ -1643,7 +1643,7 @@ export default function ConfigSettings() {
                           <button
                             type="button"
                             onClick={() => handleDetectOcrEngine(eng.key)}
-                            className="px-2 py-0.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
+                            className="px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-500"
                           >
                             检测
                           </button>
@@ -1651,19 +1651,17 @@ export default function ConfigSettings() {
                             type="button"
                             onClick={() => handleInstallOcrEngine(eng.key)}
                             disabled={info?.installing}
-                            className="px-2 py-0.5 text-xs rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+                            className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
                           >
                             {info?.installing ? '安装中...' : '安装'}
                           </button>
                         </>
                       )}
-                      {eng.key === form.ocr_engine ? (
-                        <span className="text-xs text-orange-600 font-medium ml-auto">当前</span>
-                      ) : (
+                      {eng.key === form.ocr_engine ? null : (
                         <button
                           type="button"
                           onClick={() => updateForm({ ocr_engine: eng.key })}
-                          className="px-2 py-0.5 text-xs rounded text-orange-600 hover:bg-orange-50 ml-auto"
+                          className="px-2 py-1 text-xs rounded text-blue-600 hover:bg-blue-50 ml-auto"
                         >
                           选用
                         </button>
@@ -1707,7 +1705,7 @@ export default function ConfigSettings() {
                   }}
                   className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600"
                 >
-                  安装中文语言包
+                  安装语言包
                 </button>
               )}
             </div>
@@ -1815,7 +1813,7 @@ export default function ConfigSettings() {
             </p>
 
             <div>
-              <label className="text-xs text-gray-500 block mb-1">接口地址</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">接口地址</label>
               <div className="flex gap-2">
                 <input value={form.llm_ocr_endpoint || 'http://127.0.0.1:1234/v1'}
                   onChange={(e) => updateForm({ llm_ocr_endpoint: e.target.value })}
@@ -1834,15 +1832,15 @@ export default function ConfigSettings() {
                   } catch(e) { setLlmTestMsg(String(e)); }
                   setLlmTesting(false);
                 }} disabled={llmTesting}
-                  className="px-3 py-1.5 text-xs rounded border border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap">
-                  {llmTesting ? '测试中...' : '测试连接'}
+                  className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">
+                  {llmTesting ? '测试中...' : '检测'}
                 </button>
               </div>
               {llmTestMsg && <p className={`text-xs mt-1 ${llmTestMsg.includes('成功')||llmTestMsg.includes('OK') ? 'text-green-600' : 'text-red-500'}`}>{llmTestMsg}</p>}
             </div>
 
             <div>
-              <label className="text-xs text-gray-500 block mb-1">模型名称</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
               <div className="flex gap-2">
                 <input value={form.llm_ocr_model || ''}
                   onChange={(e) => updateForm({ llm_ocr_model: e.target.value })}
@@ -1885,7 +1883,7 @@ export default function ConfigSettings() {
             </div>
 
             <div>
-              <label className="text-xs text-gray-500 block mb-1">
+              <label className="text-xs font-medium text-gray-600 block mb-1">
                 并发数: {form.llm_ocr_concurrency || 1}
               </label>
               <input type="range" min="1" max="5" step="1"
@@ -1898,7 +1896,7 @@ export default function ConfigSettings() {
             </div>
 
             <div className="mt-2">
-              <label className="text-xs text-gray-500 block mb-1">
+              <label className="text-xs font-medium text-gray-600 block mb-1">
                 版面检测批次: {form.llm_ocr_detect_batch || 20} 页/批
               </label>
               <input type="range" min="5" max="50" step="5"
@@ -1959,14 +1957,14 @@ export default function ConfigSettings() {
               仅限中国大陆网络访问，单文件 ≤200MB / ≤200页。
             </p>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">API Token</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API Token</label>
               <input value={form.mineru_token || ''}
                 onChange={(e) => updateForm({ mineru_token: e.target.value })}
                 placeholder="输入 MinerU API Token（Bearer 认证）"
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
             </div>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">模型版本</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">模型版本</label>
               <select value={form.mineru_model || 'vlm'}
                 onChange={(e) => updateForm({ mineru_model: e.target.value })}
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
@@ -1979,8 +1977,8 @@ export default function ConfigSettings() {
                 type="button"
                 onClick={handleTestMineru}
                 disabled={onlineTesting.mineru || !form.mineru_token}
-                className="px-3 py-1 text-xs rounded border border-green-500 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                {onlineTesting.mineru ? '测试中...' : '测试连通性'}
+                className="px-3 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                {onlineTesting.mineru ? '测试中...' : '检测'}
               </button>
               {onlineEngineStatus.mineru === 'ok' && (
                 <span className="text-xs text-green-600">连接正常</span>
@@ -2024,7 +2022,7 @@ export default function ConfigSettings() {
               支持中英文文档，无需本地 GPU。
             </p>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">Access Token</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Access Token</label>
               <div className="flex gap-2">
                 <input value={form.paddleocr_online_token || ''}
                   onChange={(e) => updateForm({ paddleocr_online_token: e.target.value })}
@@ -2034,8 +2032,8 @@ export default function ConfigSettings() {
                   type="button"
                   onClick={handleTestPaddleocrOnline}
                   disabled={onlineTesting.paddleocr || !form.paddleocr_online_token}
-                  className="px-3 py-1 text-xs rounded border border-green-500 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
-                  {onlineTesting.paddleocr ? '测试中...' : '测试连通性'}
+                  className="px-3 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                  {onlineTesting.paddleocr ? '测试中...' : '检测'}
                 </button>
               </div>
               {onlineEngineStatus.paddleocr === 'ok' && (
@@ -2057,7 +2055,7 @@ export default function ConfigSettings() {
               checked={form.ocr_confirm_enabled ?? false}
               onChange={(e) => updateForm({ ocr_confirm_enabled: e.target.checked })}
               className="rounded" />
-            <label htmlFor="ocr_confirm_enabled" className="text-xs text-gray-500">
+            <label htmlFor="ocr_confirm_enabled" className="text-xs font-medium text-gray-600 block mb-1">
               管道执行到 OCR 步骤时弹出确认对话框
             </label>
           </div>
@@ -2073,15 +2071,15 @@ export default function ConfigSettings() {
         onToggle={() => toggleSection('bookmarks')}
       />
       {expanded.bookmarks && (
-        <div className="space-y-3 py-3">
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
           <div className="flex items-center gap-2">
             <input type="checkbox" id="ai_vision_enabled"
               checked={form.ai_vision_enabled ?? true}
               onChange={(e) => updateForm({ ai_vision_enabled: e.target.checked })} className="rounded" />
-            <label htmlFor="ai_vision_enabled" className="text-sm">启用 AI Vision 目录提取</label>
+            <label htmlFor="ai_vision_enabled" className="text-xs">启用 AI Vision 目录提取</label>
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">API 端点</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API 端点</label>
             <input type="text" value={form.ai_vision_endpoint || ''}
               onChange={(e) => updateForm({ ai_vision_endpoint: e.target.value })}
               placeholder={
@@ -2094,7 +2092,7 @@ export default function ConfigSettings() {
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">模型名称</label>
+            <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
             <div className="flex gap-1">
               <input type="text" value={form.ai_vision_model || ''}
                 onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
@@ -2154,14 +2152,14 @@ export default function ConfigSettings() {
             )}
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">API Key</label>
+            <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
             <input type="password" value={form.ai_vision_api_key || ''}
               onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
               placeholder="sk-...  (支持 {env:VAR_NAME})"
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">API 格式</label>
+            <label className="text-xs font-medium text-gray-600 block mb-1">API 格式</label>
             <select value={form.ai_vision_provider || 'openai_compatible'}
               onChange={(e) => {
                 const newProvider = e.target.value
@@ -2187,14 +2185,14 @@ export default function ConfigSettings() {
               <input type="checkbox" id="ai_vision_messages_api"
                 checked={form.ai_vision_messages_api ?? false}
                 onChange={(e) => updateForm({ ai_vision_messages_api: e.target.checked })} className="rounded" />
-              <label htmlFor="ai_vision_messages_api" className="text-xs text-gray-500">
+              <label htmlFor="ai_vision_messages_api" className="text-xs font-medium text-gray-600 block mb-1">
                 使用 Anthropic Messages API 格式 (默认 OpenAI Chat Completions)
               </label>
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-gray-500 block mb-1">DPI</label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">DPI</label>
               <input type="number" value={form.ai_vision_dpi ?? 150}
                 onChange={(e) => updateForm({ ai_vision_dpi: parseInt(e.target.value) || 150 })}
                 min={72} max={300} className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs" />
@@ -2227,7 +2225,7 @@ export default function ConfigSettings() {
             disabled={aiVisionTest === 'testing'}
             className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
           >
-            {aiVisionTest === 'testing' ? '测试中...' : '测试连接'}
+            {aiVisionTest === 'testing' ? '测试中...' : '检测'}
           </button>
           {aiVisionMsg && (
             <p className={`text-xs ${aiVisionTest === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
@@ -2244,7 +2242,7 @@ export default function ConfigSettings() {
               checked={form.bookmark_confirm_enabled ?? false}
               onChange={(e) => updateForm({ bookmark_confirm_enabled: e.target.checked })}
               className="rounded" />
-            <label htmlFor="bookmark_confirm_enabled" className="text-xs text-gray-500">
+            <label htmlFor="bookmark_confirm_enabled" className="text-xs font-medium text-gray-600 block mb-1">
               管道执行到书签步骤时弹出确认对话框
             </label>
           </div>
@@ -2265,7 +2263,7 @@ export default function ConfigSettings() {
           type="button"
           onClick={handleCheckUpdate}
           disabled={updateChecking}
-          className="px-5 py-2 text-sm rounded border border-blue-300 bg-white text-blue-600 hover:bg-blue-50 disabled:opacity-50 font-medium"
+          className="px-5 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
         >
           {updateChecking ? '检测中...' : '检查更新'}
         </button>
