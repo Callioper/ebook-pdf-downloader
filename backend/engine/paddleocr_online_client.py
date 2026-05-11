@@ -1,12 +1,9 @@
 """PaddleOCR-VL-1.5 online API client — send PDF/image, parse layout response."""
 
 import base64
-import logging
 from typing import Any, Dict, List
 
 import httpx
-
-logger = logging.getLogger(__name__)
 
 
 class PaddleOCRAPIError(Exception):

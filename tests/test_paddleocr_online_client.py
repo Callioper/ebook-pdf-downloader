@@ -1,6 +1,6 @@
 import base64
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.engine.paddleocr_online_client import (
     PaddleOCRClient,
@@ -109,3 +109,10 @@ async def test_process_image_sends_filetype_1(client):
     payload = call_args[1]["json"]
     assert payload["fileType"] == 1
     assert len(result) == 1
+
+@pytest.mark.asyncio
+async def test_close_calls_aclose(client):
+    mock_aclose = AsyncMock()
+    client._client.aclose = mock_aclose
+    await client.close()
+    mock_aclose.assert_awaited_once()
