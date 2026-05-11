@@ -1729,6 +1729,7 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                                     downloaded = True
                                     download_source = "zlibrary"
                                     report["download_path"] = zl_path
+                                    await _emit_progress(task_id, "download_pages", 100, "ZL 下载完成", "")
                                 else:
                                     task_store.add_log(task_id, "ZL: auto-download verification failed, trying next candidate")
                                     for c in candidates[1:3]:
@@ -1769,6 +1770,7 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                                         downloaded = True
                                         download_source = "zlibrary"
                                         report["download_path"] = zl_path
+                                        await _emit_progress(task_id, "download_pages", 100, "ZL 下载完成", "")
                                     else:
                                         task_store.add_log(task_id, "ZL: download verification failed")
                                 else:
