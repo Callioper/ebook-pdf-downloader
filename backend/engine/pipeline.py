@@ -2588,6 +2588,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         with open(pdf_path, "rb") as f:
                             pdf_bytes = f.read()
 
+                        task_store.add_log(task_id, f"MinerU: submitting batch ({len(pdf_bytes)} bytes)...")
                         zip_bytes = await client.process_pdf(
                             pdf_bytes,
                             file_name=os.path.basename(pdf_path),
@@ -2626,7 +2627,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
-                task_store.add_log(task_id, f"MinerU OCR error: {e} | {tb.split(chr(10))[-3].strip() if tb else ''}"[:300])
+                last_lines = "\n".join(tb.split(chr(10))[-5:])
+                task_store.add_log(task_id, f"MinerU OCR error: {e} | {last_lines}"[:500])
 
         elif ocr_engine == "paddleocr_online":
             paddle_token = config.get("paddleocr_online_token", "")

@@ -814,7 +814,63 @@ async def _try_fetch_models(client, endpoint: str):
     raise RuntimeError("无法连接到 LLM 端点")
 
 
-@router.post("/check-mineru")
+@router.post("/debug-mineru-httpx")
+async def debug_mineru_httpx(req: Request):
+    """Diagnostic: test exact httpx POST to MinerU and capture full error chain."""
+    import httpx, httpcore, traceback as _tb, sys
+    body = await req.json()
+    token = (body.get("token", "") or "").strip()
+    result = {"steps": []}
+
+    # Step 1: Check module versions
+    result["httpx_version"] = getattr(httpx, "__version__", "unknown")
+    result["python_version"] = sys.version
+    result["frozen"] = getattr(sys, "frozen", False)
+
+    # Step 2: Try the exact same POST as submit_batch
+    if not token:
+        return {**result, "ok": False, "message": "缺少 token"}
+
+    try:
+        async with httpx.AsyncClient(
+            base_url="https://mineru.net",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=30,
+        ) as client:
+            result["steps"].append("client created")
+            try:
+                resp = await client.post("/api/v4/file-urls/batch", json={
+                    "files": [{"name": "debug.pdf", "is_ocr": True}],
+                    "model_version": "vlm",
+                    "language": "ch",
+                    "enable_table": True,
+                    "enable_formula": True,
+                })
+                result["steps"].append(f"POST returned HTTP {resp.status_code}")
+                result["ok"] = True
+                result["message"] = f"连接成功: HTTP {resp.status_code}"
+            except Exception as e:
+                result["steps"].append(f"POST failed: {type(e).__name__}")
+                result["error_type"] = type(e).__name__
+                result["error_msg"] = str(e)
+                result["error_repr"] = repr(e)
+                # Capture full traceback
+                result["traceback"] = _tb.format_exc()
+                # Dig into cause chain
+                cause = e.__cause__
+                depth = 0
+                while cause and depth < 5:
+                    result[f"cause_{depth}_type"] = type(cause).__name__
+                    result[f"cause_{depth}_msg"] = str(cause)
+                    cause = cause.__cause__
+                    depth += 1
+                result["ok"] = False
+                result["message"] = f"{type(e).__name__}: {str(e)}"
+    except Exception as e:
+        result["ok"] = False
+        result["message"] = f"Client creation failed: {type(e).__name__}: {e}"
+
+    return result
 async def check_mineru(req: Request):
     """Test MinerU API connectivity."""
     import httpx
