@@ -1785,10 +1785,14 @@ async def system_status():
             return "proxy", {"ok": False, "detail": str(ex)[:50]}
 
     async def check_sources():
+        proxy = cfg.get("http_proxy", "")
         ok = {}
         for label, url in [("aa", "https://annas-archive.org"), ("zl", "https://z-lib.sk")]:
             try:
-                async with _httpx.AsyncClient(timeout=6) as c:
+                kwargs = {"timeout": 8}
+                if proxy:
+                    kwargs["proxy"] = proxy
+                async with _httpx.AsyncClient(**kwargs) as c:
                     sr = await c.get(url)
                     ok[label] = sr.status_code in (200, 301, 302)
             except Exception:
