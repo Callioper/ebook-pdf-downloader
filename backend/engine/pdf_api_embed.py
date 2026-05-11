@@ -84,11 +84,24 @@ def embed_api_text_layer(
             # Baseline at box bottom, shifted up by descender
             baseline = fitz.Point(x0, y1 + descender * fs)
 
+            # Horizontal scaling: stretch text to fill box width (matching LLM OCR pipeline)
+            natural_width = font.text_length(text, fontsize=fs)
+            if natural_width > 0:
+                target_width = max(1.0, box_w * 0.98)
+                scale_x = target_width / natural_width
+                morph = (baseline, fitz.Matrix(scale_x, 1.0))
+            else:
+                morph = None
+
             try:
+                kwargs = {"fontsize": fs, "render_mode": 3}
                 if _has_cjk(text):
-                    page.insert_text(baseline, text, fontname="F1", fontsize=fs, render_mode=3)
+                    kwargs["fontname"] = "F1"
                 else:
-                    page.insert_text(baseline, text, fontname=fontname, fontsize=fs, render_mode=3)
+                    kwargs["fontname"] = fontname
+                if morph:
+                    kwargs["morph"] = morph
+                page.insert_text(baseline, text, **kwargs)
             except Exception:
                 pass
 
