@@ -871,6 +871,8 @@ async def debug_mineru_httpx(req: Request):
         result["message"] = f"Client creation failed: {type(e).__name__}: {e}"
 
     return result
+
+@router.post("/check-mineru")
 async def check_mineru(req: Request):
     """Test MinerU API connectivity."""
     import httpx
