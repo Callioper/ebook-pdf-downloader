@@ -25,11 +25,16 @@ def _find_uv() -> Optional[str]:
 def _find_project_root() -> Optional[str]:
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).resolve().parent
-        path = str(base / "local-llm-pdf-ocr")
+        # Check current dir and parent dir (exe may be in dist/ subfolder)
+        candidates = [base, base.parent]
     else:
         base = Path(__file__).resolve().parent.parent.parent
-        path = str(base / "local-llm-pdf-ocr")
-    return path if os.path.isdir(path) else None
+        candidates = [base]
+    for c in candidates:
+        p = str(c / "local-llm-pdf-ocr")
+        if os.path.isdir(p):
+            return p
+    return None
 
 
 async def run_surya_detect(
