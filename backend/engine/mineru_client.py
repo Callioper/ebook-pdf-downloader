@@ -55,13 +55,11 @@ class MinerUClient:
         return data["data"]["batch_id"], data["data"]["file_urls"]
 
     async def upload_file(self, file_url: str, pdf_bytes: bytes):
-        """PUT raw bytes to OSS signed URL. No auth header — URL has embedded signature."""
-        resp = await self._client.put(
-            file_url, content=pdf_bytes,
-            headers={"Authorization": "", "Content-Type": ""},
-        )
-        if resp.status_code not in (200, 201):
-            raise MinerUAPIError(f"upload failed: HTTP {resp.status_code}")
+        """PUT raw bytes to OSS signed URL. Uses bare client — URL has embedded signature."""
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as up:
+            resp = await up.put(file_url, content=pdf_bytes)
+            if resp.status_code not in (200, 201):
+                raise MinerUAPIError(f"upload failed: HTTP {resp.status_code}")
 
     async def poll_until_done(
         self,

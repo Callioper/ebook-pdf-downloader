@@ -3,7 +3,7 @@ import zipfile
 import json
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from backend.engine.mineru_client import (
     MinerUClient,
@@ -43,13 +43,17 @@ async def test_upload_file_sends_raw_bytes(client):
     mock_response.status_code = 200
 
     pdf_bytes = b"%PDF-1.4 fake pdf content"
-    with patch.object(client._client, "put", return_value=mock_response) as mock_put:
+    with patch("backend.engine.mineru_client.httpx.AsyncClient") as mock_client_cls:
+        mock_up = MagicMock()
+        mock_up.put = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value.__aenter__.return_value = mock_up
+
         await client.upload_file("https://oss.example.com/upload/abc", pdf_bytes)
 
-    mock_put.assert_called_once()
-    call_args = mock_put.call_args
-    assert call_args[0][0] == "https://oss.example.com/upload/abc"
-    assert call_args[1]["content"] == pdf_bytes
+        mock_up.put.assert_called_once()
+        call_args = mock_up.put.call_args
+        assert call_args[0][0] == "https://oss.example.com/upload/abc"
+        assert call_args[1]["content"] == pdf_bytes
 
 @pytest.mark.asyncio
 async def test_poll_until_done_returns_zip_url(client):
