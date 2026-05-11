@@ -1,3 +1,3 @@
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 GITHUB_REPO = "Callioper/ebook-pdf-downloader"
 UPDATE_CHECKED_KEY = "last_update_seen"
