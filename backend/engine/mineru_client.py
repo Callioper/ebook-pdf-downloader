@@ -3,15 +3,13 @@
 import asyncio
 import io
 import json
-import logging
+
 import time
 import zipfile
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import httpx
 
-logger = logging.getLogger(__name__)
 
 MINERU_BASE = "https://mineru.net"
 
@@ -25,12 +23,6 @@ class MinerUAPIError(Exception):
 class MinerUTimeoutError(Exception):
     pass
 
-
-@dataclass
-class MinerUProgress:
-    extracted_pages: int
-    total_pages: int
-    start_time: str
 
 
 class MinerUClient:
@@ -93,7 +85,7 @@ class MinerUClient:
                 continue
 
             file_result = results[0]
-            state = file_result["state"]
+            state = file_result.get("state", "unknown")
 
             if state == "done":
                 return file_result

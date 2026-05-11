@@ -1,9 +1,9 @@
 import io
 import zipfile
 import json
-import httpx
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 from backend.engine.mineru_client import (
     MinerUClient,
