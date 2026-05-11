@@ -32,7 +32,7 @@ export default function Layout() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // System status check
-  const [sysStatus, setSysStatus] = useState<{all_ok?: boolean; failures?: string[]; ocr_engine?: string; components?: Record<string, {ok:boolean;detail:string}>} | null>(null)
+  const [sysStatus, setSysStatus] = useState<{all_ok?: boolean; failures?: string[]; ocr_engine?: string; components?: Record<string, {ok:boolean;detail:string;balance?:string}>} | null>(null)
   const [sysChecking, setSysChecking] = useState(false)
   const sysCheckedRef = useRef(false)
 
@@ -278,16 +278,21 @@ export default function Layout() {
                className="hover:text-gray-600 disabled:opacity-50 ml-1 px-1.5 py-0.5 rounded border border-gray-300 text-[10px]"
                title="检测所有组件状态"
              >
-               {sysChecking ? '...' : '状态检测'}
-             </button>
-             {sysStatus && sysCheckedRef.current && (
-               <span className={`text-[10px] ${sysStatus.all_ok ? 'text-green-500' : 'text-orange-500'}`}>
-                 {sysStatus.all_ok
-                   ? `√ 全部正常 (${sysStatus.ocr_engine})`
-                   : `× ${sysStatus.failures?.join(', ')}`
-                 }
-               </span>
-             )}
+                {sysChecking ? '...' : '状态检测'}
+              </button>
+              {sysStatus && sysCheckedRef.current && (
+                <span className={`text-[10px] ${sysStatus.all_ok ? 'text-green-500' : 'text-orange-500'}`}>
+                  {sysStatus.all_ok
+                    ? (() => {
+                        const zl = sysStatus.components?.zlib;
+                        const zlBal = zl?.balance || zl?.detail || '';
+                        const engine = sysStatus.ocr_engine || '';
+                        return `√ 全部正常 | ${engine}` + (zlBal ? ` | ZL:${zlBal}` : '');
+                      })()
+                    : `× ${sysStatus.failures?.join(', ')}`
+                  }
+                </span>
+              )}
             {checkResult && (
               <span className={`text-xs ${checkResult.includes('失败') ? 'text-red-400' : checkResult.includes('新版本') ? 'text-blue-500 font-semibold' : 'text-green-400'}`}>
                 {checkResult}

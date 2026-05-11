@@ -1741,10 +1741,10 @@ async def system_status():
                 from engine.zlib_downloader import ZLibDownloader
                 r = await ZLibDownloader(cfg).zlib_login(e, p)
                 ok = r.get("ok", False)
-                return "zlib", {"ok": ok, "detail": r.get("balance", "") if ok else "登录失败"}
+                return "zlib", {"ok": ok, "detail": r.get("balance", "") if ok else "登录失败", "balance": r.get("balance", "")}
             except Exception as ex:
-                return "zlib", {"ok": False, "detail": str(ex)[:50]}
-        return "zlib", {"ok": False, "detail": "未配置"}
+                return "zlib", {"ok": False, "detail": str(ex)[:50], "balance": ""}
+        return "zlib", {"ok": False, "detail": "未配置", "balance": ""}
 
     async def check_stacks():
         url = cfg.get("stacks_base_url", "")
