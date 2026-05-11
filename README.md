@@ -11,7 +11,7 @@
 
 Ebook PDF Downloader 的核心目标是**将任意电子书转化为可搜索、带书签的高质量 PDF**。它从本地 SQLite 数据库和在线书源检索书籍、多源下载 PDF、通过三引擎 OCR 为扫描版 PDF 添加文字层、自动生成并注入书签目录。内置 React 前端和 FastAPI 后端，支持 Windows 10+ x64。
 
-> **支持平台:** Windows 10+ x64 / macOS 12+。Windows 便携版 exe 开箱即用，macOS 支持源码运行和 .app 构建，源码版需 Python 3.10+。
+> **支持平台:** Windows 10+ x64（便携版 exe 开箱即用）。源码版需 Python 3.10+，可在 macOS/Linux 下运行但未提供编译版本。
 
 ---
 
@@ -75,7 +75,6 @@ graph TD
 | **Python 3.10+** | 运行环境 | [python.org](https://www.python.org/downloads/) |
 | **数据库文件** | 本地检索 | [EbookDatabase 下载文档](https://github.com/Hellohistory/EbookDatabase/blob/main/Markdown/%E6%95%B0%E6%8D%AE%E5%BA%93%E4%B8%8B%E8%BD%BD%E6%96%87%E6%A1%A3.md) |
 | **Tesseract OCR** | OCR 默认引擎 | `winget install UB-Mannheim.TesseractOCR`（勾选中英文语言包） |
-| **Tesseract OCR** (macOS) | OCR 默认引擎 | `brew install tesseract tesseract-lang` |
 
 > 下载 `DX_2.0-5.0.db` / `DX_6.0.db` 后放入 `backend/data/` 目录，启动后在设置页 - 数据库路径中点击"智能查找"自动扫描常见位置。
 
@@ -98,8 +97,8 @@ B）源码版：克隆仓库，手动搭建所有依赖
 1. 从 Releases 下载 `ebook-pdf-downloader.exe`（便携版，单文件直接运行）或 `ebook-pdf-downloader-setup.exe`（安装版，含桌面快捷方式和卸载程序）
 2. 便携版双击即启动，安装版安装到 Program Files。浏览器自动打开 http://localhost:8000
 3. 帮我检查以下外部依赖（逐一确认是否需要）：
-   - **Tesseract OCR**（OCR 默认引擎）：Windows `winget install UB-Mannheim.TesseractOCR`（安装时勾选中文语言包）；macOS `brew install tesseract tesseract-lang`
-   - **GhostScript**（PDF 优化）：Windows 下载安装 https://ghostscript.com/releases/gsdnld.html；macOS `brew install ghostscript`
+   - **Tesseract OCR**（OCR 默认引擎）：Windows `winget install UB-Mannheim.TesseractOCR`（安装时勾选中文语言包）
+   - **GhostScript**（PDF 优化）：Windows 下载安装 https://ghostscript.com/releases/gsdnld.html
    - **数据库文件**：从 EbookDatabase 项目下载 `DX_2.0-5.0.db` / `DX_6.0.db`，在设置页配置路径
 
 ---
@@ -111,7 +110,7 @@ B）源码版：克隆仓库，手动搭建所有依赖
    - **Node.js ≥18**：`node --version`（编译前端）
    - **Tesseract OCR**：同上
    - **GhostScript**：同上
-   - **uv**（Python 包管理器，LLM OCR 必需）：Windows `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`；macOS/Linux `curl -LsSf https://astral.sh/uv/install.sh | sh`
+   - **uv**（Python 包管理器，LLM OCR 必需）：Windows `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`
 
 2. 克隆仓库：
    ```
@@ -198,26 +197,6 @@ python main.py
 > **前端已预编译** `frontend/dist/` 目录中包含最新前端构建产物，无需安装 Node.js 或运行 npm。如需修改前端代码，才需要 `cd ../frontend && npm install && npm run build`。
 
 > PaddleOCR 需要独立 Python 3.11 venv（PaddlePaddle MKL 冲突）。进入设置页 → OCR 面板 → 一键安装 PaddleOCR。
-
-### macOS
-
-```bash
-# 克隆仓库
-git clone https://github.com/Callioper/ebook-pdf-downloader.git
-cd ebook-pdf-downloader
-
-# 安装后端依赖
-cd backend
-pip install -r requirements.txt
-
-# 安装 Tesseract 和 GhostScript（Homebrew）
-brew install tesseract tesseract-lang ghostscript
-
-# 启动
-python main.py
-```
-
-> 也可构建 macOS .app：安装 PyInstaller 后运行 `python release_mac.py`，输出 `dist/ebook-pdf-downloader.app` 和 `dist/ebook-pdf-downloader.dmg`。
 
 ---
 
