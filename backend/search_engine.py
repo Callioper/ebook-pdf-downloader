@@ -214,7 +214,7 @@ def detect_database_paths(timeout: float = 30.0) -> List[Dict[str, Any]]:
             for name in known_names:
                 p = root / name
                 if p.exists() and p.is_dir():
-                    _safe_scan_dir(p, max_depth=1)
+                    _safe_scan_dir(p, max_depth=2)
         except (PermissionError, OSError):
             continue
 
@@ -228,7 +228,7 @@ def detect_database_paths(timeout: float = 30.0) -> List[Dict[str, Any]]:
                         for name in known_names:
                             p = child / name
                             if p.exists() and p.is_dir():
-                                _safe_scan_dir(p, max_depth=1)
+                                _safe_scan_dir(p, max_depth=2)
                 except (PermissionError, OSError):
                     pass
         except (PermissionError, OSError):

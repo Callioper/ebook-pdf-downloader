@@ -30,6 +30,9 @@ class MinerUClient:
         self.token = token
         self._timeout = timeout
 
+    async def close(self):
+        pass  # no persistent client to close
+
     def _make_client(self, timeout=None):
         t = timeout or self._timeout
         return httpx.AsyncClient(
