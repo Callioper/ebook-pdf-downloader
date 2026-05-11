@@ -368,9 +368,9 @@ async def search_books(
         def _run_zlib():
             try:
                 return asyncio.new_event_loop().run_until_complete(_search_zlib(query, proxy))
-    except Exception as e:
-        logger.error(f"open tools folder failed: {e}")
-        return {"ok": False, "error": str(e)}
+            except Exception as e:
+                logger.warning(f"Failed to run Z-Library search: {e}")
+                return []
 
 
 @router.get("/system-status")
