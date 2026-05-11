@@ -53,24 +53,14 @@ def _draw_block(page, nx0, ny0, nx1, ny1, text, pw, ph, font, fontname):
             _draw_block(page, nx0, ny0 + i * slice_h, nx1, ny0 + (i + 1) * slice_h, line_text, pw, ph, font, fontname)
         return
 
-    # === Single-line: auto-size font + horizontal morph scaling ===
-    ascender = getattr(font, "ascender", 1.075)
-    descender = getattr(font, "descender", -0.299)
-    extent_em = max(0.01, ascender - descender)
-    fs = max(3.0, min(24.0, box_h / extent_em))  # cap at 24pt — MinerU bboxes have generous padding
-
-    baseline = fitz.Point(x0, y1 + descender * fs)
-
-    natural_width = font.text_length(text, fontsize=fs)
-    if natural_width <= 0:
-        return
-
-    target_width = max(1.0, box_w * 0.98)
-    scale_x = target_width / natural_width
-    morph = (baseline, fitz.Matrix(scale_x, 1.0))
-
+    # === Single-line: place at box baseline (left/top) ===
+    fs = max(6.0, min(16.0, box_h * 0.7))  # scale font to ~70% of box height
+    
+    # Place baseline at bbox left + 2pt, bottom - 2pt (leave 2pt bottom margin)
+    baseline = fitz.Point(x0 + 2, y1 - 2)
+    
     try:
-        page.insert_text(baseline, text, fontname=fontname, fontsize=fs, render_mode=3, morph=morph)
+        page.insert_text(baseline, text, fontname=fontname, fontsize=fs, render_mode=3)
     except Exception:
         pass
 
