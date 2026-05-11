@@ -1767,7 +1767,7 @@ async def system_status():
     async def check_flare():
         port = cfg.get("flaresolverr_port", 8191)
         try:
-            async with _httpx.AsyncClient(timeout=4) as c:
+            async with _httpx.AsyncClient(timeout=4, verify=False) as c:
                 await c.get(f"http://localhost:{port}")
             return "flaresolverr", {"ok": True, "detail": f"端口 {port}"}
         except Exception:
@@ -1777,6 +1777,8 @@ async def system_status():
         proxy = cfg.get("http_proxy", "")
         if not proxy:
             return "proxy", {"ok": True, "detail": "直连"}
+        if "://" not in proxy:
+            proxy = "http://" + proxy
         try:
             async with _httpx.AsyncClient(proxy=proxy, timeout=8, verify=False) as c:
                 r = await c.get("http://httpbin.org/ip")
@@ -1786,6 +1788,8 @@ async def system_status():
 
     async def check_sources():
         proxy = cfg.get("http_proxy", "")
+        if proxy and "://" not in proxy:
+            proxy = "http://" + proxy
         hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         ok = {}
         for label, url in [("aa", "https://annas-archive.org"), ("zl", "https://z-lib.sk")]:
