@@ -2568,6 +2568,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     base_url="https://mineru.net",
                     headers={"Authorization": f"Bearer {mineru_token}", "Content-Type": "application/json"},
                     timeout=30,
+                    trust_env=False,
                 ) as diag_client:
                     diag_resp = await diag_client.post("/api/v4/file-urls/batch", json={
                         "files": [{"name": os.path.basename(pdf_path), "is_ocr": True}],

@@ -50,6 +50,7 @@ class MinerUClient:
                 base_url=MINERU_BASE,
                 headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
                 timeout=30,
+                trust_env=False,
             ) as client:
                 resp = await client.post("/api/v4/file-urls/batch", json=payload)
                 data = resp.json()
@@ -65,7 +66,7 @@ class MinerUClient:
         import httpx
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as up:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30), trust_env=False) as up:
                     resp = await up.put(file_url, content=pdf_bytes)
                     if resp.status_code in (200, 201):
                         return
@@ -93,6 +94,7 @@ class MinerUClient:
                 base_url=MINERU_BASE,
                 headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
                 timeout=30,
+                trust_env=False,
             ) as client:
                 resp = await client.get(f"/api/v4/extract-results/batch/{batch_id}")
                 data = resp.json()
