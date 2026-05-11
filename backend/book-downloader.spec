@@ -25,6 +25,7 @@ a = Analysis(
         (str(BACKEND_DIR / "version.py"), "."),
         (str(BACKEND_DIR.parent / "config.default.json"), "config.default.json"),
         (str(BACKEND_DIR.parent / "icon.ico"), "icon.ico"),
+        (r"C:\Users\Administrator\AppData\Roaming\Python\Python314\site-packages\certifi\cacert.pem", "certifi"),
     ],
     excludes=[
         'torch', 'torchvision', 'torchaudio', 'torchgen',
@@ -43,7 +44,8 @@ a = Analysis(
         'api', 'api.search', 'api.tasks', 'api.ws',
         'config', 'search_engine', 'task_store', 'ws_manager', 'version',
         'curl_cffi',
-        'httpx', 'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
+        'httpx', 'httpcore', 'h11', 'certifi',
+        'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
         'pikepdf',
     ],
     hookspath=[],
