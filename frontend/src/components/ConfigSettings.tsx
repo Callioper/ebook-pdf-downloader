@@ -629,7 +629,7 @@ export default function ConfigSettings() {
     }
   }, [form.ocr_engine, ocrEngines])
 
-  // Auto-detect stacks on config load
+  // Auto-detect stacks on config load (health + login)
   const autoStacksRef = useRef(false)
   useEffect(() => {
     if (!config || autoStacksRef.current) return
@@ -641,6 +641,21 @@ export default function ConfigSettings() {
         const health = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
         if (!mountedRef.current) return
         if (!health.ok) { setStacksStatus('red'); return }
+
+        const uname = form.stacks_username
+        const passwd = form.stacks_password
+        if (uname && passwd) {
+          try {
+            const loginRes = await fetch('/api/v1/check-stacks', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url, username: uname, password: passwd }),
+              signal: AbortSignal.timeout(5000),
+            })
+            const ld = await loginRes.json()
+            if (mountedRef.current) setStacksStatus(ld.ok ? 'green' : 'yellow')
+          } catch { if (mountedRef.current) setStacksStatus('yellow') }
+          return
+        }
 
         const key = form.stacks_api_key || ''
         if (key) {

@@ -59,7 +59,11 @@ class MinerUClient:
         return data["data"]["batch_id"], data["data"]["file_urls"]
 
     async def upload_file(self, file_url: str, pdf_bytes: bytes):
-        resp = await self._client.put(file_url, content=pdf_bytes)
+        """PUT raw bytes to OSS signed URL. No auth header — URL has embedded signature."""
+        resp = await self._client.put(
+            file_url, content=pdf_bytes,
+            headers={"Authorization": "", "Content-Type": ""},
+        )
         if resp.status_code not in (200, 201):
             raise MinerUAPIError(f"upload failed: HTTP {resp.status_code}")
 
