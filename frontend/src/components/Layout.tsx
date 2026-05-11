@@ -260,7 +260,7 @@ export default function Layout() {
 
       <footer className="bg-white border-t border-gray-200 py-2">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-xs text-gray-400">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               onClick={checkUpdate}
               disabled={checking}
@@ -271,37 +271,41 @@ export default function Layout() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
-             <span>v{version || '...'}</span>
-             <button
-               onClick={checkSystemStatus}
-               disabled={sysChecking}
-               className="hover:text-gray-600 disabled:opacity-50 ml-1 px-1.5 py-0.5 rounded border border-gray-300 text-[10px]"
-               title="检测所有组件状态"
-             >
-                {sysChecking ? '...' : '状态检测'}
-              </button>
-              {sysStatus && sysCheckedRef.current && (
-                <span className={`text-[10px] ${sysStatus.all_ok ? 'text-green-500' : 'text-orange-500'}`}>
-                  {sysStatus.all_ok
-                    ? (() => {
-                        const zl = sysStatus.components?.zlib;
-                        const zlBal = zl?.balance || zl?.detail || '';
-                        const engine = sysStatus.ocr_engine || '';
-                        return `√ 全部正常 | ${engine}` + (zlBal ? ` | ZL:${zlBal}` : '');
-                      })()
-                    : `× ${sysStatus.failures?.join(', ')}`
-                  }
-                </span>
-              )}
+            <span>v{version || '...'}</span>
             {checkResult && (
               <span className={`text-xs ${checkResult.includes('失败') ? 'text-red-400' : checkResult.includes('新版本') ? 'text-blue-500 font-semibold' : 'text-green-400'}`}>
                 {checkResult}
               </span>
             )}
-          </div>
             <a href="https://github.com/Callioper/ebook-pdf-downloader" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">
-              github.com/Callioper/ebook-pdf-downloader
+              项目主页: Callioper/ebook-pdf-downloader
             </a>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={checkSystemStatus}
+              disabled={sysChecking}
+              className="hover:text-gray-600 disabled:opacity-50 px-1.5 py-0.5 rounded border border-gray-300 text-[10px]"
+              title="检测所有组件状态"
+            >
+              {sysChecking ? '...' : '状态检测'}
+            </button>
+            {sysStatus && sysCheckedRef.current && (
+              <span className={`text-[10px] ${sysStatus.all_ok ? 'text-green-500' : 'text-orange-500'}`}>
+                {sysStatus.all_ok
+                  ? (() => {
+                      const engine = sysStatus.ocr_engine || '';
+                      const labels: Record<string,string> = { mineru: 'MinerU 线上 API', paddleocr_online: 'PaddleOCR-VL-1.5 线上 API', paddleocr: 'PaddleOCR', tesseract: 'Tesseract OCR', llm_ocr: 'LLM OCR' };
+                      const el = labels[engine] || engine;
+                      const zl = sysStatus.components?.zlib;
+                      const zlBal = zl?.balance || zl?.detail || '';
+                      return `√ 全部正常 · ${el}` + (zlBal ? ` · ZL:${zlBal}` : '');
+                    })()
+                  : '× 请检查设置'
+                }
+              </span>
+            )}
+          </div>
         </div>
       </footer>
     </div>
