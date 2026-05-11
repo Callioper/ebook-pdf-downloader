@@ -185,8 +185,8 @@ const OCR_ENGINES = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
   { key: 'llm_ocr', name: 'LLM OCR', desc: '大模型视觉识别，无需本地引擎' },
-  { key: 'mineru', name: 'MinerU 线上 API', desc: '上海 AI Lab 精准解析，需 Token' },
-  { key: 'paddleocr_online', name: 'PaddleOCR-VL-1.5 线上 API', desc: '百度 AI Studio，需 Token' },
+  { key: 'mineru', name: 'MinerU', desc: '线上 API 精准解析，需 Token' },
+  { key: 'paddleocr_online', name: 'PaddleOCR-VL-1.5', desc: '线上 API，需 Token' },
 ]
 
 const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
@@ -631,13 +631,14 @@ export default function ConfigSettings() {
     const check = async () => {
       setStacksChecking(true)
       try {
-        const url = form.stacks_base_url || 'http://localhost:7788'
+        const cfg = config!
+        const url = cfg.stacks_base_url || form.stacks_base_url || 'http://localhost:7788'
         const health = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) })
         if (!mountedRef.current) return
         if (!health.ok) { setStacksStatus('red'); return }
 
-        const uname = form.stacks_username
-        const passwd = form.stacks_password
+        const uname = cfg.stacks_username || form.stacks_username
+        const passwd = cfg.stacks_password || form.stacks_password
         if (uname && passwd) {
           try {
             const loginRes = await fetch('/api/v1/check-stacks', {
@@ -651,7 +652,7 @@ export default function ConfigSettings() {
           return
         }
 
-        const key = form.stacks_api_key || ''
+        const key = cfg.stacks_api_key || form.stacks_api_key || ''
         if (key) {
           try {
             const kt = await fetch(url + '/api/key/test', {
@@ -666,6 +667,35 @@ export default function ConfigSettings() {
         }
       } catch { if (mountedRef.current) setStacksStatus('red') }
       finally { if (mountedRef.current) setStacksChecking(false) }
+    }
+    check()
+  }, [config])
+
+  // Auto-detect online API connectivity on startup
+  const autoOnlineRef = useRef(false)
+  useEffect(() => {
+    if (!config || autoOnlineRef.current) return
+    autoOnlineRef.current = true
+    const cfg = config
+    const check = async () => {
+      if (cfg.mineru_token) {
+        setOnlineTesting(prev => ({ ...prev, mineru: true }))
+        try {
+          const r = await fetch('/api/v1/check-mineru', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: cfg.mineru_token }) })
+          const d = await r.json()
+          if (mountedRef.current) setOnlineEngineStatus(prev => ({ ...prev, mineru: d.ok ? 'ok' : 'fail' }))
+        } catch { if (mountedRef.current) setOnlineEngineStatus(prev => ({ ...prev, mineru: 'fail' })) }
+        if (mountedRef.current) setOnlineTesting(prev => ({ ...prev, mineru: false }))
+      }
+      if (cfg.paddleocr_online_token) {
+        setOnlineTesting(prev => ({ ...prev, paddleocr: true }))
+        try {
+          const r = await fetch('/api/v1/check-paddleocr-online', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: cfg.paddleocr_online_token }) })
+          const d = await r.json()
+          if (mountedRef.current) setOnlineEngineStatus(prev => ({ ...prev, paddleocr: d.ok ? 'ok' : 'fail' }))
+        } catch { if (mountedRef.current) setOnlineEngineStatus(prev => ({ ...prev, paddleocr: 'fail' })) }
+        if (mountedRef.current) setOnlineTesting(prev => ({ ...prev, paddleocr: false }))
+      }
     }
     check()
   }, [config])
@@ -1786,9 +1816,9 @@ export default function ConfigSettings() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-700">
                 {form.ocr_engine === 'llm_ocr' ? (
-                  <span className="text-blue-600">LLM OCR 已启用 (视觉大模型 dense-mode)</span>
+                  <span className="text-blue-600">LLM OCR 已启用</span>
                 ) : (
-                  <span className="text-gray-500">LLM OCR (视觉大模型 dense-mode)</span>
+                  <span className="text-gray-500">LLM OCR</span>
                 )}
               </span>
               <button
@@ -1808,7 +1838,7 @@ export default function ConfigSettings() {
           {form.ocr_engine === 'llm_ocr' && (
           <div className="space-y-3 pt-2">
             <p className="text-xs text-gray-500">
-              使用视觉大模型逐框识别文字层（dense mode）。需要运行 lmstudio / ollama 加载对应模型。
+               使用视觉大模型逐框识别文字层。需要运行 lmstudio / ollama 加载对应模型。
               推荐模型已验证中文 PDF 可用。
             </p>
 
@@ -1934,7 +1964,7 @@ export default function ConfigSettings() {
                 {form.ocr_engine === 'mineru' ? (
                   <span className="text-blue-600">MinerU 线上 API 已启用</span>
                 ) : (
-                  <span className="text-gray-500">MinerU 线上 API (上海 AI Lab 精准解析)</span>
+                  <span className="text-gray-500">MinerU 线上 API</span>
                 )}
               </span>
               <button
@@ -1969,7 +1999,7 @@ export default function ConfigSettings() {
                 onChange={(e) => updateForm({ mineru_model: e.target.value })}
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
                 <option value="pipeline">pipeline (传统引擎)</option>
-                <option value="vlm">vlm (推荐，视觉大模型)</option>
+                <option value="vlm">vlm（推荐）</option>
               </select>
             </div>
             <div className="flex items-center gap-2">
@@ -1999,7 +2029,7 @@ export default function ConfigSettings() {
                 {form.ocr_engine === 'paddleocr_online' ? (
                   <span className="text-blue-600">PaddleOCR-VL-1.5 线上 API 已启用</span>
                 ) : (
-                  <span className="text-gray-500">PaddleOCR-VL-1.5 线上 API (百度 AI Studio)</span>
+                  <span className="text-gray-500">PaddleOCR-VL-1.5 线上 API</span>
                 )}
               </span>
               <button
@@ -2018,7 +2048,7 @@ export default function ConfigSettings() {
           {form.ocr_engine === 'paddleocr_online' && (
           <div className="space-y-3 pt-2">
             <p className="text-xs text-gray-500">
-              使用百度 AI Studio 部署的 PaddleOCR-VL-1.5 视觉大模型 API 进行文档版面解析。
+              使用百度 PaddleOCR-VL-1.5 视觉大模型进行文档版面解析。
               支持中英文文档，无需本地 GPU。
             </p>
             <div>
