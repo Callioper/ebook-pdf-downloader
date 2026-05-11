@@ -42,11 +42,10 @@ class MinerUClient:
     ) -> Tuple[str, List[str]]:
         url = f"{MINERU_BASE}/api/v4/file-urls/batch"
         payload = {
-            "files": [{"name": name} for name in file_names],
+            "files": [{"name": name, "is_ocr": is_ocr} for name in file_names],
             "model_version": model_version,
             "language": language,
             "enable_table": enable_table,
-            "is_ocr": is_ocr,
             "enable_formula": enable_formula,
         }
         resp = await self._client.post(url, json=payload)
