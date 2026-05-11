@@ -369,8 +369,26 @@ async def search_books(
             try:
                 return asyncio.new_event_loop().run_until_complete(_search_zlib(query, proxy))
             except Exception as e:
-                logger.warning(f"Failed to run Z-Library search: {e}")
+                logger.warning(f"Failed to run ZLibrary search: {e}")
                 return []
+
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        try:
+            future_aa = pool.submit(_run_aa)
+            future_zlib = pool.submit(_run_zlib)
+            try:
+                external_books.extend(future_aa.result(timeout=15))
+            except Exception:
+                pass
+            try:
+                external_books.extend(future_zlib.result(timeout=15))
+            except Exception:
+                pass
+        finally:
+            pool.shutdown(wait=False)
+
+    result["external_books"] = external_books
+    return result
 
 
 @router.get("/system-status")
@@ -387,9 +405,7 @@ async def system_status():
             for f in ["DX_2.0-5.0.db", "DX_6.0.db"]:
                 if _os.path.isfile(_os.path.join(db_path, f)):
                     dbs_found.append(f)
-        result["components"]["database"] = {"ok": len(dbs_found) > 0, "detail": f"{len(dbs_found)} db(s)" if dbs_found else "未检测到"}
-        if not dbs_found:
-            result["failures"].append("数据库")
+        return "database", {"ok": len(dbs_found) > 0, "detail": f"{len(dbs_found)} db(s)" if dbs_found else "未检测到"}
 
     async def check_zlib():
         zl_email = cfg.get("zlib_email", "")
@@ -401,163 +417,120 @@ async def system_status():
                 zl_r = await dl.zlib_login(zl_email, zl_pass)
                 zl_ok = zl_r.get("ok", False)
                 zl_balance = zl_r.get("balance", "")
-                result["components"]["zlib"] = {"ok": zl_ok, "detail": zl_balance if zl_ok else "登录失败"}
-                if not zl_ok:
-                    result["failures"].append("Z-Library")
+                return "zlib", {"ok": zl_ok, "detail": zl_balance if zl_ok else "登录失败"}
             except Exception as e:
-                result["components"]["zlib"] = {"ok": False, "detail": str(e)[:50]}
-                result["failures"].append("Z-Library")
-        else:
-            result["components"]["zlib"] = {"ok": False, "detail": "未配置"}
+                return "zlib", {"ok": False, "detail": str(e)[:50]}
+        return "zlib", {"ok": False, "detail": "未配置"}
 
     async def check_stacks():
         stacks_url = cfg.get("stacks_base_url", "")
         stacks_user = cfg.get("stacks_username", "")
         stacks_pass = cfg.get("stacks_password", "")
-        if stacks_url:
-            try:
-                async with _httpx.AsyncClient(timeout=5) as c:
-                    hr = await c.get(f"{stacks_url}/api/health")
-                    if hr.status_code != 200:
-                        result["components"]["stacks"] = {"ok": False, "detail": f"服务 HTTP {hr.status_code}"}
-                        result["failures"].append("Stacks")
-                    elif stacks_user and stacks_pass:
-                        lr = await c.post(f"{stacks_url}/login", json={"username": stacks_user, "password": stacks_pass})
-                        result["components"]["stacks"] = {"ok": lr.status_code == 200, "detail": "已登录" if lr.status_code == 200 else f"登录 HTTP {lr.status_code}"}
-                        if lr.status_code != 200:
-                            result["failures"].append("Stacks")
-                    else:
-                        result["components"]["stacks"] = {"ok": hr.status_code == 200, "detail": "可连接（未配置登录）"}
-            except Exception as e:
-                result["components"]["stacks"] = {"ok": False, "detail": str(e)[:50]}
-                result["failures"].append("Stacks")
-        else:
-            result["components"]["stacks"] = {"ok": False, "detail": "未配置"}
-
-    async def check_flaresolverr():
-        flaresolverr_port = cfg.get("flaresolverr_port", 8191)
+        if not stacks_url:
+            return "stacks", {"ok": False, "detail": "未配置"}
         try:
             async with _httpx.AsyncClient(timeout=5) as c:
-                fr = await c.get(f"http://localhost:{flaresolverr_port}")
-                result["components"]["flaresolverr"] = {"ok": fr.status_code in (200, 404), "detail": f"端口 {flaresolverr_port}"}
+                hr = await c.get(f"{stacks_url}/api/health")
+                if hr.status_code != 200:
+                    return "stacks", {"ok": False, "detail": f"HTTP {hr.status_code}"}
+                if stacks_user and stacks_pass:
+                    lr = await c.post(f"{stacks_url}/login", json={"username": stacks_user, "password": stacks_pass})
+                    return "stacks", {"ok": lr.status_code == 200, "detail": "已登录" if lr.status_code == 200 else f"登录 HTTP {lr.status_code}"}
+                return "stacks", {"ok": True, "detail": "可连接"}
+        except Exception as e:
+            return "stacks", {"ok": False, "detail": str(e)[:50]}
+
+    async def check_flare():
+        port = cfg.get("flaresolverr_port", 8191)
+        try:
+            async with _httpx.AsyncClient(timeout=4) as c:
+                await c.get(f"http://localhost:{port}")
+            return "flaresolverr", {"ok": True, "detail": f"端口 {port}"}
         except Exception:
-            result["components"]["flaresolverr"] = {"ok": False, "detail": f"端口 {flaresolverr_port} 不可达"}
+            return "flaresolverr", {"ok": False, "detail": f"端口 {port} 不可达"}
 
     async def check_proxy():
         proxy = cfg.get("http_proxy", "")
-        if proxy:
-            try:
-                async with _httpx.AsyncClient(timeout=6, proxy=proxy) as c:
-                    pr = await c.get("http://httpbin.org/ip")
-                    result["components"]["proxy"] = {"ok": pr.status_code == 200, "detail": proxy}
-            except Exception as e:
-                result["components"]["proxy"] = {"ok": False, "detail": str(e)[:50]}
-                result["failures"].append("代理")
-        else:
-            result["components"]["proxy"] = {"ok": True, "detail": "直连（未配置代理）"}
+        if not proxy:
+            return "proxy", {"ok": True, "detail": "直连"}
+        try:
+            async with _httpx.AsyncClient(timeout=5, proxy=proxy) as c:
+                await c.get("http://httpbin.org/ip")
+            return "proxy", {"ok": True, "detail": proxy}
+        except Exception as e:
+            return "proxy", {"ok": False, "detail": str(e)[:50]}
 
     async def check_sources():
         sources = {}
-        for label, url in [("aa", "https://annas-archive.org"), ("zl_site", "https://z-lib.sk")]:
+        for label, url in [("aa", "https://annas-archive.org"), ("zl", "https://z-lib.sk")]:
             try:
-                async with _httpx.AsyncClient(timeout=8) as c:
+                async with _httpx.AsyncClient(timeout=6) as c:
                     sr = await c.get(url)
                     sources[label] = sr.status_code in (200, 301, 302)
             except Exception:
                 sources[label] = False
         aa_ok = sources.get("aa", False)
-        zl_site_ok = sources.get("zl_site", False)
-        result["components"]["sources"] = {"ok": aa_ok or zl_site_ok, "detail": f"AA:{'√' if aa_ok else '×'} ZL:{'√' if zl_site_ok else '×'}"}
-        if not aa_ok and not zl_site_ok:
-            result["failures"].append("源站")
+        zl_ok = sources.get("zl", False)
+        return "sources", {"ok": aa_ok or zl_ok, "detail": f"AA:{'v' if aa_ok else 'x'} ZL:{'v' if zl_ok else 'x'}"}
 
     async def check_ocr():
-        ocr_engine = cfg.get("ocr_engine", "tesseract")
-        if ocr_engine == "mineru":
+        engine = cfg.get("ocr_engine", "tesseract")
+        if engine == "mineru":
             token = cfg.get("mineru_token", "")
-            if token:
-                try:
-                    async with _httpx.AsyncClient(timeout=10) as c:
-                        mr = await c.get("https://mineru.net/api/v4/extract-results/batch/test", headers={"Authorization": f"Bearer {token}"})
-                        result["components"]["ocr"] = {"ok": mr.status_code in (200, 404), "detail": f"MinerU API"}
-                        if mr.status_code not in (200, 404):
-                            result["failures"].append("MinerU")
-                except Exception as e:
-                    result["components"]["ocr"] = {"ok": False, "detail": f"MinerU: {str(e)[:50]}"}
-                    result["failures"].append("MinerU")
-            else:
-                result["components"]["ocr"] = {"ok": False, "detail": "MinerU: 未配置 Token"}
-                result["failures"].append("MinerU")
-        elif ocr_engine == "paddleocr_online":
+            if not token:
+                return "ocr", {"ok": False, "detail": "MinerU: 未配置 Token"}
+            try:
+                async with _httpx.AsyncClient(timeout=10, trust_env=False) as c:
+                    r = await c.get("https://mineru.net/api/v4/extract-results/batch/test", headers={"Authorization": f"Bearer {token}"})
+                    return "ocr", {"ok": r.status_code in (200, 404), "detail": "MinerU API"}
+            except Exception as e:
+                return "ocr", {"ok": False, "detail": f"MinerU: {str(e)[:50]}"}
+        if engine == "paddleocr_online":
             token = cfg.get("paddleocr_online_token", "")
-            if token:
-                try:
-                    async with _httpx.AsyncClient(timeout=10) as c:
-                        pr = await c.get("https://paddleocr.aistudio-app.com/api/v2/ocr/jobs", headers={"Authorization": f"bearer {token}"}, params={"limit": 1})
-                        result["components"]["ocr"] = {"ok": pr.status_code in (200, 401), "detail": f"PaddleOCR-VL-1.5"}
-                        if pr.status_code not in (200, 401):
-                            result["failures"].append("PaddleOCR")
-                except Exception as e:
-                    result["components"]["ocr"] = {"ok": False, "detail": f"PaddleOCR: {str(e)[:50]}"}
-                    result["failures"].append("PaddleOCR")
-            else:
-                result["components"]["ocr"] = {"ok": False, "detail": "PaddleOCR: 未配置 Token"}
-                result["failures"].append("PaddleOCR")
-        elif ocr_engine == "llm_ocr":
+            if not token:
+                return "ocr", {"ok": False, "detail": "PaddleOCR: 未配置 Token"}
+            try:
+                async with _httpx.AsyncClient(timeout=10) as c:
+                    r = await c.get("https://paddleocr.aistudio-app.com/api/v2/ocr/jobs", headers={"Authorization": f"bearer {token}"}, params={"limit": 1})
+                    return "ocr", {"ok": r.status_code in (200, 401), "detail": "PaddleOCR-VL-1.5"}
+            except Exception as e:
+                return "ocr", {"ok": False, "detail": f"PaddleOCR: {str(e)[:50]}"}
+        if engine == "llm_ocr":
             endpoint = cfg.get("llm_ocr_endpoint", "")
             model = cfg.get("llm_ocr_model", "")
-            if endpoint:
-                try:
-                    async with _httpx.AsyncClient(timeout=8) as c:
-                        for suffix in ("/v1/models", "/models"):
-                            try:
-                                lr = await c.get(f"{endpoint.rstrip('/')}{suffix}")
-                                models = [m.get("id", "") for m in lr.json().get("data", [])]
-                                has_model = model in models if model else len(models) > 0
-                                result["components"]["ocr"] = {"ok": has_model, "detail": f"LLM: {len(models)} models, {model}" if has_model else f"LLM: {len(models)} models, {model} 未加载"}
-                                break
-                            except Exception:
-                                pass
-                        else:
-                            result["components"]["ocr"] = {"ok": False, "detail": "LLM: 端点不可达"}
-                            result["failures"].append("LLM OCR")
-                except Exception as e:
-                    result["components"]["ocr"] = {"ok": False, "detail": f"LLM: {str(e)[:50]}"}
-                    result["failures"].append("LLM OCR")
-            else:
-                result["components"]["ocr"] = {"ok": False, "detail": "LLM: 未配置端点"}
-        else:
-            result["components"]["ocr"] = {"ok": True, "detail": f"本地引擎: {ocr_engine}"}
-
-    async def check_ai_vision():
-        av_endpoint = cfg.get("ai_vision_endpoint", "")
-        if av_endpoint:
+            if not endpoint:
+                return "ocr", {"ok": False, "detail": "LLM: 未配置端点"}
             try:
                 async with _httpx.AsyncClient(timeout=8) as c:
-                    for suffix in ("/v1/models", "/models"):
-                        try:
-                            avr = await c.get(f"{av_endpoint.rstrip('/')}{suffix}")
-                            result["components"]["ai_vision"] = {"ok": True, "detail": "AI Vision: OK"}
-                            break
-                        except Exception:
-                            pass
-                    else:
-                        result["components"]["ai_vision"] = {"ok": False, "detail": "AI Vision: 端点不可达"}
+                    r = await c.get(f"{endpoint.rstrip('/')}/v1/models")
+                    models = [m.get("id", "") for m in r.json().get("data", [])]
+                    has = model in models if model else len(models) > 0
+                    return "ocr", {"ok": has, "detail": f"LLM: {model}" if has else f"LLM: {model} 未加载"}
             except Exception as e:
-                result["components"]["ai_vision"] = {"ok": False, "detail": f"AI Vision: {str(e)[:50]}"}
-        else:
-            result["components"]["ai_vision"] = {"ok": True, "detail": "未配置（不使用）"}
+                return "ocr", {"ok": False, "detail": f"LLM: {str(e)[:50]}"}
+        return "ocr", {"ok": True, "detail": f"本地: {engine}"}
 
-    await asyncio.gather(
-        check_database(),
-        check_zlib(),
-        check_stacks(),
-        check_flaresolverr(),
-        check_proxy(),
-        check_sources(),
-        check_ocr(),
-        check_ai_vision(),
-    )
+    async def check_ai_vision():
+        endpoint = cfg.get("ai_vision_endpoint", "")
+        if not endpoint:
+            return "ai_vision", {"ok": True, "detail": "未配置"}
+        try:
+            async with _httpx.AsyncClient(timeout=6) as c:
+                await c.get(f"{endpoint.rstrip('/')}/v1/models")
+            return "ai_vision", {"ok": True, "detail": "OK"}
+        except Exception as e:
+            return "ai_vision", {"ok": False, "detail": str(e)[:50]}
+
+    tasks = [
+        check_database(), check_zlib(), check_stacks(), check_flare(),
+        check_proxy(), check_sources(), check_ocr(), check_ai_vision(),
+    ]
+    results = await asyncio.gather(*tasks)
+
+    for key, comp in results:
+        result["components"][key] = comp
+        if not comp["ok"] and key not in ("ai_vision",):
+            result["failures"].append(key)
 
     result["all_ok"] = len(result["failures"]) == 0
     return result
