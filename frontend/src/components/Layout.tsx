@@ -31,6 +31,11 @@ export default function Layout() {
   const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // System status check
+  const [sysStatus, setSysStatus] = useState<{all_ok?: boolean; failures?: string[]; ocr_engine?: string; components?: Record<string, {ok:boolean;detail:string}>} | null>(null)
+  const [sysChecking, setSysChecking] = useState(false)
+  const sysCheckedRef = useRef(false)
+
   const checkUpdate = () => {
     setChecking(true)
     fetch(`${API_BASE}/check-update`)
@@ -60,6 +65,18 @@ export default function Layout() {
       })
       .finally(() => setChecking(false))
   }
+
+  const checkSystemStatus = () => {
+    setSysChecking(true)
+    fetch('/api/v1/system-status')
+      .then(r => r.json())
+      .then(data => { setSysStatus(data); sysCheckedRef.current = true })
+      .catch(() => setSysStatus(null))
+      .finally(() => setSysChecking(false))
+  }
+
+  // Auto-run system status check on mount
+  useEffect(() => { checkSystemStatus() }, [])
 
   // Shutdown backend when page/electron window is closed
   useEffect(() => {
@@ -254,7 +271,23 @@ export default function Layout() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
-            <span>v{version || '...'}</span>
+             <span>v{version || '...'}</span>
+             <button
+               onClick={checkSystemStatus}
+               disabled={sysChecking}
+               className="hover:text-gray-600 disabled:opacity-50 ml-1 px-1.5 py-0.5 rounded border border-gray-300 text-[10px]"
+               title="检测所有组件状态"
+             >
+               {sysChecking ? '⏳' : '状态检测'}
+             </button>
+             {sysStatus && sysCheckedRef.current && (
+               <span className={`text-[10px] ${sysStatus.all_ok ? 'text-green-500' : 'text-orange-500'}`}>
+                 {sysStatus.all_ok
+                   ? `√ 全部正常 (${sysStatus.ocr_engine})`
+                   : `× ${sysStatus.failures?.join(', ')}`
+                 }
+               </span>
+             )}
             {checkResult && (
               <span className={`text-xs ${checkResult.includes('失败') ? 'text-red-400' : checkResult.includes('新版本') ? 'text-blue-500 font-semibold' : 'text-green-400'}`}>
                 {checkResult}
