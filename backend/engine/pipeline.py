@@ -2072,7 +2072,6 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
     elif ocr_engine == "paddleocr_online":
         config_info = {
             "引擎": "PaddleOCR-VL-1.5 线上 API",
-            "端点": config.get("paddleocr_online_endpoint", ""),
         }
     else:
         engine_labels = {
@@ -2629,29 +2628,45 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
         elif ocr_engine == "paddleocr_online":
             paddle_token = config.get("paddleocr_online_token", "")
-            paddle_endpoint = config.get("paddleocr_online_endpoint", "")
-            if not paddle_token or not paddle_endpoint:
-                task_store.add_log(task_id, "PaddleOCR online: no token/endpoint configured, skipping")
+            if not paddle_token:
+                task_store.add_log(task_id, "PaddleOCR online: no token configured, skipping")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            task_store.add_log(task_id, f"PaddleOCR-VL-1.5 online: sending PDF to {paddle_endpoint}")
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Sending PDF to PaddleOCR..."})
+            task_store.add_log(task_id, "PaddleOCR-VL-1.5 online: submitting to Baidu AI Studio")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Submitting to PaddleOCR..."})
 
             try:
                 from backend.engine.paddleocr_online_client import PaddleOCRClient
                 from backend.engine.pdf_api_embed import embed_api_text_layer
 
-                client = PaddleOCRClient(token=paddle_token, endpoint=paddle_endpoint, timeout=config.get("ocr_timeout", 3600))
+                client = PaddleOCRClient(token=paddle_token, timeout=config.get("ocr_timeout", 3600))
+
+                _paddle_last_pct = [0]
+
+                def _paddle_progress(extracted, total, state):
+                    if total > 0:
+                        pct = min(5 + int(extracted * 85 / total), 90)
+                    else:
+                        pct = 10
+                    detail = f"PaddleOCR: {state} ({extracted}/{total})"
+                    if pct != _paddle_last_pct[0]:
+                        _paddle_last_pct[0] = pct
+                        asyncio.run_coroutine_threadsafe(
+                            _emit(task_id, "step_progress", {"step": "ocr", "progress": pct, "detail": detail}),
+                            asyncio.get_event_loop(),
+                        )
 
                 async def _run_paddleocr():
                     try:
                         with open(pdf_path, "rb") as f:
                             pdf_bytes = f.read()
 
-                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": "PaddleOCR processing PDF..."})
-
-                        pages = await client.process_pdf(pdf_bytes)
+                        pages = await client.process_pdf(
+                            pdf_bytes,
+                            file_name=os.path.basename(pdf_path),
+                            progress_callback=_paddle_progress,
+                        )
                         task_store.add_log(task_id, f"PaddleOCR-VL-1.5: got {len(pages)} pages")
 
                         layout = {}
@@ -2663,7 +2678,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                                 for line in lines
                             ]
 
-                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 85, "detail": "Embedding text layer..."})
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 92, "detail": "Embedding text layer..."})
 
                         output_pdf = pdf_path + ".paddleocr.pdf"
                         loop = asyncio.get_event_loop()

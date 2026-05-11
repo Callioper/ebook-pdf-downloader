@@ -1,9 +1,16 @@
-"""PaddleOCR-VL-1.5 online API client — send PDF/image, parse layout response."""
+"""PaddleOCR-VL-1.5 online API client — async job submission + polling + JSONL parsing."""
 
-import base64
-from typing import Any, Dict, List
+import asyncio
+import json
+import io
+import time
+from typing import Any, Dict, List, Optional
 
 import httpx
+
+PADDLEOCR_JOB_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+PADDLEOCR_MODEL = "PaddleOCR-VL-1.5"
+DEFAULT_POLL_INTERVAL = 5.0
 
 
 class PaddleOCRAPIError(Exception):
@@ -13,57 +20,122 @@ class PaddleOCRAPIError(Exception):
 
 
 class PaddleOCRClient:
-    """Client for PaddleOCR-VL-1.5 online API (Baido AI Studio)."""
-    def __init__(self, token: str, endpoint: str, timeout: int = 300):
+    """Client for PaddleOCR-VL-1.5 online API (Baidu AI Studio)."""
+
+    def __init__(self, token: str, timeout: int = 600):
         self.token = token
-        self.endpoint = endpoint.rstrip("/")
         self._client = httpx.AsyncClient(
-            headers={
-                "Authorization": f"token {token}",
-                "Content-Type": "application/json",
-            },
+            headers={"Authorization": f"bearer {token}"},
             timeout=timeout,
         )
 
-    async def _call_api(self, file_data: bytes, file_type: int) -> List[Dict[str, Any]]:
-        url = f"{self.endpoint}/layout-parsing"
-        payload = {
-            "file": base64.b64encode(file_data).decode("ascii"),
-            "fileType": file_type,
-            "useDocOrientationClassify": False,
-            "useDocUnwarping": False,
-            "useChartRecognition": False,
+    async def submit_job_file(self, file_path: str, pdf_bytes: bytes) -> str:
+        """Submit a local file for OCR processing, returns jobId."""
+        files = {"file": ("document.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+        data = {
+            "model": PADDLEOCR_MODEL,
+            "optionalPayload": json.dumps({
+                "useDocOrientationClassify": False,
+                "useDocUnwarping": False,
+                "useChartRecognition": False,
+            }),
         }
-        resp = await self._client.post(url, json=payload)
-        data = resp.json()
-
-        if resp.status_code != 200 or data.get("errorCode", 0) != 0:
+        resp = await self._client.post(PADDLEOCR_JOB_URL, data=data, files=files)
+        if resp.status_code != 200:
             raise PaddleOCRAPIError(
-                data.get("errorMsg", f"HTTP {resp.status_code}"),
-                data.get("errorCode", resp.status_code),
+                f"job submission failed: HTTP {resp.status_code} {resp.text[:200]}",
+                resp.status_code,
             )
+        result = resp.json()
+        job_id = result.get("data", {}).get("jobId", "")
+        if not job_id:
+            raise PaddleOCRAPIError(f"no jobId in response: {resp.text[:200]}")
+        return job_id
 
-        return parse_paddleocr_result(data)
+    async def poll_job(
+        self,
+        job_id: str,
+        timeout: int = 1800,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
+        """Poll job status until done, returns result data dict with jsonl_url."""
+        url = f"{PADDLEOCR_JOB_URL}/{job_id}"
+        deadline = time.monotonic() + timeout
+        last_pct = -1
 
-    async def process_pdf(self, pdf_bytes: bytes) -> List[Dict[str, Any]]:
-        return await self._call_api(pdf_bytes, file_type=0)
+        while time.monotonic() < deadline:
+            resp = await self._client.get(url)
+            if resp.status_code != 200:
+                raise PaddleOCRAPIError(f"poll failed: HTTP {resp.status_code}")
 
-    async def process_image(self, image_bytes: bytes) -> List[Dict[str, Any]]:
-        return await self._call_api(image_bytes, file_type=1)
+            result = resp.json()
+            data = result.get("data", {})
+            state = data.get("state", "unknown")
+
+            if state == "done":
+                return data
+            if state == "failed":
+                raise PaddleOCRAPIError(data.get("errorMsg", "job failed"))
+
+            if progress_callback:
+                progress = data.get("extractProgress", {})
+                total = progress.get("totalPages", 0)
+                extracted = progress.get("extractedPages", 0)
+                if total > 0:
+                    pct = int(extracted * 100 / total)
+                    if pct != last_pct:
+                        last_pct = pct
+                        progress_callback(extracted, total, state)
+
+            await asyncio.sleep(poll_interval)
+
+        raise PaddleOCRAPIError(f"job {job_id} did not complete within {timeout}s")
+
+    async def download_jsonl(self, jsonl_url: str) -> List[Dict[str, Any]]:
+        """Download and parse the JSONL result file."""
+        resp = await self._client.get(jsonl_url)
+        resp.raise_for_status()
+        return parse_jsonl_result(resp.text)
+
+    async def process_pdf(
+        self,
+        pdf_bytes: bytes,
+        file_name: str = "document.pdf",
+        progress_callback=None,
+    ) -> List[Dict[str, Any]]:
+        """Full flow: submit → poll → download → parse."""
+        job_id = await self.submit_job_file(file_name, pdf_bytes)
+        result = await self.poll_job(job_id, progress_callback=progress_callback)
+        jsonl_url = result.get("resultUrl", {}).get("jsonUrl", "")
+        if not jsonl_url:
+            raise PaddleOCRAPIError("no jsonl URL in completed job result")
+        return await self.download_jsonl(jsonl_url)
+
+    async def test_connectivity(self) -> Dict[str, Any]:
+        """Lightweight connectivity check: just ping the API."""
+        resp = await self._client.get(PADDLEOCR_JOB_URL, params={"limit": 1})
+        return {"ok": resp.status_code == 200, "status": resp.status_code}
 
     async def close(self):
         await self._client.aclose()
 
 
-def parse_paddleocr_result(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Parse PaddleOCR-VL-1.5 API response, return list of page dicts."""
-    results = raw.get("result", {}).get("layoutParsingResults", [])
+def parse_jsonl_result(jsonl_text: str) -> List[Dict[str, Any]]:
+    """Parse PaddleOCR JSONL output, return list of page dicts with markdown."""
     pages = []
-    for item in results:
-        md = item.get("markdown", {})
-        pages.append({
-            "markdown": md.get("text", ""),
-            "images": md.get("images", {}),
-            "output_images": item.get("outputImages", {}),
-        })
+    for line in jsonl_text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        result = record.get("result", {})
+        layout_results = result.get("layoutParsingResults", [])
+        for item in layout_results:
+            md = item.get("markdown", {})
+            pages.append({
+                "markdown": md.get("text", ""),
+                "images": md.get("images", {}),
+                "output_images": item.get("outputImages", {}),
+            })
     return pages
