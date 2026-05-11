@@ -1,15 +1,13 @@
-"""MinerU v4 精准解析 API client -- batch upload + poll + parse layout."""
+"""MinerU v4 精准解析 API client — batch upload + poll + parse layout."""
 
 import asyncio
 import io
 import json
-
 import time
 import zipfile
 from typing import Any, Dict, List, Tuple
 
 import httpx
-
 
 MINERU_BASE = "https://mineru.net"
 
@@ -22,7 +20,6 @@ class MinerUAPIError(Exception):
 
 class MinerUTimeoutError(Exception):
     pass
-
 
 
 class MinerUClient:
@@ -83,19 +80,27 @@ class MinerUClient:
             if data.get("code") != 0:
                 raise MinerUAPIError(data.get("msg", "query failed"))
 
-            results = data["data"]["extract_result"]
-            if not results:
+            extract = data.get("data", {})
+            items = extract.get("extract_result", [])
+
+            if not items:
                 await asyncio.sleep(poll_interval)
                 continue
 
-            file_result = results[0]
+            if isinstance(items, dict):
+                items = [items]
+
+            file_result = items[0]
             state = file_result.get("state", "unknown")
 
             if state == "done":
+                full_zip = file_result.get("full_zip_url", "")
+                if not full_zip:
+                    raise MinerUAPIError(f"done but no full_zip_url in response: {json.dumps(file_result)[:300]}")
                 return file_result
             if state == "failed":
                 raise MinerUAPIError(file_result.get("err_msg", "parse failed"))
-            if state in ("running", "pending") and progress_callback:
+            if state in ("running", "pending", "waiting-file") and progress_callback:
                 progress = file_result.get("extract_progress", {})
                 extracted = progress.get("extracted_pages", 0)
                 total = progress.get("total_pages", 0)
@@ -127,10 +132,6 @@ class MinerUClient:
 
 
 def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
-    """Parse MinerU result zip, return {page_index: [text_blocks]}.
-
-    Each text_block has: 'text', 'bbox' (x0,y0,x1,y1 in px), 'category_id'
-    """
     pages: Dict[int, List[Dict]] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         name_list = zf.namelist()

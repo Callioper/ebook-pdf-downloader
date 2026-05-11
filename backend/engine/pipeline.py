@@ -2624,7 +2624,9 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, "MinerU OCR timed out")
             except Exception as e:
-                task_store.add_log(task_id, f"MinerU OCR error: {str(e)[:200]}")
+                import traceback
+                tb = traceback.format_exc()
+                task_store.add_log(task_id, f"MinerU OCR error: {e} | {tb.split(chr(10))[-3].strip() if tb else ''}"[:300])
 
         elif ocr_engine == "paddleocr_online":
             paddle_token = config.get("paddleocr_online_token", "")
