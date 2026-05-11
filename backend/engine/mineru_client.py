@@ -156,54 +156,118 @@ class MinerUClient:
 
 
 def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
+    """Parse MinerU result zip using _content_list.json (flat text+bbox+page_idx format).
+
+    Returns {page_index: [{"text": str, "bbox": (x0,y0,x1,y1) or None, "category_id": int}]}
+    """
     pages: Dict[int, List[Dict]] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         name_list = zf.namelist()
 
-        layout_name = None
+        # Priority: _content_list.json (flat, has bbox+page_idx) > content_list_v2 > model.json
         content_name = None
         for name in name_list:
             basename = name.split("/")[-1]
-            if basename.endswith("_layout.json") or basename == "layout.json":
-                layout_name = name
-            if basename.endswith("_content_list.json") or basename == "content_list.json":
+            if basename.endswith("_content_list.json") and not basename.endswith("_v2.json"):
                 content_name = name
+                break
 
-        if layout_name:
-            layout_data = json.loads(zf.read(layout_name))
-            for item in layout_data:
-                text = (item.get("text") or "").strip()
-                poly = item.get("poly", [])
-                cat_id = item.get("category_id", -1)
-                page_idx = item.get("page_idx", 0)
+        # Fallback to v2 or model.json
+        if not content_name:
+            for name in name_list:
+                basename = name.split("/")[-1]
+                if basename.endswith("_content_list_v2.json"):
+                    content_name = name
+                    break
 
-                if not text:
-                    continue
+        if not content_name:
+            for name in name_list:
+                basename = name.split("/")[-1]
+                if basename.endswith("_model.json"):
+                    content_name = name
+                    break
 
-                if poly and len(poly) >= 4:
-                    xs = [poly[i] for i in range(0, len(poly), 2)]
-                    ys = [poly[i] for i in range(1, len(poly), 2)]
-                    bbox = (min(xs), min(ys), max(xs), max(ys))
-                else:
-                    bbox = None
+        if content_name:
+            data = json.loads(zf.read(content_name))
 
-                pages.setdefault(page_idx, []).append({
-                    "text": text,
-                    "bbox": bbox,
-                    "category_id": cat_id,
-                })
+            # For model.json: data is [[page0_items], [page1_items], ...]
+            is_model = content_name.endswith("_model.json")
+            if is_model and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+                for page_idx, page_items in enumerate(data):
+                    for item in page_items:
+                        text = _extract_text_from_item(item)
+                        if not text:
+                            continue
+                        bbox = _extract_bbox_from_item(item)
+                        pages.setdefault(page_idx, []).append({
+                            "text": text,
+                            "bbox": bbox,
+                            "category_id": 0,
+                        })
+                return dict(sorted(pages.items()))
 
-        if not layout_name and content_name:
-            content_data = json.loads(zf.read(content_name))
-            for item in content_data:
-                text = item.get("text", "").strip()
-                page_idx = item.get("page_idx", 0)
-                if not text:
-                    continue
-                pages.setdefault(page_idx, []).append({
-                    "text": text,
-                    "bbox": None,
-                    "category_id": -1,
-                })
+            # For content_list.json / v2: data is [{type, text, bbox, page_idx}, ...]
+            if isinstance(data, list):
+                for item in data:
+                    text = _extract_text_from_item(item)
+                    if not text:
+                        continue
+                    page_idx = item.get("page_idx", 0)
+                    bbox_arr = item.get("bbox", [])
+                    bbox = _normalize_bbox(bbox_arr)
+                    pages.setdefault(page_idx, []).append({
+                        "text": text,
+                        "bbox": bbox,
+                        "category_id": 0,
+                    })
+                return dict(sorted(pages.items()))
 
-    return dict(sorted(pages.items()))
+    # No recognized JSON — try full.md as last resort
+    for name in name_list:
+        if name.endswith("full.md") or name == "full.md":
+            md_text = zf.read(name).decode("utf-8", errors="replace")
+            lines = [l.strip() for l in md_text.split("\n") if l.strip()]
+            # Heuristic: split on heading markers for rough page boundaries
+            pages[0] = [{"text": l, "bbox": None, "category_id": 0} for l in lines]
+            return pages
+
+    return pages
+
+
+def _extract_text_from_item(item: Dict) -> str:
+    """Extract text from various MinerU item formats."""
+    # content_list.json: {"text": "..."} or {"content": "..."}
+    for key in ("text", "content"):
+        val = item.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+
+    # content_list_v2.json: {"content": {"paragraph_content": [{"content": "text"}]}}
+    content = item.get("content")
+    if isinstance(content, dict):
+        for sub_key in ("paragraph_content", "title_content", "page_header_content", "page_footer_content"):
+            sub = content.get(sub_key)
+            if isinstance(sub, list):
+                parts = []
+                for c in sub:
+                    if isinstance(c, dict):
+                        t = c.get("text") or c.get("content")
+                        if isinstance(t, str):
+                            parts.append(t)
+                if parts:
+                    return "".join(parts)
+
+    return ""
+
+
+def _extract_bbox_from_item(item: Dict):
+    """Extract bbox from model.json item format."""
+    bbox = item.get("bbox", [])
+    return _normalize_bbox(bbox)
+
+
+def _normalize_bbox(bbox) -> tuple:
+    """Convert bbox [x0,y0,x1,y1] to tuple or None."""
+    if bbox and isinstance(bbox, list) and len(bbox) == 4:
+        return tuple(bbox)
+    return None
