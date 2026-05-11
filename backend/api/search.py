@@ -814,6 +814,51 @@ async def _try_fetch_models(client, endpoint: str):
     raise RuntimeError("无法连接到 LLM 端点")
 
 
+@router.post("/check-mineru")
+async def check_mineru(req: Request):
+    """Test MinerU API connectivity."""
+    import httpx
+    body = await req.json()
+    token = (body.get("token", "") or "").strip()
+    if not token:
+        return {"ok": False, "message": "缺少 API Token"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://mineru.net/api/v4/extract-results/batch/test",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code in (200, 404):
+                return {"ok": True, "message": "MinerU API 连接正常"}
+            return {"ok": False, "message": f"MinerU API 返回 HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"ok": False, "message": f"MinerU 连接失败: {str(e)[:150]}"}
+
+
+@router.post("/check-paddleocr-online")
+async def check_paddleocr_online(req: Request):
+    """Test PaddleOCR-VL-1.5 API connectivity."""
+    import httpx
+    body = await req.json()
+    token = (body.get("token", "") or "").strip()
+    if not token:
+        return {"ok": False, "message": "缺少 Access Token"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs",
+                headers={"Authorization": f"bearer {token}"},
+                params={"limit": 1},
+            )
+            if resp.status_code in (200, 401):
+                if resp.status_code == 200:
+                    return {"ok": True, "message": "PaddleOCR API 连接正常"}
+                return {"ok": False, "message": "Token 无效"}
+            return {"ok": False, "message": f"PaddleOCR API 返回 HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"ok": False, "message": f"PaddleOCR 连接失败: {str(e)[:150]}"}
+
+
 @router.post("/check-proxy-sources")
 async def check_proxy_sources(body: ProxyRequest):
     proxy_url = body.http_proxy or get_config().get("http_proxy", "")

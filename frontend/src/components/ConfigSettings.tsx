@@ -187,6 +187,8 @@ const OCR_ENGINES = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
   { key: 'llm_ocr', name: 'LLM OCR', desc: '大模型视觉识别，无需本地引擎' },
+  { key: 'mineru', name: 'MinerU 线上 API', desc: '上海 AI Lab 精准解析，需 Token' },
+  { key: 'paddleocr_online', name: 'PaddleOCR-VL-1.5 线上 API', desc: '百度 AI Studio，需 Token' },
 ]
 
 const OCR_INSTALL_GUIDE = `## 安装 OCR 引擎
@@ -403,6 +405,8 @@ export default function ConfigSettings() {
 
   const [llmModels, setLlmModels] = useState<any[]>([])
   const [llmFetchMsg, setLlmFetchMsg] = useState('')
+  const [onlineEngineStatus, setOnlineEngineStatus] = useState<Record<string, 'ok' | 'fail' | ''>>({ mineru: '', paddleocr: '' })
+  const [onlineTesting, setOnlineTesting] = useState<Record<string, boolean>>({ mineru: false, paddleocr: false })
   const [llmFetching, setLlmFetching] = useState(false)
   const [llmTestMsg, setLlmTestMsg] = useState('')
   const [llmTesting, setLlmTesting] = useState(false)
@@ -941,6 +945,42 @@ export default function ConfigSettings() {
         }))
       }
     }
+  }
+
+  const handleTestMineru = async () => {
+    setOnlineTesting(prev => ({ ...prev, mineru: true }))
+    setOnlineEngineStatus(prev => ({ ...prev, mineru: '' }))
+    try {
+      const res = await fetch('/api/v1/check-mineru', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: form.mineru_token || '' }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setOnlineEngineStatus(prev => ({ ...prev, mineru: data.ok ? 'ok' : 'fail' }))
+    } catch {
+      if (mountedRef.current) setOnlineEngineStatus(prev => ({ ...prev, mineru: 'fail' }))
+    }
+    if (mountedRef.current) setOnlineTesting(prev => ({ ...prev, mineru: false }))
+  }
+
+  const handleTestPaddleocrOnline = async () => {
+    setOnlineTesting(prev => ({ ...prev, paddleocr: true }))
+    setOnlineEngineStatus(prev => ({ ...prev, paddleocr: '' }))
+    try {
+      const res = await fetch('/api/v1/check-paddleocr-online', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: form.paddleocr_online_token || '' }),
+      })
+      const data = await res.json()
+      if (!mountedRef.current) return
+      setOnlineEngineStatus(prev => ({ ...prev, paddleocr: data.ok ? 'ok' : 'fail' }))
+    } catch {
+      if (mountedRef.current) setOnlineEngineStatus(prev => ({ ...prev, paddleocr: 'fail' }))
+    }
+    if (mountedRef.current) setOnlineTesting(prev => ({ ...prev, paddleocr: false }))
   }
 
   const handleInstallOcrEngine = async (engine: string) => {
@@ -1519,6 +1559,16 @@ export default function ConfigSettings() {
         <StatusDot status={form.llm_ocr_endpoint ? 'green' : 'red'} />
         <span className="text-xs">LLM OCR {form.llm_ocr_endpoint ? '已配置' : '未配置'}</span>
       </>
+    ) : form.ocr_engine === 'mineru' ? (
+      <>
+        <StatusDot status={onlineEngineStatus.mineru === 'ok' ? 'green' : onlineEngineStatus.mineru === 'fail' ? 'red' : null} />
+        <span className="text-xs">MinerU 线上 API{onlineEngineStatus.mineru === 'ok' ? ' 已启用' : onlineEngineStatus.mineru === 'fail' ? ' 连接失败' : ''}</span>
+      </>
+    ) : form.ocr_engine === 'paddleocr_online' ? (
+      <>
+        <StatusDot status={onlineEngineStatus.paddleocr === 'ok' ? 'green' : onlineEngineStatus.paddleocr === 'fail' ? 'red' : null} />
+        <span className="text-xs">PaddleOCR-VL-1.5 线上 API{onlineEngineStatus.paddleocr === 'ok' ? ' 已启用' : onlineEngineStatus.paddleocr === 'fail' ? ' 连接失败' : ''}</span>
+      </>
     ) : (
       <>
         <StatusDot status={form.ocr_engine === 'paddleocr' ? 'green' : ocrEngines['tesseract']?.installed ? 'green' : 'red'} />
@@ -1925,6 +1975,21 @@ export default function ConfigSettings() {
                 <option value="vlm">vlm (推荐，视觉大模型)</option>
               </select>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestMineru}
+                disabled={onlineTesting.mineru || !form.mineru_token}
+                className="px-3 py-1 text-xs rounded border border-green-500 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                {onlineTesting.mineru ? '测试中...' : '测试连通性'}
+              </button>
+              {onlineEngineStatus.mineru === 'ok' && (
+                <span className="text-xs text-green-600">连接正常</span>
+              )}
+              {onlineEngineStatus.mineru === 'fail' && (
+                <span className="text-xs text-red-500">连接失败</span>
+              )}
+            </div>
             <p className="text-xs text-gray-400">
               需要先申请 Token：<a href="https://mineru.net/apiManage/docs" target="_blank" className="text-blue-500 hover:underline">MinerU API 文档</a>
             </p>
@@ -1960,21 +2025,29 @@ export default function ConfigSettings() {
               支持中英文文档，无需本地 GPU。
             </p>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">API 端点</label>
-              <input value={form.paddleocr_online_endpoint || ''}
-                onChange={(e) => updateForm({ paddleocr_online_endpoint: e.target.value })}
-                placeholder="https://aistudio.baidu.com/serving/xxx"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
-            </div>
-            <div>
               <label className="text-xs text-gray-500 block mb-1">Access Token</label>
-              <input value={form.paddleocr_online_token || ''}
-                onChange={(e) => updateForm({ paddleocr_online_token: e.target.value })}
-                placeholder="输入 PaddleOCR access token"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+              <div className="flex gap-2">
+                <input value={form.paddleocr_online_token || ''}
+                  onChange={(e) => updateForm({ paddleocr_online_token: e.target.value })}
+                  placeholder="输入 PaddleOCR access token"
+                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+                <button
+                  type="button"
+                  onClick={handleTestPaddleocrOnline}
+                  disabled={onlineTesting.paddleocr || !form.paddleocr_online_token}
+                  className="px-3 py-1 text-xs rounded border border-green-500 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                  {onlineTesting.paddleocr ? '测试中...' : '测试连通性'}
+                </button>
+              </div>
+              {onlineEngineStatus.paddleocr === 'ok' && (
+                <p className="text-xs text-green-600 mt-1">连接正常</p>
+              )}
+              {onlineEngineStatus.paddleocr === 'fail' && (
+                <p className="text-xs text-red-500 mt-1">连接失败</p>
+              )}
             </div>
             <p className="text-xs text-gray-400">
-              从 <a href="https://aistudio.baidu.com/paddleocr/task" target="_blank" className="text-blue-500 hover:underline">PaddleOCR 控制台</a> 获取端点和 Token。
+              从 <a href="https://aistudio.baidu.com/paddleocr/task" target="_blank" className="text-blue-500 hover:underline">PaddleOCR 控制台</a> 获取 Access Token。
               <a href="https://ai.baidu.com/ai-doc/AISTUDIO/Cmkz2m0ma" target="_blank" className="text-blue-500 hover:underline ml-2">API 文档</a>
             </p>
           </div>
