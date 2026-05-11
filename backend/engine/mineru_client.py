@@ -158,24 +158,27 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
         content_name = None
         for name in name_list:
             basename = name.split("/")[-1]
-            if basename.endswith("_content_list.json") and not basename.endswith("_v2.json"):
+            if basename.endswith("_model.json"):
                 content_name = name
                 break
+
+        if not content_name:
+            for name in name_list:
+                basename = name.split("/")[-1]
+                if basename.endswith("_content_list.json") and not basename.endswith("_v2.json"):
+                    content_name = name
+                    break
         if not content_name:
             for name in name_list:
                 basename = name.split("/")[-1]
                 if basename.endswith("_content_list_v2.json"):
                     content_name = name
                     break
-        if not content_name:
-            for name in name_list:
-                basename = name.split("/")[-1]
-                if basename.endswith("_model.json"):
-                    content_name = name
-                    break
 
         if content_name:
             data = json.loads(zf.read(content_name))
+
+            # model.json: [[page0_items], [page1_items], ...] — bbox values are normalized 0..1
             is_model = content_name.endswith("_model.json")
             if is_model and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
                 for page_idx, page_items in enumerate(data):

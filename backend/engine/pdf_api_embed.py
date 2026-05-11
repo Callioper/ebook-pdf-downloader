@@ -23,18 +23,31 @@ def embed_api_text_layer(
 ) -> None:
     doc = fitz.open(input_path)
 
-    # Compute pixel-to-point scale per page from bbox ranges
-    page_max_xy: Dict[int, tuple] = {}
-    for pg, blocks in layout.items():
-        if pg >= len(doc):
-            continue
-        max_x = max_y = 1
+    # Detect coordinate system: if all bbox values are in [0,1], they're normalized
+    all_normalized = True
+    for blocks in layout.values():
         for b in blocks:
             bbox = b.get("bbox")
-            if bbox:
-                max_x = max(max_x, bbox[2])
-                max_y = max(max_y, bbox[3])
-        page_max_xy[pg] = (max_x, max_y)
+            if bbox and len(bbox) == 4:
+                if any(v > 1.0 for v in bbox):
+                    all_normalized = False
+                    break
+        if not all_normalized:
+            break
+
+    if not all_normalized:
+        # Pixel coordinates — compute scale per page from bbox ranges
+        page_max_xy: Dict[int, tuple] = {}
+        for pg, blocks in layout.items():
+            if pg >= len(doc):
+                continue
+            max_x = max_y = 1
+            for b in blocks:
+                bbox = b.get("bbox")
+                if bbox:
+                    max_x = max(max_x, bbox[2])
+                    max_y = max(max_y, bbox[3])
+            page_max_xy[pg] = (max_x, max_y)
 
     for pg in range(len(doc)):
         page = doc[pg]
@@ -45,15 +58,16 @@ def embed_api_text_layer(
         if not blocks:
             continue
 
-        # Get pixel dimensions for this page
-        pmax = page_max_xy.get(pg)
-        if not pmax or pmax[0] <= 1:
-            continue
-        px_w, px_h = pmax
-
-        # Scale: points = pixels * (page_points / pixel_max)
-        sx = pw / px_w
-        sy = ph / px_h
+        # Get scale factors
+        if all_normalized:
+            sx = pw
+            sy = ph
+        else:
+            pmax = page_max_xy.get(pg)
+            if not pmax or pmax[0] <= 1:
+                continue
+            sx = pw / pmax[0]
+            sy = ph / pmax[1]
 
         # Embed CJK font
         cjk_needed = any(b.get("text", "") for b in blocks)
