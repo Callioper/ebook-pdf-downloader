@@ -1778,23 +1778,21 @@ async def system_status():
         if not proxy:
             return "proxy", {"ok": True, "detail": "直连"}
         try:
-            async with _httpx.AsyncClient(timeout=5, proxy=proxy) as c:
-                await c.get("http://httpbin.org/ip")
-            return "proxy", {"ok": True, "detail": proxy}
+            async with _httpx.AsyncClient(proxy=proxy, timeout=8, verify=False) as c:
+                r = await c.get("http://httpbin.org/ip")
+            return "proxy", {"ok": r.status_code == 200, "detail": proxy}
         except Exception as ex:
             return "proxy", {"ok": False, "detail": str(ex)[:50]}
 
     async def check_sources():
         proxy = cfg.get("http_proxy", "")
+        hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         ok = {}
         for label, url in [("aa", "https://annas-archive.org"), ("zl", "https://z-lib.sk")]:
             try:
-                kwargs = {"timeout": 8}
-                if proxy:
-                    kwargs["proxy"] = proxy
-                async with _httpx.AsyncClient(**kwargs) as c:
-                    sr = await c.get(url)
-                    ok[label] = sr.status_code in (200, 301, 302)
+                async with _httpx.AsyncClient(proxy=proxy if proxy else None, timeout=10, headers=hdrs, verify=False) as c:
+                    r = await c.get(url)
+                    ok[label] = r.status_code in (200, 301, 302, 503)
             except Exception:
                 ok[label] = False
         aa, zl = ok.get("aa", False), ok.get("zl", False)
