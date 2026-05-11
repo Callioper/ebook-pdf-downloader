@@ -1,28 +1,30 @@
 import io
 import os
 import pytest
-import pikepdf
+import fitz
 
-from backend.engine.pdf_api_embed import embed_api_text_layer
+from engine.pdf_api_embed import embed_api_text_layer
 
 
 @pytest.fixture
 def blank_pdf():
     """Create a minimal PDF with one blank page."""
     buf = io.BytesIO()
-    with pikepdf.new() as pdf:
-        pdf.add_blank_page(page_size=(595, 842))
-        pdf.save(buf)
+    doc = fitz.open()
+    doc.new_page(width=595, height=842)
+    doc.save(buf)
+    doc.close()
     return buf.getvalue()
 
 
 @pytest.fixture
 def blank_pdf_two_pages():
     buf = io.BytesIO()
-    with pikepdf.new() as pdf:
-        pdf.add_blank_page(page_size=(595, 842))
-        pdf.add_blank_page(page_size=(595, 842))
-        pdf.save(buf)
+    doc = fitz.open()
+    doc.new_page(width=595, height=842)
+    doc.new_page(width=595, height=842)
+    doc.save(buf)
+    doc.close()
     return buf.getvalue()
 
 
@@ -42,8 +44,9 @@ def test_embed_single_page_creates_text_layer(tmp_path, blank_pdf):
     embed_api_text_layer(input_path, output_path, layout)
 
     assert os.path.exists(output_path)
-    with pikepdf.open(output_path) as pdf:
-        assert len(pdf.pages) == 1
+    doc = fitz.open(output_path)
+    assert len(doc) == 1
+    doc.close()
 
 
 def test_embed_preserves_non_text_pages(tmp_path, blank_pdf_two_pages):
@@ -58,8 +61,9 @@ def test_embed_preserves_non_text_pages(tmp_path, blank_pdf_two_pages):
 
     embed_api_text_layer(input_path, output_path, layout)
 
-    with pikepdf.open(output_path) as pdf:
-        assert len(pdf.pages) == 2
+    doc = fitz.open(output_path)
+    assert len(doc) == 2
+    doc.close()
 
 
 def test_embed_no_bbox_uses_reading_order(tmp_path, blank_pdf):
@@ -77,5 +81,6 @@ def test_embed_no_bbox_uses_reading_order(tmp_path, blank_pdf):
 
     embed_api_text_layer(input_path, output_path, layout)
 
-    with pikepdf.open(output_path) as pdf:
-        assert len(pdf.pages) == 1
+    doc = fitz.open(output_path)
+    assert len(doc) == 1
+    doc.close()
