@@ -51,6 +51,8 @@ export const OCR_ENGINES: OcrEngineInfo[] = [
   { key: 'tesseract', name: 'Tesseract OCR', desc: '内置引擎，需 chi_sim 语言包' },
   { key: 'paddleocr', name: 'PaddleOCR', desc: '百度引擎，需 Python 3.11 虚拟环境' },
   { key: 'llm_ocr', name: 'LLM OCR (视觉大模型)', desc: '需运行 lmstudio / ollama 加载本地视觉大模型', needs_install: true, has_install: false },
+  { key: 'mineru', name: 'MinerU 线上 API', desc: '上海 AI Lab 精准解析，需 Token' },
+  { key: 'paddleocr_online', name: 'PaddleOCR-VL-1.5 线上 API', desc: '百度 PaddleOCR 视觉大模型，需 Token 和端点' },
 ]
 
 export const LLM_OCR_RECOMMENDED = [

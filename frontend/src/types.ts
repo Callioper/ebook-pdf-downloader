@@ -130,6 +130,10 @@ export interface AppConfig {
   llm_ocr_endpoint: string
   llm_ocr_model: string
   llm_ocr_concurrency: number
+  mineru_token?: string
+  mineru_model?: string
+  paddleocr_online_token?: string
+  paddleocr_online_endpoint?: string
   [key: string]: unknown
 }
 
