@@ -57,7 +57,7 @@ def _draw_block(page, nx0, ny0, nx1, ny1, text, pw, ph, font, fontname):
     ascender = getattr(font, "ascender", 1.075)
     descender = getattr(font, "descender", -0.299)
     extent_em = max(0.01, ascender - descender)
-    fs = max(3.0, min(72.0, box_h / extent_em))
+    fs = max(3.0, min(24.0, box_h / extent_em))  # cap at 24pt — MinerU bboxes have generous padding
 
     baseline = fitz.Point(x0, y1 + descender * fs)
 
@@ -102,5 +102,5 @@ def embed_api_text_layer(
                 continue
             _draw_block(page, bbox[0], bbox[1], bbox[2], bbox[3], text, pw, ph, font, fontname)
 
-    doc.save(output_path, incremental=False, encryption=0)
+    doc.save(output_path, garbage=3, deflate=True)
     doc.close()
