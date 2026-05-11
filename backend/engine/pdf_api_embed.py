@@ -1,6 +1,7 @@
 """Embed text layer into PDF from online API layout results (MinerU/PaddleOCR).
 
-Uses PyMuPDF (fitz) for proper CJK text encoding — avoids pikepdf CID issues.
+Uses PyMuPDF (fitz) with page.insert_text() for precise per-block positioning,
+matching the LLM OCR pipeline's approach (not insert_textbox which auto-fits).
 """
 
 from pathlib import Path
@@ -12,73 +13,47 @@ PageTextBlocks = Dict[int, List[Dict[str, Any]]]
 
 _SIMSUN_PATH = r"C:\Windows\Fonts\simsun.ttc"
 
-DEFAULT_FONT_SIZE = 8.0
+
+def _ensure_cjk_font(page):
+    """Embed CJK font in page if available. Returns fontname."""
+    if Path(_SIMSUN_PATH).exists():
+        try:
+            page.insert_font(fontname="F1", fontfile=_SIMSUN_PATH)
+            return fitz.Font(fontfile=_SIMSUN_PATH), "F1"
+        except Exception:
+            pass
+    return fitz.Font("helv"), "helv"
+
+
+def _has_cjk(text: str) -> bool:
+    for ch in text:
+        cp = ord(ch)
+        if any(lo <= cp <= hi for lo, hi in (
+            (0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0xF900, 0xFAFF),
+            (0x3040, 0x309F), (0x30A0, 0x30FF), (0x3000, 0x303F),
+            (0xFF00, 0xFFEF),
+        )):
+            return True
+    return False
 
 
 def embed_api_text_layer(
     input_path: str,
     output_path: str,
     layout: PageTextBlocks,
-    font_size: float = DEFAULT_FONT_SIZE,
+    font_size: float = 9.0,
 ) -> None:
     doc = fitz.open(input_path)
-
-    # Detect coordinate system: if all bbox values are in [0,1], they're normalized
-    all_normalized = True
-    for blocks in layout.values():
-        for b in blocks:
-            bbox = b.get("bbox")
-            if bbox and len(bbox) == 4:
-                if any(v > 1.0 for v in bbox):
-                    all_normalized = False
-                    break
-        if not all_normalized:
-            break
-
-    if not all_normalized:
-        # Pixel coordinates — compute scale per page from bbox ranges
-        page_max_xy: Dict[int, tuple] = {}
-        for pg, blocks in layout.items():
-            if pg >= len(doc):
-                continue
-            max_x = max_y = 1
-            for b in blocks:
-                bbox = b.get("bbox")
-                if bbox:
-                    max_x = max(max_x, bbox[2])
-                    max_y = max(max_y, bbox[3])
-            page_max_xy[pg] = (max_x, max_y)
 
     for pg in range(len(doc)):
         page = doc[pg]
         pw = page.rect.width
         ph = page.rect.height
         blocks = layout.get(pg, [])
-
         if not blocks:
             continue
 
-        # Get scale factors
-        if all_normalized:
-            sx = pw
-            sy = ph
-        else:
-            pmax = page_max_xy.get(pg)
-            if not pmax or pmax[0] <= 1:
-                continue
-            sx = pw / pmax[0]
-            sy = ph / pmax[1]
-
-        # Embed CJK font
-        cjk_needed = any(b.get("text", "") for b in blocks)
-        if cjk_needed and Path(_SIMSUN_PATH).exists():
-            try:
-                page.insert_font(fontname="F1", fontfile=_SIMSUN_PATH)
-                fontname = "F1"
-            except Exception:
-                fontname = "helv"
-        else:
-            fontname = "helv"
+        font, fontname = _ensure_cjk_font(page)
 
         for block in blocks:
             text = (block.get("text") or "").strip()
@@ -86,28 +61,34 @@ def embed_api_text_layer(
                 continue
 
             bbox = block.get("bbox")
-            if bbox and len(bbox) == 4:
-                rect = fitz.Rect(
-                    bbox[0] * sx,
-                    bbox[1] * sy,
-                    bbox[2] * sx,
-                    bbox[3] * sy,
-                )
-            else:
-                rect = fitz.Rect(50, 50, pw - 50, ph - 50)
-
-            if rect.width <= 0 or rect.height <= 0:
+            if not bbox or len(bbox) != 4:
                 continue
 
+            # Normalized coordinates → PDF points
+            x0 = bbox[0] * pw
+            y0 = bbox[1] * ph
+            x1 = bbox[2] * pw
+            y1 = bbox[3] * ph
+
+            box_w = x1 - x0
+            box_h = y1 - y0
+            if box_w <= 1 or box_h <= 1:
+                continue
+
+            # Auto-size font to fit within box height
+            ascender = getattr(font, "ascender", 1.075)
+            descender = getattr(font, "descender", -0.299)
+            extent_em = max(0.01, ascender - descender)
+            fs = max(3.0, min(72.0, box_h / extent_em))
+
+            # Baseline at box bottom, shifted up by descender
+            baseline = fitz.Point(x0, y1 + descender * fs)
+
             try:
-                page.insert_textbox(
-                    rect,
-                    text,
-                    fontname=fontname,
-                    fontsize=font_size,
-                    render_mode=3,  # invisible
-                    align=0,
-                )
+                if _has_cjk(text):
+                    page.insert_text(baseline, text, fontname="F1", fontsize=fs, render_mode=3)
+                else:
+                    page.insert_text(baseline, text, fontname=fontname, fontsize=fs, render_mode=3)
             except Exception:
                 pass
 
