@@ -3,11 +3,14 @@
 import asyncio
 import io
 import json
+import logging
 import time
 import zipfile
 from typing import Any, Dict, List, Tuple
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 MINERU_BASE = "https://mineru.net"
 
@@ -40,7 +43,6 @@ class MinerUClient:
         is_ocr: bool = True,
         enable_formula: bool = True,
     ) -> Tuple[str, List[str]]:
-        url = f"{MINERU_BASE}/api/v4/file-urls/batch"
         payload = {
             "files": [{"name": name, "is_ocr": is_ocr} for name in file_names],
             "model_version": model_version,
@@ -48,18 +50,39 @@ class MinerUClient:
             "enable_table": enable_table,
             "enable_formula": enable_formula,
         }
-        resp = await self._client.post(url, json=payload)
-        data = resp.json()
-        if data.get("code") != 0:
-            raise MinerUAPIError(data.get("msg", "unknown error"), data.get("code", -1))
-        return data["data"]["batch_id"], data["data"]["file_urls"]
+        logger.info(f"submit_batch: files={file_names}, model={model_version}")
+        try:
+            resp = await self._client.post("/api/v4/file-urls/batch", json=payload)
+            data = resp.json()
+            logger.info(f"submit_batch response: code={data.get('code')}, batch_id={data.get('data',{}).get('batch_id','?')}")
+            if data.get("code") != 0:
+                raise MinerUAPIError(data.get("msg", "unknown error"), data.get("code", -1))
+            return data["data"]["batch_id"], data["data"]["file_urls"]
+        except MinerUAPIError:
+            raise
+        except Exception as e:
+            raise MinerUAPIError(f"submit_batch failed: {type(e).__name__}: {e}") from e
 
     async def upload_file(self, file_url: str, pdf_bytes: bytes):
         """PUT raw bytes to OSS signed URL. Uses bare client — URL has embedded signature."""
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as up:
-            resp = await up.put(file_url, content=pdf_bytes)
-            if resp.status_code not in (200, 201):
-                raise MinerUAPIError(f"upload failed: HTTP {resp.status_code}")
+        logger.info(f"upload_file: url_host={file_url.split('/')[2] if '//' in file_url else '?'}, size={len(pdf_bytes)}")
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as up:
+                    resp = await up.put(file_url, content=pdf_bytes)
+                    logger.info(f"upload_file response: HTTP {resp.status_code}")
+                    if resp.status_code in (200, 201):
+                        return
+                    if resp.status_code >= 500 and attempt < 2:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    raise MinerUAPIError(f"upload failed: HTTP {resp.status_code}")
+            except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
+                logger.warning(f"upload_file attempt {attempt+1} failed: {type(e).__name__}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise MinerUAPIError(f"upload failed after 3 attempts: {type(e).__name__}: {e}") from e
 
     async def poll_until_done(
         self,
@@ -68,7 +91,7 @@ class MinerUClient:
         poll_interval: float = 5.0,
         progress_callback=None,
     ) -> Dict[str, Any]:
-        url = f"{MINERU_BASE}/api/v4/extract-results/batch/{batch_id}"
+        url = f"/api/v4/extract-results/batch/{batch_id}"
         deadline = time.monotonic() + timeout
 
         while time.monotonic() < deadline:
@@ -108,8 +131,10 @@ class MinerUClient:
         raise MinerUTimeoutError(f"batch {batch_id} did not complete within {timeout}s")
 
     async def download_zip(self, zip_url: str) -> bytes:
+        logger.info(f"download_zip: {zip_url[:80]}...")
         resp = await self._client.get(zip_url)
         resp.raise_for_status()
+        logger.info(f"download_zip: {len(resp.content)} bytes")
         return resp.content
 
     async def close(self):
@@ -122,8 +147,10 @@ class MinerUClient:
         model_version: str = "vlm",
         progress_callback=None,
     ) -> bytes:
+        logger.info(f"process_pdf: file={file_name}, size={len(pdf_bytes)}, model={model_version}")
         batch_id, file_urls = await self.submit_batch([file_name], model_version=model_version)
         await self.upload_file(file_urls[0], pdf_bytes)
+        logger.info(f"process_pdf: polling batch_id={batch_id}")
         result = await self.poll_until_done(batch_id, progress_callback=progress_callback)
         return await self.download_zip(result["full_zip_url"])
 
