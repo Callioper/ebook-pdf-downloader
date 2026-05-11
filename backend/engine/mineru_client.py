@@ -3,14 +3,9 @@
 import asyncio
 import io
 import json
-import logging
 import time
 import zipfile
 from typing import Any, Dict, List, Tuple
-
-import httpx
-
-logger = logging.getLogger(__name__)
 
 MINERU_BASE = "https://mineru.net"
 
@@ -31,7 +26,7 @@ class MinerUClient:
         self._timeout = timeout
 
     async def close(self):
-        pass  # no persistent client to close
+        pass
 
     async def submit_batch(
         self,
@@ -42,6 +37,7 @@ class MinerUClient:
         is_ocr: bool = True,
         enable_formula: bool = True,
     ) -> Tuple[str, List[str]]:
+        import httpx
         payload = {
             "files": [{"name": name, "is_ocr": is_ocr} for name in file_names],
             "model_version": model_version,
@@ -66,12 +62,11 @@ class MinerUClient:
             raise MinerUAPIError(f"submit_batch failed: {type(e).__name__}: {e}") from e
 
     async def upload_file(self, file_url: str, pdf_bytes: bytes):
-        logger.info(f"upload_file: size={len(pdf_bytes)}")
+        import httpx
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as up:
                     resp = await up.put(file_url, content=pdf_bytes)
-                    logger.info(f"upload_file response: HTTP {resp.status_code}")
                     if resp.status_code in (200, 201):
                         return
                     if resp.status_code >= 500 and attempt < 2:
@@ -79,7 +74,6 @@ class MinerUClient:
                         continue
                     raise MinerUAPIError(f"upload failed: HTTP {resp.status_code}")
             except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
-                logger.warning(f"upload_file attempt {attempt+1} failed: {type(e).__name__}: {e}")
                 if attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -92,6 +86,7 @@ class MinerUClient:
         poll_interval: float = 5.0,
         progress_callback=None,
     ) -> Dict[str, Any]:
+        import httpx
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             async with httpx.AsyncClient(
@@ -110,7 +105,6 @@ class MinerUClient:
             if not items:
                 await asyncio.sleep(poll_interval)
                 continue
-
             if isinstance(items, dict):
                 items = [items]
 
@@ -135,11 +129,10 @@ class MinerUClient:
         raise MinerUTimeoutError(f"batch {batch_id} did not complete within {timeout}s")
 
     async def download_zip(self, zip_url: str) -> bytes:
-        logger.info(f"download_zip: {zip_url[:80]}...")
+        import httpx
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.get(zip_url)
             resp.raise_for_status()
-            logger.info(f"download_zip: {len(resp.content)} bytes")
             return resp.content
 
     async def process_pdf(
@@ -149,10 +142,8 @@ class MinerUClient:
         model_version: str = "vlm",
         progress_callback=None,
     ) -> bytes:
-        logger.info(f"process_pdf: file={file_name}, size={len(pdf_bytes)}, model={model_version}")
         batch_id, file_urls = await self.submit_batch([file_name], model_version=model_version)
         await self.upload_file(file_urls[0], pdf_bytes)
-        logger.info(f"process_pdf: polling batch_id={batch_id}")
         result = await self.poll_until_done(batch_id, progress_callback=progress_callback)
         return await self.download_zip(result["full_zip_url"])
 
@@ -168,14 +159,12 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
             if basename.endswith("_content_list.json") and not basename.endswith("_v2.json"):
                 content_name = name
                 break
-
         if not content_name:
             for name in name_list:
                 basename = name.split("/")[-1]
                 if basename.endswith("_content_list_v2.json"):
                     content_name = name
                     break
-
         if not content_name:
             for name in name_list:
                 basename = name.split("/")[-1]
@@ -185,7 +174,6 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
 
         if content_name:
             data = json.loads(zf.read(content_name))
-
             is_model = content_name.endswith("_model.json")
             if is_model and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
                 for page_idx, page_items in enumerate(data):
@@ -194,11 +182,8 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
                         if not text:
                             continue
                         bbox = _extract_bbox_from_item(item)
-                        pages.setdefault(page_idx, []).append({
-                            "text": text, "bbox": bbox, "category_id": 0,
-                        })
+                        pages.setdefault(page_idx, []).append({"text": text, "bbox": bbox, "category_id": 0})
                 return dict(sorted(pages.items()))
-
             if isinstance(data, list):
                 for item in data:
                     text = _extract_text_from_item(item)
@@ -207,9 +192,7 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
                     page_idx = item.get("page_idx", 0)
                     bbox_arr = item.get("bbox", [])
                     bbox = _normalize_bbox(bbox_arr)
-                    pages.setdefault(page_idx, []).append({
-                        "text": text, "bbox": bbox, "category_id": 0,
-                    })
+                    pages.setdefault(page_idx, []).append({"text": text, "bbox": bbox, "category_id": 0})
                 return dict(sorted(pages.items()))
 
     for name in name_list:
@@ -218,7 +201,6 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
             lines = [l.strip() for l in md_text.split("\n") if l.strip()]
             pages[0] = [{"text": l, "bbox": None, "category_id": 0} for l in lines]
             return pages
-
     return pages
 
 
@@ -227,18 +209,12 @@ def _extract_text_from_item(item: Dict) -> str:
         val = item.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
-
     content = item.get("content")
     if isinstance(content, dict):
         for sub_key in ("paragraph_content", "title_content", "page_header_content", "page_footer_content"):
             sub = content.get(sub_key)
             if isinstance(sub, list):
-                parts = []
-                for c in sub:
-                    if isinstance(c, dict):
-                        t = c.get("text") or c.get("content")
-                        if isinstance(t, str):
-                            parts.append(t)
+                parts = [c.get("text") or c.get("content") or "" for c in sub if isinstance(c, dict)]
                 if parts:
                     return "".join(parts)
     return ""

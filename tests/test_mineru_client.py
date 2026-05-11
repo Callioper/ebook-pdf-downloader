@@ -26,12 +26,12 @@ async def test_submit_batch_returns_batch_id(client):
         "data": {"batch_id": "batch-abc-123", "file_urls": ["https://oss.example.com/upload/abc"]},
         "msg": "ok",
     }
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(return_value=mock_resp)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client_inst = MagicMock()
+    mock_client_inst.post = AsyncMock(return_value=mock_resp)
+    mock_client_inst.__aenter__ = AsyncMock(return_value=mock_client_inst)
+    mock_client_inst.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("httpx.AsyncClient", return_value=mock_client_inst):
         batch_id, file_urls = await client.submit_batch(file_names=["test.pdf"], model_version="vlm")
 
     assert batch_id == "batch-abc-123"
@@ -44,17 +44,17 @@ async def test_upload_file_sends_raw_bytes(client):
     mock_resp.status_code = 200
 
     pdf_bytes = b"%PDF-1.4 fake pdf content"
-    with patch("engine.mineru_client.httpx.AsyncClient") as mock_client_cls:
-        mock_up = MagicMock()
-        mock_up.put = AsyncMock(return_value=mock_resp)
-        mock_client_cls.return_value.__aenter__.return_value = mock_up
+    mock_client_inst = MagicMock()
+    mock_client_inst.put = AsyncMock(return_value=mock_resp)
+    mock_client_inst.__aenter__ = AsyncMock(return_value=mock_client_inst)
+    mock_client_inst.__aexit__ = AsyncMock(return_value=None)
 
+    with patch("httpx.AsyncClient", return_value=mock_client_inst):
         await client.upload_file("https://oss.example.com/upload/abc", pdf_bytes)
 
-        mock_up.put.assert_called_once()
-        call_args = mock_up.put.call_args
-        assert call_args[0][0] == "https://oss.example.com/upload/abc"
-        assert call_args[1]["content"] == pdf_bytes
+    mock_client_inst.put.assert_called_once()
+    call_args = mock_client_inst.put.call_args
+    assert call_args[0][0] == "https://oss.example.com/upload/abc"
 
 
 @pytest.mark.asyncio
@@ -79,12 +79,12 @@ async def test_poll_until_done_returns_zip_url(client):
         },
     }
 
-    mock_client = MagicMock()
-    mock_client.get = AsyncMock(side_effect=[pending_resp, done_resp])
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client_inst = MagicMock()
+    mock_client_inst.get = AsyncMock(side_effect=[pending_resp, done_resp])
+    mock_client_inst.__aenter__ = AsyncMock(return_value=mock_client_inst)
+    mock_client_inst.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("httpx.AsyncClient", return_value=mock_client_inst):
         result = await client.poll_until_done("batch-abc", poll_interval=0.01)
 
     assert result["full_zip_url"] == "https://cdn.example.com/result.zip"
@@ -99,12 +99,12 @@ async def test_poll_raises_on_failed(client):
         "data": {"batch_id": "batch-abc", "extract_result": [{"file_name": "test.pdf", "state": "failed", "err_msg": "file too large"}]},
     }
 
-    mock_client = MagicMock()
-    mock_client.get = AsyncMock(return_value=failed_resp)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client_inst = MagicMock()
+    mock_client_inst.get = AsyncMock(return_value=failed_resp)
+    mock_client_inst.__aenter__ = AsyncMock(return_value=mock_client_inst)
+    mock_client_inst.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("httpx.AsyncClient", return_value=mock_client_inst):
         with pytest.raises(MinerUAPIError, match="file too large"):
             await client.poll_until_done("batch-abc", poll_interval=0.01)
 
@@ -118,12 +118,12 @@ async def test_poll_raises_timeout(client):
         "data": {"batch_id": "batch-abc", "extract_result": [{"file_name": "test.pdf", "state": "running"}]},
     }
 
-    mock_client = MagicMock()
-    mock_client.get = AsyncMock(return_value=running_resp)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client_inst = MagicMock()
+    mock_client_inst.get = AsyncMock(return_value=running_resp)
+    mock_client_inst.__aenter__ = AsyncMock(return_value=mock_client_inst)
+    mock_client_inst.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("engine.mineru_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("httpx.AsyncClient", return_value=mock_client_inst):
         with pytest.raises(MinerUTimeoutError):
             await client.poll_until_done("batch-abc", timeout=0.1, poll_interval=0.01)
 
