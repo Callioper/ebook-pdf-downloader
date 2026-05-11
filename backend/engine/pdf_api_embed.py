@@ -60,12 +60,6 @@ def embed_api_text_layer(
 
             stream_lines = []
             stream_lines.append("/GS0 gs")
-            stream_lines.append("BT")
-
-            if font:
-                stream_lines.append(f"/{font_name} {font_size:.1f} Tf")
-            else:
-                stream_lines.append(f"/{font_name} {font_size:.1f} Tf")
 
             if blocks:
                 for i, block in enumerate(blocks):
@@ -82,10 +76,16 @@ def embed_api_text_layer(
                         y = page_height - DEFAULT_MARGIN_TOP - i * line_height
 
                     escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-                    stream_lines.append(f"{x:.1f} {y:.1f} Td ({escaped}) Tj")
-                    stream_lines.append(f"0 {line_height:.1f} Td")
 
-            stream_lines.append("ET")
+                    block_lines = []
+                    block_lines.append("BT")
+                    if font:
+                        block_lines.append(f"/{font_name} {font_size:.1f} Tf")
+                    else:
+                        block_lines.append(f"/{font_name} {font_size:.1f} Tf")
+                    block_lines.append(f"{x:.1f} {y:.1f} Td ({escaped}) Tj")
+                    block_lines.append("ET")
+                    stream_lines.extend(block_lines)
 
             content_stream = pikepdf.Stream(pdf, "\n".join(stream_lines).encode("utf-8"))
 
