@@ -2560,6 +2560,31 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Uploading to MinerU..."})
 
             try:
+                import httpx
+
+                # Diagnostic: call same code path that works in debug-mineru-httpx endpoint
+                task_store.add_log(task_id, "MinerU: testing httpx connectivity via same pattern as debug endpoint...")
+                async with httpx.AsyncClient(
+                    base_url="https://mineru.net",
+                    headers={"Authorization": f"Bearer {mineru_token}", "Content-Type": "application/json"},
+                    timeout=30,
+                ) as diag_client:
+                    diag_resp = await diag_client.post("/api/v4/file-urls/batch", json={
+                        "files": [{"name": os.path.basename(pdf_path), "is_ocr": True}],
+                        "model_version": mineru_model,
+                        "language": "ch",
+                        "enable_table": True,
+                        "enable_formula": True,
+                    })
+                    diag_data = diag_resp.json()
+                    task_store.add_log(task_id, f"MinerU: diagnostic HTTP {diag_resp.status_code}, code={diag_data.get('code')}")
+                    if diag_data.get("code") != 0:
+                        raise RuntimeError(f"diagnostic submit failed: {diag_data.get('msg')}")
+                    batch_id = diag_data["data"]["batch_id"]
+                    file_urls = diag_data["data"]["file_urls"]
+                    task_store.add_log(task_id, f"MinerU: diagnostic batch_id={batch_id}")
+
+                # Now use MinerUClient for the rest (upload, poll, download, parse, embed)
                 from backend.engine.mineru_client import MinerUClient, parse_layout_from_zip
                 from backend.engine.pdf_api_embed import embed_api_text_layer
 
@@ -2588,13 +2613,13 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         with open(pdf_path, "rb") as f:
                             pdf_bytes = f.read()
 
-                        task_store.add_log(task_id, f"MinerU: submitting batch ({len(pdf_bytes)} bytes)...")
-                        zip_bytes = await client.process_pdf(
-                            pdf_bytes,
-                            file_name=os.path.basename(pdf_path),
-                            model_version=mineru_model,
-                            progress_callback=_mineru_progress,
-                        )
+                        # Skip submit_batch (done via diagnostic above), start from upload
+                        await client.upload_file(file_urls[0], pdf_bytes)
+                        task_store.add_log(task_id, "MinerU: uploaded OK, polling...")
+
+                        result = await client.poll_until_done(batch_id, progress_callback=_mineru_progress)
+                        zip_bytes = await client.download_zip(result["full_zip_url"])
+                        task_store.add_log(task_id, f"MinerU: downloaded {len(zip_bytes)} bytes")
 
                         layout = parse_layout_from_zip(zip_bytes)
                         task_store.add_log(task_id, f"MinerU: parsed {len(layout)} pages with text")
@@ -2603,13 +2628,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
                         output_pdf = pdf_path + ".mineru.pdf"
                         loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(
-                            None,
-                            embed_api_text_layer,
-                            pdf_path,
-                            output_pdf,
-                            layout,
-                        )
+                        await loop.run_in_executor(None, embed_api_text_layer, pdf_path, output_pdf, layout)
 
                         if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
                             os.replace(output_pdf, pdf_path)
