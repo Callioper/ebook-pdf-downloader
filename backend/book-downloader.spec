@@ -46,7 +46,7 @@ a = Analysis(
         'curl_cffi',
         'httpx', 'httpcore', 'h11', 'certifi',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
-        'pikepdf',
+        'pikepdf', 'fitz',
     ],
     hookspath=[],
     hooksconfig={},
