@@ -278,7 +278,7 @@ export default function Layout() {
                className="hover:text-gray-600 disabled:opacity-50 ml-1 px-1.5 py-0.5 rounded border border-gray-300 text-[10px]"
                title="检测所有组件状态"
              >
-               {sysChecking ? '⏳' : '状态检测'}
+               {sysChecking ? '...' : '状态检测'}
              </button>
              {sysStatus && sysCheckedRef.current && (
                <span className={`text-[10px] ${sysStatus.all_ok ? 'text-green-500' : 'text-orange-500'}`}>

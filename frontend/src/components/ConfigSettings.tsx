@@ -60,10 +60,8 @@ function FolderPicker({ value, onChange, placeholder }: { value: string; onChang
       if (data.path) {
         onChange(data.path)
       } else if (data.error) {
-        console.warn('Folder picker:', data.error)
       }
     } catch (e) {
-      console.warn('Folder picker failed:', e)
     }
     pickingRef.current = false
     setPicking(false)
@@ -429,7 +427,6 @@ export default function ConfigSettings() {
         setUpdateResult(`已是最新版本 v${data.current}`)
       }
     } catch (e) {
-      console.warn('[ConfigSettings] check update:', e)
       if (mountedRef.current) setUpdateResult('检查失败')
     } finally {
       if (mountedRef.current) setUpdateChecking(false)
@@ -453,7 +450,6 @@ export default function ConfigSettings() {
       const merged = { ...DEFAULT_CONFIG, ...data }
       setForm(merged)
     } catch (e) {
-      console.warn('[ConfigSettings] fetch config:', e)
       if (mountedRef.current) setConfig(DEFAULT_CONFIG)
     } finally {
       if (mountedRef.current) setLoading(false)
@@ -477,7 +473,7 @@ export default function ConfigSettings() {
           setZlibChecked(true)
           if (data.balance) setZlibBalance(data.balance)
         }
-      } catch (e) { console.warn('[ConfigSettings] restore zlib:', e) }
+      } catch (e) { }
     }
     restoreZlib()
   }, [config, form.zlib_email, form.zlib_password, zlibChecked])
@@ -499,7 +495,7 @@ export default function ConfigSettings() {
           setProxyMsg(data.message || '代理不可用')
         }
         setProxyChecked(true)
-      } catch (e) { console.warn('[ConfigSettings] restore proxy:', e) }
+      } catch (e) { }
     }
     restoreProxy()
   }, [config, form.http_proxy, proxyChecked])
@@ -524,7 +520,7 @@ export default function ConfigSettings() {
         setZlProxyStatus(results.zlibrary ? 'green' : 'red')
         setAaProxyDetail(details.annas_archive || '')
         setZlProxyDetail(details.zlibrary || '')
-      } catch (e) { console.warn('[ConfigSettings] restore source:', e) }
+      } catch (e) { }
     }
     restoreSourceStatus()
   }, [config])
@@ -545,7 +541,6 @@ export default function ConfigSettings() {
       setFlareInstalled(data.installed || false)
       if (data.exe_path) setFlareStatusText(`已找到: ${data.exe_path}`)
     } catch (e) {
-      console.warn('[ConfigSettings] check flare:', e)
       if (mountedRef.current) {
         setFlareRunning(false)
         setFlareInstalled(false)
@@ -574,7 +569,6 @@ export default function ConfigSettings() {
         setDbNames(dbs)
         setDbStatus(dbs.length > 0 ? 'green' : 'yellow')
       } catch (e) {
-        console.warn('[ConfigSettings] auto detect db:', e)
         if (mountedRef.current) setDbStatus('red')
       }
     }
@@ -604,7 +598,7 @@ export default function ConfigSettings() {
             },
           }))
         })
-        .catch((e) => console.warn(`[ConfigSettings] auto detect ${eng}:`, e))
+        .catch(() => {})
     })
     // Also check the default OCR engine for the main OCR status
     const defaultEngine = form.ocr_engine || 'tesseract'
@@ -686,7 +680,6 @@ export default function ConfigSettings() {
       setOcrStatus(data.ok ? 'green' : 'red')
       setOcrMsg(data.message || (data.ok ? data.version || '已安装' : '未检测到'))
     } catch (e) {
-      console.warn('[ConfigSettings] check ocr:', e)
       if (mountedRef.current) {
         setOcrStatus('red')
         setOcrMsg('检测失败')
@@ -717,7 +710,6 @@ export default function ConfigSettings() {
       }
       setDetectedPaths(allPaths)
     } catch (e) {
-      console.warn('[ConfigSettings] detect paths:', e)
       if (mountedRef.current) setDbStatus('red')
     } finally {
       if (mountedRef.current) setDbDetecting(false)
@@ -734,7 +726,6 @@ export default function ConfigSettings() {
       setDbNames(dbs)
       setDbStatus(dbs.length > 0 ? 'green' : 'yellow')
     } catch (e) {
-      console.warn('[ConfigSettings] check db:', e)
       if (mountedRef.current) setDbStatus('red')
     } finally {
       if (mountedRef.current) setDbDetecting(false)
@@ -767,7 +758,6 @@ export default function ConfigSettings() {
         setZlibMsg(data.message || '登录失败')
       }
     } catch (e) {
-      console.warn('[ConfigSettings] zlib check:', e)
       if (mountedRef.current) {
         setZlibChecked(true)
         setZlibConnected(false)
@@ -798,7 +788,6 @@ export default function ConfigSettings() {
         setProxyMsg(data.message || '代理不可用')
       }
     } catch (e) {
-      console.warn('[ConfigSettings] check proxy:', e)
       if (mountedRef.current) {
         setProxyChecked(true)
         setProxyStatus('red')
@@ -824,7 +813,7 @@ export default function ConfigSettings() {
       setZlProxyStatus(results.zlibrary ? 'green' : 'red')
       setAaProxyDetail(details.annas_archive || '')
       setZlProxyDetail(details.zlibrary || '')
-    } catch (e) { console.warn('[ConfigSettings] check proxy sources:', e) }
+    } catch (e) { }
   }
 
   const handleInstallFlare = async () => {
@@ -885,10 +874,9 @@ export default function ConfigSettings() {
             }
             if (flarePollRef.current) clearInterval(flarePollRef.current)
           }
-        } catch (e) { console.warn('[ConfigSettings] flare poll:', e) }
+        } catch (e) { }
 }, 1500)
     } catch (e) {
-      console.warn('[ConfigSettings] install flare:', e)
       if (mountedRef.current) {
         setFlareStatusText('安装请求失败')
         setFlareInstallFailed(true)
@@ -912,7 +900,6 @@ export default function ConfigSettings() {
         if (data.message) setFlareInstallFailed(true)
       }
     } catch (e) {
-      console.warn('[ConfigSettings] start flare:', e)
       if (mountedRef.current) setFlareStatusText('启动请求失败')
     } finally {
       if (mountedRef.current) setFlareChecking(false)
@@ -929,7 +916,6 @@ export default function ConfigSettings() {
         setFlareStatusText('已停止')
       }
     } catch (e) {
-      console.warn('[ConfigSettings] stop flare:', e)
       if (mountedRef.current) setFlareStatusText('停止请求失败')
     }
   }
@@ -952,7 +938,6 @@ export default function ConfigSettings() {
         },
       }))
     } catch (e) {
-      console.warn('[ConfigSettings] detect ocr engine:', e)
       if (mountedRef.current) {
         setOcrEngines(prev => ({
           ...prev,
@@ -1017,7 +1002,6 @@ export default function ConfigSettings() {
         },
       }))
     } catch (e) {
-      console.warn('[ConfigSettings] install ocr engine:', e)
       if (mountedRef.current) {
         setOcrEngines(prev => ({
           ...prev,
@@ -1378,7 +1362,7 @@ export default function ConfigSettings() {
                         const res = await fetch('/api/v1/browse-folder')
                         const data = await res.json()
                         if (data.path) setFlareManualPath(data.path)
-                      } catch (e) { console.warn('[ConfigSettings] browse folder:', e) }
+                      } catch (e) { }
                     }}
                     className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 shrink-0"
                     title="选择安装目录..."
@@ -1718,7 +1702,7 @@ export default function ConfigSettings() {
                       await fetch('/api/v1/install-tesseract-lang?lang=chi_sim')
                       handleDetectOcrEngine('tesseract')
                     } catch (e) {
-                      console.warn('[ConfigSettings] install tess lang:', e)
+
                     }
                   }}
                   className="px-2 py-1 text-xs rounded bg-orange-500 text-white hover:bg-orange-600"
