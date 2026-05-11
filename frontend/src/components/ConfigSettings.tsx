@@ -35,6 +35,10 @@ interface AppConfig {
   llm_ocr_model: string
   llm_ocr_concurrency: number
   llm_ocr_detect_batch: number
+  mineru_token: string
+  mineru_model: string
+  paddleocr_online_token: string
+  paddleocr_online_endpoint: string
   ocr_confirm_enabled: boolean
   bookmark_confirm_enabled: boolean
   pdf_compress: boolean
@@ -169,6 +173,10 @@ const DEFAULT_CONFIG: AppConfig = {
   llm_ocr_model: '',
   llm_ocr_concurrency: 1,
   llm_ocr_detect_batch: 20,
+  mineru_token: '',
+  mineru_model: 'vlm',
+  paddleocr_online_token: '',
+  paddleocr_online_endpoint: '',
   ocr_confirm_enabled: false,
   bookmark_confirm_enabled: false,
   pdf_compress: false,
@@ -1554,7 +1562,7 @@ export default function ConfigSettings() {
           <div className="border-t border-gray-200 pt-3">
             <span className="text-xs font-medium text-gray-600 mb-2 block">引擎切换</span>
             <div className="grid grid-cols-2 gap-2">
-              {OCR_ENGINES.filter(eng => eng.key !== 'llm_ocr').map((eng) => {
+              {OCR_ENGINES.filter(eng => eng.key !== 'llm_ocr' && eng.key !== 'mineru' && eng.key !== 'paddleocr_online').map((eng) => {
                 const info = ocrEngines[eng.key] || { installed: eng.key === 'llm_ocr', msg: '' }
                 const isSelected = form.ocr_engine === eng.key
                 return (
@@ -1870,6 +1878,105 @@ export default function ConfigSettings() {
                 ))}
               </div>
             </details>
+          </div>
+          )}
+          {/* ---------- MinerU 线上 API ---------- */}
+          <div className="border-t border-gray-200 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-700">
+                {form.ocr_engine === 'mineru' ? (
+                  <span className="text-blue-600">MinerU 线上 API 已启用</span>
+                ) : (
+                  <span className="text-gray-500">MinerU 线上 API (上海 AI Lab 精准解析)</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateForm({ ocr_engine: form.ocr_engine === 'mineru' ? 'tesseract' : 'mineru' })}
+                className={`px-3 py-1 text-xs rounded ${
+                  form.ocr_engine === 'mineru'
+                    ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                }`}
+              >
+                {form.ocr_engine === 'mineru' ? '停用 MinerU' : '启用 MinerU'}
+              </button>
+            </div>
+          </div>
+          {form.ocr_engine === 'mineru' && (
+          <div className="space-y-3 pt-2">
+            <p className="text-xs text-gray-500">
+              使用 MinerU v4 精准解析 API 进行文档 OCR。PDF 将上传至 MinerU 服务器处理。
+              仅限中国大陆网络访问，单文件 ≤200MB / ≤200页。
+            </p>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">API Token</label>
+              <input value={form.mineru_token || ''}
+                onChange={(e) => updateForm({ mineru_token: e.target.value })}
+                placeholder="输入 MinerU API Token（Bearer 认证）"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">模型版本</label>
+              <select value={form.mineru_model || 'vlm'}
+                onChange={(e) => updateForm({ mineru_model: e.target.value })}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
+                <option value="pipeline">pipeline (传统引擎)</option>
+                <option value="vlm">vlm (推荐，视觉大模型)</option>
+              </select>
+            </div>
+            <p className="text-xs text-gray-400">
+              需要先申请 Token：<a href="https://mineru.net/apiManage/docs" target="_blank" className="text-blue-500 hover:underline">MinerU API 文档</a>
+            </p>
+          </div>
+          )}
+          {/* ---------- PaddleOCR-VL-1.5 线上 API ---------- */}
+          <div className="border-t border-gray-200 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-700">
+                {form.ocr_engine === 'paddleocr_online' ? (
+                  <span className="text-blue-600">PaddleOCR-VL-1.5 线上 API 已启用</span>
+                ) : (
+                  <span className="text-gray-500">PaddleOCR-VL-1.5 线上 API (百度 AI Studio)</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateForm({ ocr_engine: form.ocr_engine === 'paddleocr_online' ? 'tesseract' : 'paddleocr_online' })}
+                className={`px-3 py-1 text-xs rounded ${
+                  form.ocr_engine === 'paddleocr_online'
+                    ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                }`}
+              >
+                {form.ocr_engine === 'paddleocr_online' ? '停用 PaddleOCR-VL-1.5' : '启用 PaddleOCR-VL-1.5'}
+              </button>
+            </div>
+          </div>
+          {form.ocr_engine === 'paddleocr_online' && (
+          <div className="space-y-3 pt-2">
+            <p className="text-xs text-gray-500">
+              使用百度 AI Studio 部署的 PaddleOCR-VL-1.5 视觉大模型 API 进行文档版面解析。
+              支持中英文文档，无需本地 GPU。
+            </p>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">API 端点</label>
+              <input value={form.paddleocr_online_endpoint || ''}
+                onChange={(e) => updateForm({ paddleocr_online_endpoint: e.target.value })}
+                placeholder="https://aistudio.baidu.com/serving/xxx"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Access Token</label>
+              <input value={form.paddleocr_online_token || ''}
+                onChange={(e) => updateForm({ paddleocr_online_token: e.target.value })}
+                placeholder="输入 PaddleOCR access token"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+            </div>
+            <p className="text-xs text-gray-400">
+              从 <a href="https://aistudio.baidu.com/paddleocr/task" target="_blank" className="text-blue-500 hover:underline">PaddleOCR 控制台</a> 获取端点和 Token。
+              <a href="https://ai.baidu.com/ai-doc/AISTUDIO/Cmkz2m0ma" target="_blank" className="text-blue-500 hover:underline ml-2">API 文档</a>
+            </p>
           </div>
           )}
 
