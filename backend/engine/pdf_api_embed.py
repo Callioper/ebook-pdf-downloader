@@ -36,28 +36,41 @@ def _draw_block(page, nx0, ny0, nx1, ny1, text, pw, ph, font, fontname):
     if box_w <= 1 or box_h <= 1:
         return
 
-    # === Multi-line detection (matching LLM OCR pipeline) ===
+    # === Multi-line detection (matching LLM OCR pipeline + CJK support) ===
     norm_height = ny1 - ny0
     aspect = box_h / max(0.01, box_w)
     words = text.split()
-    if norm_height > 0.07 and aspect > 0.20 and len(words) >= 2:
+    # Also count CJK characters (no spaces between words)
+    cjk_chars = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf')
+    total_chars = max(len(words), cjk_chars)
+
+    if norm_height > 0.07 and aspect > 0.20 and total_chars >= 2:
         n_lines = 3 if norm_height > 0.13 else 2
-        n_lines = min(n_lines, len(words))
+        n_lines = min(n_lines, total_chars)
         slice_h = norm_height / n_lines
-        for i in range(n_lines):
-            start = round(i * len(words) / n_lines)
-            end = round((i + 1) * len(words) / n_lines)
-            line_text = " ".join(words[start:end])
-            if not line_text:
-                continue
-            _draw_block(page, nx0, ny0 + i * slice_h, nx1, ny0 + (i + 1) * slice_h, line_text, pw, ph, font, fontname)
+        # Split text evenly across lines by character count (for CJK) or word count
+        if cjk_chars > len(words):
+            chars_per_line = max(1, len(text) // n_lines)
+            for i in range(n_lines):
+                start = i * chars_per_line
+                end = start + chars_per_line if i < n_lines - 1 else len(text)
+                line_text = text[start:end].strip()
+                if not line_text:
+                    continue
+                _draw_block(page, nx0, ny0 + i * slice_h, nx1, ny0 + (i + 1) * slice_h, line_text, pw, ph, font, fontname)
+        else:
+            for i in range(n_lines):
+                start = round(i * len(words) / n_lines)
+                end = round((i + 1) * len(words) / n_lines)
+                line_text = " ".join(words[start:end])
+                if not line_text:
+                    continue
+                _draw_block(page, nx0, ny0 + i * slice_h, nx1, ny0 + (i + 1) * slice_h, line_text, pw, ph, font, fontname)
         return
 
-    # === Single-line: place at box baseline (left/top) ===
-    fs = max(6.0, min(16.0, box_h * 0.7))  # scale font to ~70% of box height
-    
-    # Place baseline at bbox left + 2pt, bottom - 2pt (leave 2pt bottom margin)
-    baseline = fitz.Point(x0 + 2, y1 - 2)
+    # === Single-line: place at box top ===
+    fs = max(6.0, min(16.0, box_h * 0.7))
+    baseline = fitz.Point(x0 + 2, y0 + fs)  # CJK glyph sits on baseline, extends upward
     
     try:
         page.insert_text(baseline, text, fontname=fontname, fontsize=fs, render_mode=3)
