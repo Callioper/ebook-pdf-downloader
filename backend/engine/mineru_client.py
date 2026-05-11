@@ -28,10 +28,14 @@ class MinerUTimeoutError(Exception):
 class MinerUClient:
     def __init__(self, token: str, timeout: int = 120):
         self.token = token
-        self._client = httpx.AsyncClient(
+        self._timeout = timeout
+
+    def _make_client(self, timeout=None):
+        t = timeout or self._timeout
+        return httpx.AsyncClient(
             base_url=MINERU_BASE,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            timeout=timeout,
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+            timeout=t,
         )
 
     async def submit_batch(
@@ -52,20 +56,20 @@ class MinerUClient:
         }
         logger.info(f"submit_batch: files={file_names}, model={model_version}")
         try:
-            resp = await self._client.post("/api/v4/file-urls/batch", json=payload)
-            data = resp.json()
-            logger.info(f"submit_batch response: code={data.get('code')}, batch_id={data.get('data',{}).get('batch_id','?')}")
-            if data.get("code") != 0:
-                raise MinerUAPIError(data.get("msg", "unknown error"), data.get("code", -1))
-            return data["data"]["batch_id"], data["data"]["file_urls"]
+            async with self._make_client(30) as client:
+                resp = await client.post("/api/v4/file-urls/batch", json=payload)
+                data = resp.json()
+                logger.info(f"submit_batch response: code={data.get('code')}, batch_id={data.get('data',{}).get('batch_id','?')}")
+                if data.get("code") != 0:
+                    raise MinerUAPIError(data.get("msg", "unknown error"), data.get("code", -1))
+                return data["data"]["batch_id"], data["data"]["file_urls"]
         except MinerUAPIError:
             raise
         except Exception as e:
             raise MinerUAPIError(f"submit_batch failed: {type(e).__name__}: {e}") from e
 
     async def upload_file(self, file_url: str, pdf_bytes: bytes):
-        """PUT raw bytes to OSS signed URL. Uses bare client — URL has embedded signature."""
-        logger.info(f"upload_file: url_host={file_url.split('/')[2] if '//' in file_url else '?'}, size={len(pdf_bytes)}")
+        logger.info(f"upload_file: size={len(pdf_bytes)}")
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as up:
@@ -91,54 +95,51 @@ class MinerUClient:
         poll_interval: float = 5.0,
         progress_callback=None,
     ) -> Dict[str, Any]:
-        url = f"/api/v4/extract-results/batch/{batch_id}"
         deadline = time.monotonic() + timeout
+        async with self._make_client(30) as client:
+            while time.monotonic() < deadline:
+                resp = await client.get(f"/api/v4/extract-results/batch/{batch_id}")
+                data = resp.json()
+                if data.get("code") != 0:
+                    raise MinerUAPIError(data.get("msg", "query failed"))
 
-        while time.monotonic() < deadline:
-            resp = await self._client.get(url)
-            data = resp.json()
-            if data.get("code") != 0:
-                raise MinerUAPIError(data.get("msg", "query failed"))
+                extract = data.get("data", {})
+                items = extract.get("extract_result", [])
 
-            extract = data.get("data", {})
-            items = extract.get("extract_result", [])
+                if not items:
+                    await asyncio.sleep(poll_interval)
+                    continue
 
-            if not items:
+                if isinstance(items, dict):
+                    items = [items]
+
+                file_result = items[0]
+                state = file_result.get("state", "unknown")
+
+                if state == "done":
+                    full_zip = file_result.get("full_zip_url", "")
+                    if not full_zip:
+                        raise MinerUAPIError(f"done but no full_zip_url: {json.dumps(file_result)[:300]}")
+                    return file_result
+                if state == "failed":
+                    raise MinerUAPIError(file_result.get("err_msg", "parse failed"))
+                if state in ("running", "pending", "waiting-file") and progress_callback:
+                    progress = file_result.get("extract_progress", {})
+                    extracted = progress.get("extracted_pages", 0)
+                    total = progress.get("total_pages", 0)
+                    progress_callback(extracted, total, state)
+
                 await asyncio.sleep(poll_interval)
-                continue
-
-            if isinstance(items, dict):
-                items = [items]
-
-            file_result = items[0]
-            state = file_result.get("state", "unknown")
-
-            if state == "done":
-                full_zip = file_result.get("full_zip_url", "")
-                if not full_zip:
-                    raise MinerUAPIError(f"done but no full_zip_url in response: {json.dumps(file_result)[:300]}")
-                return file_result
-            if state == "failed":
-                raise MinerUAPIError(file_result.get("err_msg", "parse failed"))
-            if state in ("running", "pending", "waiting-file") and progress_callback:
-                progress = file_result.get("extract_progress", {})
-                extracted = progress.get("extracted_pages", 0)
-                total = progress.get("total_pages", 0)
-                progress_callback(extracted, total, state)
-
-            await asyncio.sleep(poll_interval)
 
         raise MinerUTimeoutError(f"batch {batch_id} did not complete within {timeout}s")
 
     async def download_zip(self, zip_url: str) -> bytes:
         logger.info(f"download_zip: {zip_url[:80]}...")
-        resp = await self._client.get(zip_url)
-        resp.raise_for_status()
-        logger.info(f"download_zip: {len(resp.content)} bytes")
-        return resp.content
-
-    async def close(self):
-        await self._client.aclose()
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.get(zip_url)
+            resp.raise_for_status()
+            logger.info(f"download_zip: {len(resp.content)} bytes")
+            return resp.content
 
     async def process_pdf(
         self,
@@ -156,15 +157,10 @@ class MinerUClient:
 
 
 def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
-    """Parse MinerU result zip using _content_list.json (flat text+bbox+page_idx format).
-
-    Returns {page_index: [{"text": str, "bbox": (x0,y0,x1,y1) or None, "category_id": int}]}
-    """
     pages: Dict[int, List[Dict]] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         name_list = zf.namelist()
 
-        # Priority: _content_list.json (flat, has bbox+page_idx) > content_list_v2 > model.json
         content_name = None
         for name in name_list:
             basename = name.split("/")[-1]
@@ -172,7 +168,6 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
                 content_name = name
                 break
 
-        # Fallback to v2 or model.json
         if not content_name:
             for name in name_list:
                 basename = name.split("/")[-1]
@@ -190,7 +185,6 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
         if content_name:
             data = json.loads(zf.read(content_name))
 
-            # For model.json: data is [[page0_items], [page1_items], ...]
             is_model = content_name.endswith("_model.json")
             if is_model and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
                 for page_idx, page_items in enumerate(data):
@@ -200,13 +194,10 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
                             continue
                         bbox = _extract_bbox_from_item(item)
                         pages.setdefault(page_idx, []).append({
-                            "text": text,
-                            "bbox": bbox,
-                            "category_id": 0,
+                            "text": text, "bbox": bbox, "category_id": 0,
                         })
                 return dict(sorted(pages.items()))
 
-            # For content_list.json / v2: data is [{type, text, bbox, page_idx}, ...]
             if isinstance(data, list):
                 for item in data:
                     text = _extract_text_from_item(item)
@@ -216,18 +207,14 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
                     bbox_arr = item.get("bbox", [])
                     bbox = _normalize_bbox(bbox_arr)
                     pages.setdefault(page_idx, []).append({
-                        "text": text,
-                        "bbox": bbox,
-                        "category_id": 0,
+                        "text": text, "bbox": bbox, "category_id": 0,
                     })
                 return dict(sorted(pages.items()))
 
-    # No recognized JSON — try full.md as last resort
     for name in name_list:
         if name.endswith("full.md") or name == "full.md":
             md_text = zf.read(name).decode("utf-8", errors="replace")
             lines = [l.strip() for l in md_text.split("\n") if l.strip()]
-            # Heuristic: split on heading markers for rough page boundaries
             pages[0] = [{"text": l, "bbox": None, "category_id": 0} for l in lines]
             return pages
 
@@ -235,14 +222,11 @@ def parse_layout_from_zip(zip_bytes: bytes) -> Dict[int, List[Dict[str, Any]]]:
 
 
 def _extract_text_from_item(item: Dict) -> str:
-    """Extract text from various MinerU item formats."""
-    # content_list.json: {"text": "..."} or {"content": "..."}
     for key in ("text", "content"):
         val = item.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
 
-    # content_list_v2.json: {"content": {"paragraph_content": [{"content": "text"}]}}
     content = item.get("content")
     if isinstance(content, dict):
         for sub_key in ("paragraph_content", "title_content", "page_header_content", "page_footer_content"):
@@ -256,18 +240,15 @@ def _extract_text_from_item(item: Dict) -> str:
                             parts.append(t)
                 if parts:
                     return "".join(parts)
-
     return ""
 
 
 def _extract_bbox_from_item(item: Dict):
-    """Extract bbox from model.json item format."""
     bbox = item.get("bbox", [])
     return _normalize_bbox(bbox)
 
 
 def _normalize_bbox(bbox) -> tuple:
-    """Convert bbox [x0,y0,x1,y1] to tuple or None."""
     if bbox and isinstance(bbox, list) and len(bbox) == 4:
         return tuple(bbox)
     return None
