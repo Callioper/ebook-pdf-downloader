@@ -7,6 +7,18 @@ from typing import Optional, Dict, Any, List
 DOUBAN_SEARCH = "https://www.douban.com/search"
 DOUBAN_SEARCH_JSON = "https://www.douban.com/j/search"
 DOUBAN_BOOK_URL_PATTERN = re.compile(r".*/subject/(\d+)/?")
+
+# simple-boot-douban-api proxy (backup: Docker local proxy with anti-blocking)
+DOUBAN_PROXY_BASE = "http://localhost:8085"
+
+def _try_proxy(endpoint: str, params: dict = None) -> Optional[requests.Response]:
+    """Try to call the Douban proxy API, return None if not running."""
+    url = f"{DOUBAN_PROXY_BASE}{endpoint}"
+    try:
+        return requests.get(url, params=params, timeout=5)
+    except requests.RequestException:
+        return None
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -19,6 +31,21 @@ def _search_by_isbn(isbn: str) -> Optional[str]:
     """Search Douban by ISBN and return the first book detail URL."""
     import json as _json
     params = {"cat": "1001", "q": isbn}
+
+    # Try local proxy first (simple-boot-douban-api)
+    rp = _try_proxy("/v2/book/search", params={"q": isbn, "cat": "1001"})
+    if rp and rp.status_code == 200:
+        try:
+            data = rp.json()
+            items = data if isinstance(data, list) else data.get("items", data.get("books", []))
+            for item in items:
+                href = item.get("url", "") if isinstance(item, dict) else str(item)
+                if "/subject/" in href:
+                    return href
+        except ValueError:
+            pass
+
+    # Direct scrape — JSON API first, HTML fallback
     headers = {**HEADERS, "Referer": "https://www.douban.com/search"}
     try:
         # Prefer JSON API (faster, no HTML parsing)
@@ -166,6 +193,25 @@ def fetch_douban(isbn: str) -> Optional[Dict[str, Any]]:
     """Fetch Douban book metadata by ISBN. Returns dict or None."""
     if not isbn:
         return None
+
+    # Try proxy for book details by ISBN
+    rp = _try_proxy(f"/v2/book/isbn/{isbn}")
+    if rp and rp.status_code == 200:
+        try:
+            d = rp.json()
+            if d.get("title"):
+                return {
+                    "title": d.get("title", ""),
+                    "authors": d.get("authors", d.get("author", [])),
+                    "toc": d.get("toc", d.get("contents", "")),
+                    "url": d.get("url", ""),
+                    "rating": d.get("rating"),
+                    "description": d.get("description", ""),
+                    "tags": d.get("tags", []),
+                }
+        except ValueError:
+            pass
+
     try:
         url = _search_by_isbn(isbn)
         if not url:
