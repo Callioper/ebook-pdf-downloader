@@ -217,6 +217,18 @@ async def _run_ocrmypdf_with_progress(
                 continue
             _had_output = True
 
+            # Filter PaddleOCR harmless warnings
+            _skip_patterns = [
+                "No ccache found",
+                "warnings.warn",
+                "UserWarning",
+                "提供的模式无法找到文件",
+                "Model files already exist",
+                "To redownload, please delete",
+            ]
+            if any(p in _text for p in _skip_patterns):
+                continue
+
             _m = re.search(r'\[(\d+)/(\d+)\]', _text)
             if _m:
                 _cur = int(_m.group(1))
