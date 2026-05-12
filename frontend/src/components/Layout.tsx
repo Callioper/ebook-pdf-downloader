@@ -95,45 +95,76 @@ export default function Layout() {
       .finally(() => setSysChecking(false))
   }
 
-  // Auto-run system status check on mount
-  useEffect(() => { checkSystemStatus() }, [])
+  // ── Startup: run all initial checks in parallel before rendering ──
+  const [appReady, setAppReady] = useState(false)
 
-  // Theme
   useEffect(() => {
-    fetch('/api/v1/config')
-      .then(r => r.json())
-      .then(cfg => {
-        const theme = cfg.theme || 'auto'
-        localStorage.setItem('theme', theme)
-        const cleanup = applyTheme(theme)
-        return cleanup
-      })
-      .catch(() => {})
-  }, [])
+    const init = async () => {
+      const tasks = [
+        // 1. Theme
+        fetch('/api/v1/config')
+          .then(r => r.json())
+          .then(cfg => {
+            const theme = cfg.theme || 'auto'
+            localStorage.setItem('theme', theme)
+            const cleanup = applyTheme(theme)
+            return cleanup
+          })
+          .catch(() => {}),
 
-  // Auto-login to Stacks on startup
-  const stacksAutoRef = useRef(false)
-  useEffect(() => {
-    if (stacksAutoRef.current) return
-    stacksAutoRef.current = true
-    fetch('/api/v1/config')
-      .then(r => r.json())
-      .then(cfg => {
-        const url = cfg.stacks_base_url || 'http://localhost:7788'
-        const uname = cfg.stacks_username || ''
-        const passwd = cfg.stacks_password || ''
-        if (!uname || !passwd) return
-        return fetch('/api/v1/check-stacks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, username: uname, password: passwd }),
-        })
-      })
-      .then(r => r?.json())
-      .then(d => {
-        if (d?.ok) console.log('[auto-login] Stacks login OK')
-      })
-      .catch(() => {})
+        // 2. System status
+        fetch('/api/v1/system-status')
+          .then(r => r.json())
+          .then(data => { setSysStatus(data); sysCheckedRef.current = true })
+          .catch(() => setSysStatus(null))
+          .finally(() => setSysChecking(false)),
+
+        // 3. Update check
+        fetch(`${API_BASE}/check-update`)
+          .then(r => r.json())
+          .then((data: UpdateInfo) => {
+            cachedUpdate = data
+            cachedVersion = data.current || '...'
+            setVersion(cachedVersion)
+            if (data.has_update) {
+              const lastSeen = localStorage.getItem('last_update_seen')
+              if (lastSeen !== data.latest) {
+                setUpdateInfo(data)
+                setDismissed(false)
+              }
+              setCheckResult(`新版本 v${data.latest} 可用`)
+            } else {
+              setUpdateInfo(null)
+              setCheckResult(`已是最新 v${cachedVersion}`)
+            }
+          })
+          .catch(() => { setCheckResult('检查失败') }),
+
+        // 4. Stacks auto-login
+        fetch('/api/v1/config')
+          .then(r => r.json())
+          .then(cfg => {
+            const url = cfg.stacks_base_url || 'http://localhost:7788'
+            const uname = cfg.stacks_username || ''
+            const passwd = cfg.stacks_password || ''
+            if (!uname || !passwd) return
+            return fetch('/api/v1/check-stacks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url, username: uname, password: passwd }),
+            })
+          })
+          .then(r => r?.json())
+          .then(d => {
+            if (d?.ok) console.log('[auto-login] Stacks login OK')
+          })
+          .catch(() => {}),
+      ]
+
+      await Promise.allSettled(tasks)
+      setAppReady(true)
+    }
+    init()
   }, [])
 
   // Shutdown backend when page/electron window is closed
@@ -147,8 +178,6 @@ export default function Layout() {
   }, [])
 
   useEffect(() => {
-    checkUpdate()
-
     const heartbeat = setInterval(() => {
       fetch(`${API_BASE}/heartbeat`).catch(() => {})
     }, 10000)
@@ -223,8 +252,21 @@ export default function Layout() {
   const showBanner = updateInfo && updateInfo.has_update && !dismissed
   const downloadDone = downloadingPct >= 100 && !downloading
 
+  if (!appReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="inline-block w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">正在检测系统状态...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
+
+
       {showBanner && (
         <div className="bg-blue-600 text-white px-4 py-2 flex items-center justify-between gap-2 flex-wrap">
           <span className="text-sm">
