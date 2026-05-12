@@ -2680,10 +2680,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         job_id = await client.submit_job_file(pdf_path, pdf_bytes)
                         result_data = await client.poll_job(job_id, progress_callback=None)
                         jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
-                        import httpx
-                        async with httpx.AsyncClient(timeout=120) as http:
-                            r = await http.get(jsonl_url)
-                            raw_jsonl = r.text
+                        raw_jsonl = await client.download_raw_jsonl(jsonl_url)
                         layout = parse_paddleocr_blocks(raw_jsonl)
                     finally:
                         await client.close()
