@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { API_BASE } from '../constants'
 import ConfirmDownloadModal from './ConfirmDownloadModal'
 import ConfirmStepModal from './ConfirmStepModal'
+import TOCModal from './TOCModal'
 
 interface UpdateInfo {
   current: string
@@ -355,6 +356,7 @@ export default function Layout() {
           <Outlet />
           <ConfirmDownloadModal />
           <ConfirmStepModal />
+          {false && <TOCModal pdfPath="" visible={false} onConfirm={() => {}} onCancel={() => {}} />}
         </div>
       </main>
 
