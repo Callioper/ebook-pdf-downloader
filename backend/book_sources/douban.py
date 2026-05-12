@@ -29,8 +29,9 @@ def _search_by_isbn(isbn: str) -> Optional[str]:
             href = a.get("href", "")
             if "/subject/" in href:
                 return href
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger("douban").debug(f"Douban search failed: {e}")
     return None
 
 
@@ -99,16 +100,7 @@ def _parse_douban_book(html: str) -> Dict[str, Any]:
 
 def _extract_toc(soup: BeautifulSoup) -> Optional[str]:
     """Extract table of contents from Douban book page."""
-    # Hidden full TOC div
-    toc_div = soup.select_one("div#dir_72144_full")
-    if not toc_div:
-        toc_div = soup.select_one("div.indent div#dir_72144_full")
-    if toc_div:
-        text = toc_div.get_text(strip=True)
-        if text:
-            return text
-
-    # Short TOC display with label
+    # Generic: look for TOC section by label
     for div in soup.select("div.indent"):
         label_span = div.select_one("span.pl")
         if label_span and "目录" in label_span.get_text():
@@ -125,6 +117,12 @@ def _extract_toc(soup: BeautifulSoup) -> Optional[str]:
             text = "\n".join(texts)
             if text and len(text) > 10:
                 return text[:5000]
+
+    # Fallback: hidden full TOC (any div containing toc-like id)
+    for el in soup.select("div[id*='dir']"):
+        text = el.get_text(strip=True)
+        if text and len(text) > 50:
+            return text[:5000]
 
     return None
 
@@ -157,7 +155,9 @@ def fetch_douban(isbn: str) -> Optional[Dict[str, Any]]:
         data = _parse_douban_book(r.text)
         data["url"] = url
         return data if data.get("title") else None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("douban").debug(f"Douban error: {e}")
         return None
 
 
@@ -192,5 +192,7 @@ def fetch_douban_by_title(title: str) -> Optional[Dict[str, Any]]:
         data = _parse_douban_book(r2.text)
         data["url"] = url
         return data if data.get("title") else None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("douban").debug(f"Douban error: {e}")
         return None

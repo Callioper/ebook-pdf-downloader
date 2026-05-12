@@ -20,7 +20,9 @@ async def crawl_isbn(title: str, nlc_path: str = "") -> Optional[str]:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _crawl_isbn_sync, title)
         return result
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -31,7 +33,9 @@ async def crawl_metadata(isbn: str) -> Optional[Dict[str, str]]:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _crawl_metadata_sync, isbn)
         return result
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -83,7 +87,9 @@ def _crawl_metadata_sync(isbn: str) -> Optional[Dict[str, str]]:
             result["year"] = year_m.group(1).strip()
 
         return result if len(result) > 1 else None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -125,7 +131,9 @@ def _crawl_isbn_sync(title: str) -> Optional[str]:
                 continue
 
         return None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -193,7 +201,9 @@ def crawl_toc_sync(isbn: str) -> Optional[str]:
                     if toc_text and len(toc_text) > 20:
                         return toc_text
         return None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -201,7 +211,9 @@ async def crawl_toc(isbn: str) -> Optional[str]:
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, crawl_toc_sync, isbn)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -239,7 +251,9 @@ def _crawl_toc_by_title_sync(title: str) -> Optional[str]:
                     if toc_text and len(toc_text) > 20:
                         return toc_text
         return None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
 
 
@@ -250,5 +264,7 @@ async def crawl_toc_by_title(title: str) -> Optional[str]:
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _crawl_toc_by_title_sync, title)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("nlc").debug(f"NLC error: {e}")
         return None
