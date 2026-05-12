@@ -1,6 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import certifi, os
+
+_cacert = os.path.join(os.path.dirname(certifi.__file__), "cacert.pem")
 
 BACKEND_DIR = Path(SPECPATH)
 FRONTEND_DIST = BACKEND_DIR.parent / "frontend" / "dist"
@@ -25,7 +28,7 @@ a = Analysis(
         (str(BACKEND_DIR / "version.py"), "."),
         (str(BACKEND_DIR.parent / "config.default.json"), "config.default.json"),
         (str(BACKEND_DIR.parent / "icon.ico"), "icon.ico"),
-        (r"C:\Users\Administrator\AppData\Roaming\Python\Python314\site-packages\certifi\cacert.pem", "certifi"),
+        (_cacert, "certifi"),
     ],
     excludes=[
         'torch', 'torchvision', 'torchaudio', 'torchgen',
@@ -71,4 +74,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(BACKEND_DIR.parent / "icon.ico"),
+    excludes=['__pycache__', '*.pyc', '*.pyo'],
 )
