@@ -350,6 +350,7 @@ export default function ConfigSettings() {
   const [aiModels, setAiModels] = useState<{ id: string; name: string }[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchModelsMsg, setFetchModelsMsg] = useState('')
+  const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({})
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     database: false,
@@ -1203,13 +1204,22 @@ export default function ConfigSettings() {
                 spellCheck={false}
                 className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
-              <input
-                type="password"
-                value={form.zlib_password || ''}
-                onChange={(e) => updateForm({ zlib_password: e.target.value })}
-                placeholder="密码"
-                className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
+              <div className="relative">
+                <input
+                  type={visibleSecrets['zlib'] ? 'text' : 'password'}
+                  value={form.zlib_password || ''}
+                  onChange={(e) => updateForm({ zlib_password: e.target.value })}
+                  placeholder="密码"
+                  className="rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full"
+                />
+                <button type="button"
+                  onClick={() => setVisibleSecrets(prev => ({ ...prev, zlib: !prev['zlib'] }))}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  title={visibleSecrets['zlib'] ? '隐藏' : '显示'}
+                >
+                  {visibleSecrets['zlib'] ? '🙈' : '👁'}
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 mt-2">
               <button
@@ -1282,13 +1292,22 @@ export default function ConfigSettings() {
               </button>
             </div>
             {/* API Key */}
-            <input
-              type="password"
-              value={String(form.stacks_api_key || '')}
-              onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
-              placeholder="Admin API Key（可选，填写账号密码后优先使用 session 登录）"
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mt-1.5"
-            />
+            <div className="relative">
+              <input
+                type={visibleSecrets['stacks_key'] ? 'text' : 'password'}
+                value={String(form.stacks_api_key || '')}
+                onChange={(e) => setForm((prev) => ({ ...prev, stacks_api_key: e.target.value }))}
+                placeholder="Admin API Key（可选，填写账号密码后优先使用 session 登录）"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mt-1.5"
+              />
+              <button type="button"
+                onClick={() => setVisibleSecrets(prev => ({ ...prev, stacks_key: !prev['stacks_key'] }))}
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                title={visibleSecrets['stacks_key'] ? '隐藏' : '显示'}
+              >
+                {visibleSecrets['stacks_key'] ? '🙈' : '👁'}
+              </button>
+            </div>
             {/* Account login (unified with ZLibrary style) */}
             <span className="block text-xs font-medium text-gray-600 mt-2">账户登录</span>
             <div className="grid grid-cols-2 gap-2 mt-1">
@@ -1298,12 +1317,22 @@ export default function ConfigSettings() {
                 placeholder="用户名" spellCheck={false}
                 className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
-              <input
-                type="password" value={form.stacks_password || ''}
-                onChange={(e) => updateForm({ stacks_password: e.target.value })}
-                placeholder="密码"
-                className="rounded border border-gray-300 px-2 py-1.5 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
+              <div className="relative">
+                <input
+                  type={visibleSecrets['stacks_pw'] ? 'text' : 'password'}
+                  value={form.stacks_password || ''}
+                  onChange={(e) => updateForm({ stacks_password: e.target.value })}
+                  placeholder="密码"
+                  className="rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full"
+                />
+                <button type="button"
+                  onClick={() => setVisibleSecrets(prev => ({ ...prev, stacks_pw: !prev['stacks_pw'] }))}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  title={visibleSecrets['stacks_pw'] ? '隐藏' : '显示'}
+                >
+                  {visibleSecrets['stacks_pw'] ? '🙈' : '👁'}
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 mt-2">
               <button
@@ -1987,10 +2016,20 @@ export default function ConfigSettings() {
              </p>
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">API Token</label>
-              <input value={form.mineru_token || ''}
-                onChange={(e) => updateForm({ mineru_token: e.target.value })}
-                placeholder="输入 MinerU API Token（Bearer 认证）"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+              <div className="relative">
+                <input type={visibleSecrets['mineru'] ? 'text' : 'password'}
+                  value={form.mineru_token || ''}
+                  onChange={(e) => updateForm({ mineru_token: e.target.value })}
+                  placeholder="输入 MinerU API Token（Bearer 认证）"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
+                <button type="button"
+                  onClick={() => setVisibleSecrets(prev => ({ ...prev, mineru: !prev['mineru'] }))}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  title={visibleSecrets['mineru'] ? '隐藏' : '显示'}
+                >
+                  {visibleSecrets['mineru'] ? '🙈' : '👁'}
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -2073,10 +2112,20 @@ export default function ConfigSettings() {
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Access Token</label>
               <div className="flex gap-2">
-                <input value={form.paddleocr_online_token || ''}
-                  onChange={(e) => updateForm({ paddleocr_online_token: e.target.value })}
-                  placeholder="输入 PaddleOCR access token"
-                  className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+                <div className="relative flex-1">
+                  <input type={visibleSecrets['paddle'] ? 'text' : 'password'}
+                    value={form.paddleocr_online_token || ''}
+                    onChange={(e) => updateForm({ paddleocr_online_token: e.target.value })}
+                    placeholder="输入 PaddleOCR access token"
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
+                  <button type="button"
+                    onClick={() => setVisibleSecrets(prev => ({ ...prev, paddle: !prev['paddle'] }))}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    title={visibleSecrets['paddle'] ? '隐藏' : '显示'}
+                  >
+                    {visibleSecrets['paddle'] ? '🙈' : '👁'}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={handleTestPaddleocrOnline}
@@ -2274,10 +2323,20 @@ export default function ConfigSettings() {
           {/* API Key */}
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
-            <input type="password" value={form.ai_vision_api_key || ''}
-              onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
-              placeholder="sk-...  (支持 {env:VAR_NAME})"
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+            <div className="relative">
+              <input type={visibleSecrets['aivision'] ? 'text' : 'password'}
+                value={form.ai_vision_api_key || ''}
+                onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
+                placeholder="sk-...  (支持 {env:VAR_NAME})"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
+              <button type="button"
+                onClick={() => setVisibleSecrets(prev => ({ ...prev, aivision: !prev['aivision'] }))}
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                title={visibleSecrets['aivision'] ? '隐藏' : '显示'}
+              >
+                {visibleSecrets['aivision'] ? '🙈' : '👁'}
+              </button>
+            </div>
           </div>
 
           {/* 检测按钮 */}
