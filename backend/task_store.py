@@ -13,7 +13,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional
 
-from config import get_config
 from config import APP_DATA_DIR as _app_data
 
 def _get_tasks_path() -> Path:

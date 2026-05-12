@@ -39,8 +39,6 @@ def _get_default_config_path() -> Path:
     from platform_utils import get_default_config_file
     return get_default_config_file()
 
-DEFAULT_CONFIG_FILE = _get_default_config_path()
-
 DEFAULT_CONFIG: Dict[str, Any] = {
     "host": "0.0.0.0",
     "port": 8000,
@@ -87,7 +85,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ai_vision_zhipu_key": "",
     "ai_vision_doubao_key": "",
     "ai_vision_max_pages": 5,
-    "ai_vision_dpi": 300,
     "theme": "auto",
 }
 
