@@ -1997,15 +1997,6 @@ export default function ConfigSettings() {
                 placeholder="输入 MinerU API Token（Bearer 认证）"
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
             </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">模型版本</label>
-              <select value={form.mineru_model || 'vlm'}
-                onChange={(e) => updateForm({ mineru_model: e.target.value })}
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
-                <option value="pipeline">pipeline (传统引擎)</option>
-                <option value="vlm">vlm（推荐）</option>
-              </select>
-            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
