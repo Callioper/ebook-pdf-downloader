@@ -288,11 +288,12 @@ def embed_with_perbox_paddleocr(
 
             # Filter non-text shapes
             aspect = max(bw, bh) / max(1, min(bw, bh))
-            if aspect > 25:
+            if aspect > 100:  # skip decorative lines (>100:1)
                 skip_count += 1
-                continue  # likely a decorative line
+                continue
 
-            if bw * bh < 80:  # too small for meaningful OCR
+            min_area = max(80, int(150 * dpi * dpi / 90000))  # scale with DPI
+            if bw * bh < min_area:
                 skip_count += 1
                 continue
 
