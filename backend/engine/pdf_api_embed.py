@@ -230,6 +230,19 @@ def allocate_text_to_surya_boxes(
 
         page_texts[pg] = texts
 
+    # ── Deduplicate overlapping text between adjacent lines ──
+    for pg in sorted(page_texts.keys()):
+        texts = page_texts[pg]
+        for i in range(len(texts) - 1):
+            cur = texts[i]
+            nxt = texts[i + 1]
+            if not cur or not nxt or len(cur) < 3 or len(nxt) < 3:
+                continue
+            for k in range(min(4, len(cur), len(nxt)), 1, -1):
+                if cur[-k:] == nxt[:k]:
+                    texts[i] = cur[:-k].rstrip()
+                    break
+
     return page_texts
 
 
