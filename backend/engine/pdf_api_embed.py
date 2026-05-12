@@ -235,7 +235,6 @@ def allocate_text_to_surya_boxes(
 
 def embed_with_perbox_paddleocr(
     input_path: str,
-    output_path: str,
     surya_boxes: Dict[int, List[List[float]]],
     paddle_token: str,
     dpi: int = 300,
@@ -315,7 +314,7 @@ def embed_with_perbox_paddleocr(
             continue
 
         # Run OCR in parallel with semaphore
-        async def _run(paddle_token, crop_tasks, dpi):
+        async def _run(paddle_token, crop_tasks):
             sem = asyncio.Semaphore(max_concurrency)
 
             async def _ocr_one(client, box_idx, crop_bytes):
@@ -370,7 +369,9 @@ def embed_with_perbox_paddleocr(
                             elif state == "failed":
                                 return (box_idx, "")
                         return (box_idx, "")
-                    except Exception:
+                    except Exception as e:
+                        import sys
+                        print(f"  [perbox] box {box_idx} failed: {type(e).__name__}: {e}", file=sys.stderr)
                         return (box_idx, "")
 
             async with httpx.AsyncClient(
@@ -380,8 +381,11 @@ def embed_with_perbox_paddleocr(
                 tasks = [_ocr_one(client, idx, cb) for idx, cb in crop_tasks]
                 return await asyncio.gather(*tasks)
 
-        loop = asyncio.get_event_loop()
-        results = loop.run_until_complete(_run(paddle_token, crop_tasks, dpi))
+        loop = asyncio.new_event_loop()
+        try:
+            results = loop.run_until_complete(_run(paddle_token, crop_tasks))
+        finally:
+            loop.close()
 
         for box_idx, text in results:
             if text and box_idx < len(texts):
