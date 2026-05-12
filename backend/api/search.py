@@ -577,6 +577,7 @@ async def check_ai_vision(body: Dict[str, Any]):
         var_name = api_key[5:-1]
         api_key = os.environ.get(var_name, "")
     messages_api = body.get("messages_api", False)
+    orig_provider = provider  # keep before mapping for /v1 skip check
 
     if not endpoint or not model:
         return {"ok": False, "message": "请填写 API 端点和模型名称"}
@@ -594,7 +595,7 @@ async def check_ai_vision(body: Dict[str, Any]):
         provider = "openai_compatible"
 
     # Ensure endpoint ends with /v1 (skip for providers with their own version path)
-    if provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
+    if orig_provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
         endpoint = endpoint.rstrip('/') + '/v1'
 
     try:
@@ -728,6 +729,7 @@ async def fetch_models(body: Dict[str, Any]):
         api_key = os.environ.get(api_key[5:-1], "")
 
     # Map aliases
+    orig_provider = provider
     if provider in ("minimax_openai", "ollama", "lmstudio", "zhipu"):
         provider = "openai_compatible"
     elif provider in ("minimax_anthropic",):
@@ -738,7 +740,7 @@ async def fetch_models(body: Dict[str, Any]):
         provider = "doubao"  # keep as-is, different API structure
 
     # Ensure /v1 suffix (skip for providers with their own version path)
-    if provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
+    if orig_provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
         endpoint = endpoint.rstrip('/') + '/v1'
 
     results = []
