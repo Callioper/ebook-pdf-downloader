@@ -139,3 +139,63 @@ def parse_jsonl_result(jsonl_text: str) -> List[Dict[str, Any]]:
                 "output_images": item.get("outputImages", {}),
             })
     return pages
+
+
+def parse_paddleocr_blocks(jsonl_text: str) -> Dict[int, List[Dict[str, Any]]]:
+    """Parse PaddleOCR JSONL prunedResult into per-page blocks with normalized bboxes.
+
+    Each block = {"text": str, "bbox": [nx0,ny0,nx1,ny1], "type": str}
+    Coordinates normalized to [0..1] from pixel space.
+
+    Returns format compatible with PageTextBlocks (Dict[int, List[Dict[str, Any]]])
+    so allocate_text_to_surya_boxes() can consume it directly.
+    """
+    layout: Dict[int, List[Dict[str, Any]]] = {}
+
+    for line in jsonl_text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        result = record.get("result", {})
+        layout_results = result.get("layoutParsingResults", [])
+
+        for item in layout_results:
+            pruned = item.get("prunedResult", {})
+            if not pruned:
+                continue
+
+            width = float(pruned.get("width", 1))
+            height = float(pruned.get("height", 1))
+            if width <= 0 or height <= 0:
+                width, height = 1.0, 1.0
+
+            parsing_list = pruned.get("parsing_res_list", [])
+            if not parsing_list:
+                continue
+
+            blocks = []
+            for entry in parsing_list:
+                text = (entry.get("block_content") or "").strip()
+                bbox = entry.get("block_bbox")
+                label = entry.get("block_label", "")
+
+                if not text or not bbox or len(bbox) != 4:
+                    continue
+
+                nx0 = float(bbox[0]) / width
+                ny0 = float(bbox[1]) / height
+                nx1 = float(bbox[2]) / width
+                ny1 = float(bbox[3]) / height
+
+                blocks.append({
+                    "text": text,
+                    "bbox": [nx0, ny0, nx1, ny1],
+                    "type": label,
+                })
+
+            if blocks:
+                page_idx = len(layout)
+                layout[page_idx] = blocks
+
+    return layout
