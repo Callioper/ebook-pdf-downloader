@@ -575,15 +575,15 @@ async def check_ai_vision(body: Dict[str, Any]):
         return {"ok": False, "message": "请填写 API 端点和模型名称"}
 
     # Map aliases
-    if provider == "minimax_openai":
+    if provider in ("minimax_openai", "ollama", "lmstudio", "zhipu"):
         provider = "openai_compatible"
-    elif provider == "minimax_anthropic":
+    elif provider in ("minimax_anthropic",):
         provider = "anthropic"
-    elif provider == "openai_responses":
+    elif provider in ("openai_responses",):
         provider = "responses"
-    elif provider == "custom" and messages_api:
+    elif provider in ("custom",) and messages_api:
         provider = "anthropic"
-    elif provider == "custom":
+    elif provider in ("custom",):
         provider = "openai_compatible"
 
     # Ensure endpoint ends with /v1 (skip for providers with their own version path)
@@ -714,12 +714,14 @@ async def fetch_models(body: Dict[str, Any]):
         api_key = os.environ.get(api_key[5:-1], "")
 
     # Map aliases
-    if provider in ("minimax_openai",):
+    if provider in ("minimax_openai", "ollama", "lmstudio", "zhipu"):
         provider = "openai_compatible"
     elif provider in ("minimax_anthropic",):
         provider = "anthropic"
     elif provider in ("openai_responses",):
         provider = "responses"
+    elif provider == "doubao":
+        provider = "doubao"  # keep as-is, different API structure
 
     # Ensure /v1 suffix (skip for providers with their own version path)
     if provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
@@ -773,6 +775,16 @@ async def fetch_models(body: Dict[str, Any]):
                 data = resp.json()
                 for m in data.get("data", []):
                     results.append({"id": m.get("id", ""), "name": m.get("id", m.get("name", ""))})
+
+        elif provider == "doubao":
+            endpoint_id = body.get("endpoint_id", "")
+            url = f"{endpoint.rstrip('/')}/chat/completions"
+            headers["Authorization"] = f"Bearer {api_key}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json={"model": endpoint_id or "default", "messages": [{"role":"user","content":"Hi"}], "max_tokens": 1}, headers=headers)
+            if resp.status_code in (200, 400):
+                # Doubao doesn't have a list-models endpoint; show the endpoint_id as the model
+                results.append({"id": endpoint_id or "ep-...", "name": f"Access Point: {endpoint_id}" if endpoint_id else "Set Endpoint ID"})
 
         return {"ok": True, "models": results}
     except Exception as e:
