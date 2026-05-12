@@ -112,6 +112,12 @@ class PaddleOCRClient:
             raise PaddleOCRAPIError("no jsonl URL in completed job result")
         return await self.download_jsonl(jsonl_url)
 
+    async def download_raw_jsonl(self, jsonl_url: str) -> str:
+        """Download the raw JSONL text using the authorized client."""
+        resp = await self._client.get(jsonl_url)
+        resp.raise_for_status()
+        return resp.text
+
     async def test_connectivity(self) -> Dict[str, Any]:
         """Lightweight connectivity check: just ping the API."""
         resp = await self._client.get(PADDLEOCR_JOB_URL, params={"limit": 1})

@@ -2671,16 +2671,34 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 try:
                     surya_boxes = await run_surya_detect(pdf_path, dpi=200)
                 except SuryaDetectError as e:
-                    task_store.add_log(task_id, f"PaddleOCR: Surya detection failed — {e}. Falling back to markdown-only embed.")
+                    task_store.add_log(task_id, f"PaddleOCR: Surya detection failed — {e}. Falling back to block-level layout.")
+                    from backend.engine.pdf_api_embed import embed_api_text_layer
                     client = PaddleOCRClient(token=paddle_token)
                     try:
                         with open(pdf_path, "rb") as f:
                             pdf_bytes = f.read()
-                        pages_data = await client.process_pdf(pdf_bytes, file_name=os.path.basename(pdf_path))
+                        job_id = await client.submit_job_file(pdf_path, pdf_bytes)
+                        result_data = await client.poll_job(job_id, progress_callback=None)
+                        jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
+                        import httpx
+                        async with httpx.AsyncClient(timeout=120) as http:
+                            r = await http.get(jsonl_url)
+                            raw_jsonl = r.text
+                        layout = parse_paddleocr_blocks(raw_jsonl)
                     finally:
                         await client.close()
-                    task_store.add_log(task_id, f"PaddleOCR fallback: {len(pages_data)} pages with markdown")
-                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100, "detail": "Fallback: markdown only"})
+                    total_blocks = sum(len(v) for v in layout.values())
+                    task_store.add_log(task_id, f"PaddleOCR fallback: parsed {len(layout)} pages, {total_blocks} blocks")
+                    output_pdf = pdf_path + ".paddleocr.pdf"
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, embed_api_text_layer, pdf_path, output_pdf, layout)
+                    if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                        os.replace(output_pdf, pdf_path)
+                        report["ocr_done"] = True
+                        task_store.add_log(task_id, "PaddleOCR online complete (fallback: block-level layout)")
+                    else:
+                        task_store.add_log(task_id, "PaddleOCR fallback: embedding produced empty or missing output file")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                     return report
 
                 total_boxes = sum(len(v) for v in surya_boxes.values())
@@ -2698,14 +2716,13 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     job_id = await client.submit_job_file(pdf_path, pdf_bytes)
                     result_data = await client.poll_job(job_id, progress_callback=None)
                     jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
-                    import httpx
-                    async with httpx.AsyncClient(timeout=120) as http:
-                        r = await http.get(jsonl_url)
-                        raw_jsonl = r.text
+                    if not jsonl_url:
+                        raise RuntimeError("PaddleOCR: no jsonl URL in completed job")
+                    raw_jsonl_text = await client.download_raw_jsonl(jsonl_url)
                 finally:
                     await client.close()
 
-                layout = parse_paddleocr_blocks(raw_jsonl)
+                layout = parse_paddleocr_blocks(raw_jsonl_text)
                 total_blocks = sum(len(v) for v in layout.values())
                 task_store.add_log(task_id, f"PaddleOCR: API returned {len(layout)} pages, {total_blocks} text blocks")
 
