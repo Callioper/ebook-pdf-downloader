@@ -1755,7 +1755,7 @@ async def system_status():
         if not url:
             return "stacks", {"ok": False, "detail": "未配置"}
         try:
-            async with _httpx.AsyncClient(timeout=5) as c:
+            async with _httpx.AsyncClient(timeout=3) as c:
                 hr = await c.get(f"{url}/api/health")
                 if hr.status_code != 200:
                     return "stacks", {"ok": False, "detail": f"HTTP {hr.status_code}"}
@@ -1777,7 +1777,7 @@ async def system_status():
     async def check_flare():
         port = cfg.get("flaresolverr_port", 8191)
         try:
-            async with _httpx.AsyncClient(timeout=4, verify=False) as c:
+            async with _httpx.AsyncClient(timeout=2, verify=False) as c:
                 await c.get(f"http://localhost:{port}")
             return "flaresolverr", {"ok": True, "detail": f"端口 {port}"}
         except Exception:
@@ -1790,7 +1790,7 @@ async def system_status():
         if "://" not in proxy:
             proxy = "http://" + proxy
         try:
-            async with _httpx.AsyncClient(proxy=proxy, timeout=8, verify=False) as c:
+            async with _httpx.AsyncClient(proxy=proxy, timeout=5, verify=False) as c:
                 r = await c.get("http://httpbin.org/ip")
             return "proxy", {"ok": r.status_code == 200, "detail": proxy}
         except Exception as ex:
@@ -1802,13 +1802,14 @@ async def system_status():
             proxy = "http://" + proxy
         hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         ok = {}
-        for label, url in [("aa", "https://annas-archive.org"), ("zl", "https://z-lib.sk")]:
+        async def _check_one(label, url):
             try:
-                async with _httpx.AsyncClient(proxy=proxy if proxy else None, timeout=10, headers=hdrs, verify=False) as c:
+                async with _httpx.AsyncClient(proxy=proxy if proxy else None, timeout=5, headers=hdrs, verify=False) as c:
                     r = await c.get(url)
                     ok[label] = r.status_code in (200, 301, 302, 503)
             except Exception:
                 ok[label] = False
+        await asyncio.gather(_check_one("aa", "https://annas-archive.org"), _check_one("zl", "https://z-lib.sk"))
         aa, zl = ok.get("aa", False), ok.get("zl", False)
         return "sources", {"ok": aa or zl, "detail": f"AA:{'v' if aa else 'x'} ZL:{'v' if zl else 'x'}"}
 
@@ -1861,7 +1862,10 @@ async def system_status():
             return "ai_vision", {"ok": False, "detail": str(ex)[:50]}
 
     tasks = [check_database(), check_zlib(), check_stacks(), check_flare(), check_proxy(), check_sources(), check_ocr(), check_ai_vision()]
-    results = await asyncio.gather(*tasks)
+    try:
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=6)
+    except asyncio.TimeoutError:
+        results = [r for r in [(k, {"ok": False, "detail": "超时"}) for k in ["database", "zlib", "stacks", "flaresolverr", "proxy", "sources", "ocr", "ai_vision"]]]
     for key, comp in results:
         result["components"][key] = comp
         if not comp["ok"] and key not in ("ai_vision",):
