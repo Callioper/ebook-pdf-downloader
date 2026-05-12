@@ -1856,10 +1856,25 @@ async def system_status():
         ep = cfg.get("ai_vision_endpoint", "")
         if not ep:
             return "ai_vision", {"ok": True, "detail": "未配置"}
+        prv = cfg.get("ai_vision_provider", "ollama")
+        model = cfg.get("ai_vision_model", "")
+        if prv == "doubao":
+            model = cfg.get("ai_vision_endpoint_id", "") or model
+        if not model and prv not in ("ollama", "lmstudio"):
+            return "ai_vision", {"ok": False, "detail": "未配置模型"}
         try:
             async with _httpx.AsyncClient(timeout=6) as c:
-                await c.get(f"{ep.rstrip('/')}/v1/models")
-            return "ai_vision", {"ok": True, "detail": "OK"}
+                if prv in ("ollama", "lmstudio"):
+                    r = await c.get(f"{ep.rstrip('/')}/models")
+                    return "ai_vision", {"ok": r.status_code < 500, "detail": "本地模型" if r.status_code < 500 else f"HTTP {r.status_code}"}
+                elif prv == "doubao":
+                    key = cfg.get("ai_vision_doubao_key", "") or cfg.get("ai_vision_api_key", "")
+                    r = await c.post(f"{ep.rstrip('/')}/chat/completions", json={"model": model, "messages": [{"role":"user","content":"Hi"}], "max_tokens": 1}, headers={"Authorization": f"Bearer {key}"})
+                    return "ai_vision", {"ok": r.status_code in (200, 400), "detail": "Doubao" if r.status_code in (200, 400) else f"HTTP {r.status_code}"}
+                else:
+                    key = cfg.get("ai_vision_zhipu_key", "") or cfg.get("ai_vision_api_key", "")
+                    r = await c.post(f"{ep.rstrip('/')}/chat/completions", json={"model": model, "messages": [{"role":"user","content":"Hi"}], "max_tokens": 1}, headers={"Authorization": f"Bearer {key}"})
+                    return "ai_vision", {"ok": r.status_code in (200, 400, 401), "detail": "已连接" if r.status_code in (200, 400, 401) else f"HTTP {r.status_code}"}
         except Exception as ex:
             return "ai_vision", {"ok": False, "detail": str(ex)[:50]}
 
@@ -1867,7 +1882,7 @@ async def system_status():
     results = await asyncio.gather(*tasks)
     for key, comp in results:
         result["components"][key] = comp
-        if not comp["ok"] and key not in ("ai_vision",):
+        if not comp["ok"]:
             result["failures"].append(key)
     result["all_ok"] = len(result["failures"]) == 0
     return result
