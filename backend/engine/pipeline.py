@@ -2755,12 +2755,12 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
                     if paddle_mode == "perbox":
                         from backend.engine.pdf_api_embed import embed_with_perbox_paddleocr
-                        task_store.add_log(task_id, "PaddleOCR (perbox): running per-box crop OCR...")
+                        task_store.add_log(task_id, "PaddleOCR (perbox): running per-box crop OCR (skip body text)...")
                         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30, "detail": "Per-box OCR..."})
                         loop = asyncio.get_event_loop()
                         page_texts = await loop.run_in_executor(
                             None, embed_with_perbox_paddleocr,
-                            pdf_path, surya_boxes, paddle_token, 200, 5,
+                            pdf_path, surya_boxes, paddle_token, 200, 5, api_layout,
                         )
                     else:  # hybrid
                         from backend.engine.pdf_api_embed import hybrid_perbox_with_fallback

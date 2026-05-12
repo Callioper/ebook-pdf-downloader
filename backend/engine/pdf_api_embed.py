@@ -237,14 +237,15 @@ def embed_with_perbox_paddleocr(
     input_path: str,
     surya_boxes: Dict[int, List[List[float]]],
     paddle_token: str,
-    dpi: int = 300,
+    dpi: int = 200,
     max_concurrency: int = 5,
+    api_layout: PageTextBlocks | None = None,
 ) -> Dict[int, List[str]]:
     """Per-box crop OCR pipeline using PaddleOCR-VL-1.5 API.
 
-    Renders all pages, prepares crops, submits ALL crops globally in one
-    parallel batch (semaphore-limited), mapping results back to pages.
-    """
+    If api_layout is provided, skips body-text boxes (full-width lines
+    already covered by spatial allocation) and fills them from layout.
+    Only edge boxes (narrow, headers, partial lines) run per-box OCR.  """
     import asyncio
     import io
     import json
@@ -256,6 +257,27 @@ def embed_with_perbox_paddleocr(
     from PIL import Image
 
     doc = fitz.open(input_path)
+
+    # ── Phase 0: classify body vs edge boxes (skip body if api_layout provided) ──
+    body_boxes: Dict[int, set] = {}
+    body_texts: Dict[int, List[str]] = {}
+    if api_layout:
+        spatial = allocate_text_to_surya_boxes(surya_boxes, api_layout)
+        for pg in sorted(surya_boxes.keys()):
+            boxes = surya_boxes[pg]
+            sp = spatial.get(pg, [""] * len(boxes))
+            body_boxes[pg] = set()
+            body_texts[pg] = [""] * len(boxes)
+            for i, bbox in enumerate(boxes):
+                if len(bbox) < 4: continue
+                w = bbox[2] - bbox[0]
+                h = bbox[3] - bbox[1]
+                if w > 0.5 and 0.01 < h < 0.05 and i < len(sp) and sp[i]:
+                    body_boxes[pg].add(i)
+                    body_texts[pg][i] = sp[i]
+        total_body = sum(len(s) for s in body_boxes.values())
+        if total_body:
+            print(f"  [perbox] {total_body} body-text boxes -> spatial allocation (skip OCR)", flush=True)
 
     # ── Phase 1: prepare all crops across all pages ──
     # crop_list: [(page_idx, box_idx, png_bytes)]
@@ -281,6 +303,11 @@ def embed_with_perbox_paddleocr(
             y1 = int(min(ph, bbox[3] * ph + 3))
             if x1 <= x0 or y1 <= y0:
                 continue
+
+            # Skip body-text boxes — filled from spatial allocation
+            if api_layout and pg in body_boxes and i in body_boxes[pg]:
+                continue
+
             bw = x1 - x0
             bh = y1 - y0
             aspect = max(bw, bh) / max(1, min(bw, bh))
@@ -401,6 +428,17 @@ def embed_with_perbox_paddleocr(
             matched += 1
 
     total_boxes = sum(box_counts.values())
+
+    # Merge body-text fills from spatial allocation
+    if api_layout and body_texts:
+        for pg in body_texts:
+            if pg not in page_texts:
+                page_texts[pg] = body_texts[pg]
+                continue
+            for i, t in enumerate(body_texts[pg]):
+                if t:
+                    page_texts[pg][i] = t
+                    matched += 1
     print(f"  [perbox] final: {matched}/{total_boxes} ({matched*100//max(1,total_boxes)}%)", flush=True)
     return page_texts
 
@@ -423,7 +461,7 @@ def hybrid_perbox_with_fallback(
     while keeping exact text for most lines.
     """
     page_texts = embed_with_perbox_paddleocr(
-        input_path, surya_boxes, paddle_token, dpi, max_concurrency
+        input_path, surya_boxes, paddle_token, dpi, max_concurrency, api_layout
     )
 
     # Fill empty boxes AND replace low-quality per-box results with spatial fallback
