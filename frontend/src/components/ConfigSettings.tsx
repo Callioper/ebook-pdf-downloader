@@ -2259,9 +2259,12 @@ export default function ConfigSettings() {
             </details>
           )}
 
-          {/* 模型名称 */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
+          {/* 模型名称 — Doubao uses Endpoint ID as model */}
+          {form.ai_vision_provider === 'doubao' ? (
+            <p className="text-[11px] text-gray-400">模型由 Endpoint ID 指定（{form.ai_vision_endpoint_id || '未填写'}）</p>
+          ) : (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
             <div className="flex gap-1">
               <input type="text" value={form.ai_vision_model || ''}
                 onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
@@ -2323,6 +2326,7 @@ export default function ConfigSettings() {
               </p>
             )}
           </div>
+          )}
 
           {/* API Key — conditional per provider */}
           {form.ai_vision_provider === 'zhipu' && (
