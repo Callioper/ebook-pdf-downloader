@@ -415,6 +415,42 @@ async def update_config_endpoint(data: Dict[str, Any]):
     return safe
 
 
+@router.get("/config-status")
+async def config_status():
+    """Return full config + auto-detect statuses in one call to avoid N round trips."""
+    cfg = get_config()
+    safe = dict(cfg)
+    safe.pop("zlib_password", None)
+
+    import asyncio as _aio, os as _os
+
+    async def _db():
+        p = cfg.get("ebook_db_path", "")
+        dbs = [_os.path.join(p, f) for f in ["DX_2.0-5.0.db", "DX_6.0.db"] if _os.path.isfile(_os.path.join(p, f))]
+        return "database", {"ok": len(dbs) > 0, "databases": dbs}
+
+    async def _ocr():
+        eng = cfg.get("ocr_engine", "tesseract")
+        try:
+            from platform_utils import find_tesseract
+            tess = find_tesseract()
+            if tess:
+                import subprocess as _sp
+                r = _sp.run([tess, "--list-langs"], capture_output=True, text=True, timeout=10)
+                if r.returncode == 0:
+                    langs = r.stdout.strip().split("\n")
+                    return "ocr", {"ok": True, "engine": eng, "languages": langs}
+        except Exception:
+            pass
+        return "ocr", {"ok": True, "engine": eng}
+
+    tasks = [_db(), _ocr()]
+    results = await _aio.gather(*tasks)
+    extra = dict(results)
+    safe["_auto"] = extra
+    return safe
+
+
 @router.post("/upload-cookies")
 async def upload_cookies(file: UploadFile = File(...)):
     content = await file.read()
