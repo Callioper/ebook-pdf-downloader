@@ -1989,7 +1989,7 @@ export default function ConfigSettings() {
                <p className="text-xs text-gray-500">
                使用 MinerU v4 精准解析 API 进行文档 OCR。PDF 将上传至 MinerU 服务器处理。
                仅限中国大陆网络访问，单文件 ≤200MB / ≤200页。
-               <span className="text-orange-500 ml-1">实验功能</span>
+               <span className="text-orange-500 ml-1">实验功能，识别可能会有重复</span>
              </p>
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">API Token</label>
@@ -2046,7 +2046,7 @@ export default function ConfigSettings() {
                <p className="text-xs text-gray-500">
                使用百度 PaddleOCR-VL-1.5 视觉大模型进行文档版面解析。
                支持中英文文档，无需本地 GPU。
-               <span className="text-orange-500 ml-1">实验功能</span>
+               <span className="text-orange-500 ml-1">实验功能，识别可能会有重复</span>
             </p>
             <div>
                <label className="text-xs font-medium text-gray-600 block mb-1.5">识别模式 <span className="text-[11px] text-blue-500 ml-1">推荐逐框识别，次选混合识别</span></label>
