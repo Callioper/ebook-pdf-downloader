@@ -9,6 +9,7 @@ import os
 import sqlite3
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 import time as _time
 from typing import Any, Dict, List
@@ -39,26 +40,40 @@ class SearchEngine:
                 continue
         return ""
 
-    def _connect(self, db_name: str):
+    def _connect(self, db_name: str) -> sqlite3.Connection:
+        """Get or create a cached SQLite connection. Copies DB to temp if needed."""
+        # Return cached connection if still valid
+        if db_name in self._dbs:
+            conn = self._dbs[db_name]
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except sqlite3.ProgrammingError:
+                pass  # connection closed, re-open
+
+        # Compute mtime of source file to check if cache is stale
         db_dir = self._get_db_dir()
         if not db_dir:
             return None
-        src = os.path.join(db_dir, db_name)
-        if not os.path.exists(src):
+        source_path = os.path.join(db_dir, db_name)
+        if not os.path.exists(source_path):
             return None
-        # Copy to local cache to avoid UNC locking
-        cache_dir = os.path.join(os.environ.get("TEMP", os.path.dirname(__file__)), "bdw_db_cache")
+        src_mtime = os.path.getmtime(source_path)
+
+        # Use temp copy with mtime-based cache key
+        cache_dir = os.path.join(tempfile.gettempdir(), "bdw_db_cache")
         os.makedirs(cache_dir, exist_ok=True)
-        local = os.path.join(cache_dir, db_name)
-        if not os.path.exists(local) or os.path.getsize(local) == 0:
-            shutil.copy2(src, local)
-        try:
-            conn = sqlite3.connect(local, timeout=5, check_same_thread=False)
-            conn.execute("PRAGMA query_only=ON")
-            conn.row_factory = sqlite3.Row
-            return conn
-        except Exception:
-            return None
+        cached = os.path.join(cache_dir, db_name)
+
+        if not os.path.exists(cached) or os.path.getmtime(cached) < src_mtime:
+            shutil.copy2(source_path, cached)
+
+        conn = sqlite3.connect(cached, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
+        self._dbs[db_name] = conn
+        return conn
 
     def search(self, field: str = "title", query: str = "", page: int = 1, page_size: int = 20,
                fuzzy: bool = True, **kwargs) -> Dict[str, Any]:
