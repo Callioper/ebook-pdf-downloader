@@ -38,6 +38,7 @@ export default function Layout() {
 
   // ── Theme ──
   const applyTheme = (theme: string) => {
+    localStorage.setItem('theme', theme)
     const root = document.documentElement
     if (theme === 'dark') {
       root.classList.add('dark')
@@ -103,6 +104,7 @@ export default function Layout() {
       .then(r => r.json())
       .then(cfg => {
         const theme = cfg.theme || 'auto'
+        localStorage.setItem('theme', theme)
         const cleanup = applyTheme(theme)
         return cleanup
       })

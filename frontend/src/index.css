@@ -14,7 +14,8 @@ body {
 }
 
 .dark body {
-  @apply bg-gray-900 text-gray-100;
+  background-color: #111827;
+  color: #f3f4f6;
 }
 
 .dark ::selection {
@@ -24,45 +25,53 @@ body {
 @layer components {
   /* ── Structural surfaces ── */
   .dark header,
-  .dark footer { @apply bg-gray-800 border-gray-700; }
+  .dark footer { background-color: #1f2937; border-color: #374151; }
 
   /* ── Borders ── */
-  .dark .border-gray-200 { @apply border-gray-700; }
-  .dark .border-gray-300 { @apply border-gray-600; }
+  .dark .border-gray-200 { border-color: #374151; }
+  .dark .border-gray-300 { border-color: #4b5563; }
+  .dark .border-gray-100 { border-color: #374151; }
 
   /* ── Backgrounds ── */
-  .dark [class*="bg-white"] { @apply bg-gray-800; }
-  .dark .hover\:bg-gray-50:hover { @apply bg-gray-700; }
-  .dark .hover\:bg-gray-100:hover { @apply bg-gray-700; }
-  .dark [class*="bg-gray-200"] { @apply bg-gray-700; }
+  .dark .bg-white { background-color: #1f2937 !important; }
+  .dark .bg-gray-50 { background-color: #1f2937 !important; }
+  .dark .bg-gray-100 { background-color: #1f2937 !important; }
+  .dark .bg-gray-200 { background-color: #374151 !important; }
+  .dark .hover\:bg-gray-50:hover { background-color: #374151 !important; }
+  .dark .hover\:bg-gray-100:hover { background-color: #374151 !important; }
+
+  /* ── Progress bar ── */
+  .dark .bg-gray-200.rounded-full { background-color: #374151 !important; }
 
   /* ── Text colors ── */
-  .dark [class*="text-gray-500"] { @apply text-gray-400; }
-  .dark [class*="text-gray-600"] { @apply text-gray-300; }
-  .dark [class*="text-gray-700"] { @apply text-gray-200; }
-  .dark [class*="text-gray-800"] { @apply text-gray-100; }
-  .dark .hover\:text-gray-600:hover { @apply text-gray-300; }
-  .dark .hover\:text-gray-800:hover { @apply text-gray-100; }
-  .dark .hover\:text-gray-900:hover { @apply text-gray-100; }
-  .dark [class*="text-gray-400"] { @apply text-gray-400; }
+  .dark .text-gray-400 { color: #9ca3af; }
+  .dark .text-gray-500 { color: #9ca3af; }
+  .dark .text-gray-600 { color: #d1d5db; }
+  .dark .text-gray-700 { color: #e5e7eb; }
+  .dark .text-gray-800 { color: #f3f4f6; }
+  .dark .text-gray-900 { color: #f9fafb; }
+  .dark .hover\:text-gray-600:hover { color: #d1d5db; }
+  .dark .hover\:text-gray-800:hover { color: #f3f4f6; }
+  .dark .hover\:text-gray-900:hover { color: #f9fafb; }
 
-  /* ── Blue accents (keep visual identity) ── */
-  .dark [class*="bg-blue-50"] { @apply bg-blue-900/25; }
-  .dark [class*="text-blue-600"] { @apply text-blue-400; }
-  .dark [class*="text-blue-700"] { @apply text-blue-300; }
+  /* ── Blue accents ── */
+  .dark .bg-blue-50 { background-color: rgba(30, 58, 138, 0.25) !important; }
+  .dark .text-blue-600 { color: #60a5fa; }
+  .dark .text-blue-700 { color: #93c5fd; }
 
   /* ── Form controls ── */
   .dark input[type="text"],
   .dark input[type="password"],
   .dark input:not([type]),
   .dark select,
-  .dark textarea { @apply bg-gray-700 border-gray-600 text-gray-100; }
+  .dark textarea {
+    background-color: #374151;
+    border-color: #4b5563;
+    color: #f3f4f6;
+  }
 
-  /* ── Engine cards ── */
-  .dark .border-gray-200.rounded-lg { @apply border-gray-700 bg-gray-800; }
-
-  /* ── Disabled buttons ── */
-  .dark .disabled\:opacity-50:disabled { @apply opacity-30; }
+  /* ── Disabled ── */
+  .dark .disabled\:opacity-50:disabled { opacity: 0.3; }
 }
 
 .task-log-stream {

@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Book Downloader</title>
+    <script>
+      // Apply theme immediately to prevent flash of wrong mode
+      (function() {
+        var t = localStorage.getItem('theme') || 'auto';
+        if (t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
   </head>
   <body class="bg-gray-50 min-h-screen">
     <div id="root"></div>
