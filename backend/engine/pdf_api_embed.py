@@ -180,10 +180,6 @@ def allocate_text_to_surya_boxes(
         # Initialize all boxes with empty text
         texts = [""] * len(boxes)
 
-        # Compute average line height for this page
-        box_heights = [max(0.001, b[3] - b[1]) for b in boxes if len(b) >= 4]
-        avg_line_h = sum(box_heights) / len(box_heights) if box_heights else 0.02
-
         for block in blocks:
             block_text = (block.get("text") or "").strip()
             block_bbox = block.get("bbox")
@@ -193,7 +189,7 @@ def allocate_text_to_surya_boxes(
             bx0, by0, bx1, by1 = float(block_bbox[0]), float(block_bbox[1]), float(block_bbox[2]), float(block_bbox[3])
 
             # Find Surya boxes whose center falls within this MinerU block
-            matching: list[int] = []  # box indices whose center falls within block
+            matching: list[tuple[int, float]] = []  # [(box_index, box_width)]
             for i, bbox in enumerate(boxes):
                 if len(bbox) < 4:
                     continue
@@ -201,25 +197,40 @@ def allocate_text_to_surya_boxes(
                 cx = (sx0 + sx1) / 2.0
                 cy = (sy0 + sy1) / 2.0
                 if bx0 <= cx <= bx1 and by0 <= cy <= by1:
-                    matching.append(i)
+                    box_w = max(0.001, sx1 - sx0)
+                    matching.append((i, box_w))
 
             if not matching:
                 continue
 
-            # Estimate number of lines from block height (for display only)
-            block_h = by1 - by0
-            est_lines = max(1, round(block_h / avg_line_h))
-
-            # Surya boxes are ground truth for line count
-            n_chunks = len(matching)
+            # Width-proportional split with minimum meaningful allocation
+            total_w = sum(w for _, w in matching)
             text_len = len(block_text)
-            chars_per_chunk = text_len // n_chunks
-            remainder = text_len % n_chunks
 
+            # Compute proportional allocations, skip tiny boxes (< 3 chars share)
+            alloc: list[tuple[int, int]] = []
+            total_alloc = 0
+            for j, (idx, box_w) in enumerate(matching):
+                ratio = box_w / total_w
+                chars = round(text_len * ratio)
+                if chars < 3 and len(matching) > 2:
+                    chars = 0  # too narrow, leave empty
+                alloc.append((idx, chars))
+                total_alloc += chars
+
+            if total_alloc == 0:
+                continue  # all boxes skipped, nothing to allocate
+
+            # Redistribute rounding loss to last non-empty box
             cursor = 0
-            for j, idx in enumerate(matching):
-                chars = chars_per_chunk + (1 if j < remainder else 0)
-                end = min(text_len, cursor + chars)
+            non_empty = [(idx, c) for idx, c in alloc if c > 0]
+            for j, (idx, chars) in enumerate(alloc):
+                if chars == 0:
+                    continue
+                end = cursor + chars
+                if idx == non_empty[-1][0]:
+                    end = text_len
+                end = min(text_len, end)
                 chunk = block_text[cursor:end]
                 if chunk:
                     if texts[idx]:
