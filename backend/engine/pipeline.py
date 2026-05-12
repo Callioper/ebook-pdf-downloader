@@ -2914,6 +2914,15 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         "AI Vision": "已启用" if config.get("ai_vision_enabled") else "未启用",
     }
 
+    # Check Step 2 merged result before trying online sources
+    if not bookmark:
+        merged = report.get("bookmark", "")
+        if merged:
+            sources = report.get("raw_sources", {})
+            src_str = "+".join(k for k, v in sources.items() if v) or "merged"
+            bookmark = merged
+            task_store.add_log(task_id, f"Bookmark from Step 2 merge ({src_str}): {len(merged)} chars")
+
     confirmed = True  # default skip, controlled by bookmark_confirm_enabled
     if config.get("bookmark_confirm_enabled", False):
         confirmed = await _wait_for_step_confirmation(
