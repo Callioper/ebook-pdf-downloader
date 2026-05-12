@@ -850,8 +850,8 @@ async def check_paddleocr_online(req: Request):
                 headers={"Authorization": f"bearer {token}"},
                 params={"limit": 1},
             )
-            if resp.status_code in (200, 401):
-                if resp.status_code == 200:
+            if resp.status_code in (200, 401, 405):
+                if resp.status_code in (200, 405):
                     return {"ok": True, "message": "PaddleOCR API 连接正常"}
                 return {"ok": False, "message": "Token 无效"}
             return {"ok": False, "message": f"PaddleOCR API 返回 HTTP {resp.status_code}"}
@@ -1708,8 +1708,8 @@ async def check_paddleocr_online(req: Request):
                 headers={"Authorization": f"bearer {token}"},
                 params={"limit": 1},
             )
-            if resp.status_code in (200, 401):
-                if resp.status_code == 200:
+            if resp.status_code in (200, 401, 405):
+                if resp.status_code in (200, 405):
                     return {"ok": True, "message": "PaddleOCR API 连接正常"}
                 return {"ok": False, "message": "Token 无效"}
             return {"ok": False, "message": f"PaddleOCR API 返回 HTTP {resp.status_code}"}

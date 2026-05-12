@@ -120,9 +120,9 @@ class PaddleOCRClient:
             return resp.text
 
     async def test_connectivity(self) -> Dict[str, Any]:
-        """Lightweight connectivity check: just ping the API."""
+        """Lightweight connectivity check: ping the API. 405 is OK (GET not allowed but server reachable)."""
         resp = await self._client.get(PADDLEOCR_JOB_URL, params={"limit": 1})
-        return {"ok": resp.status_code == 200, "status": resp.status_code}
+        return {"ok": resp.status_code in (200, 405), "status": resp.status_code}
 
     async def close(self):
         await self._client.aclose()
