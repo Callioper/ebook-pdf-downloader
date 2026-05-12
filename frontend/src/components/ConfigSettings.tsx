@@ -166,6 +166,7 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_endpoint: '',
   ai_vision_model: '',
   ai_vision_api_key: '',
+  ai_vision_endpoint_id: '',
   ai_vision_provider: 'openai_compatible',
   ai_vision_messages_api: false,
   ai_vision_max_pages: 5,
@@ -336,16 +337,12 @@ const FLARESOLVERR_DOCKER_GUIDE = `## 安装 FlareSolverr（Docker）
 4. 验证：
    curl http://localhost:8191/v1`
 
-const AI_VISION_ENDPOINTS: Record<string, string> = {
-  openai_compatible: 'https://api.openai.com/v1',
-  openai_responses: 'https://api.openai.com/v1',
-  azure: 'https://RESOURCE_NAME.openai.azure.com',
-  anthropic: 'https://api.anthropic.com',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta',
-  minimax_openai: 'https://api.minimaxi.com/v1',
-  minimax_anthropic: 'https://api.minimaxi.com',
-  custom: '',
-}
+const AI_VISION_PROVIDERS = [
+  { key: 'ollama',   label: 'Ollama',           endpoint: 'http://localhost:11434/v1',           desc: '本地 Ollama 服务' },
+  { key: 'lmstudio', label: 'LM Studio',        endpoint: 'http://127.0.0.1:1234/v1',           desc: '本地 LM Studio 服务' },
+  { key: 'doubao',   label: 'Doubao (豆包)',     endpoint: 'https://ark.cn-beijing.volces.com/api/v3', desc: '火山引擎 ARK 平台' },
+  { key: 'zhipu',    label: 'Zhipu (智谱)',     endpoint: 'https://open.bigmodel.cn/api/paas/v4', desc: '智谱 AI 开放平台 (glm-4.6v-flash 免费)' },
+] as const
 
 export default function ConfigSettings() {
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -2218,7 +2215,7 @@ export default function ConfigSettings() {
             <select value={form.ai_vision_provider || 'openai_compatible'}
               onChange={(e) => {
                 const newProvider = e.target.value
-                const defaultEndpoint = AI_VISION_ENDPOINTS[newProvider] || ''
+                const defaultEndpoint = AI_VISION_PROVIDERS.find(p => p.key === newProvider)?.endpoint || ''
                 updateForm({
                   ai_vision_provider: newProvider,
                   ai_vision_endpoint: defaultEndpoint,

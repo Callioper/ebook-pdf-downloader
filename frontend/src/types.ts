@@ -135,6 +135,8 @@ export interface AppConfig {
   paddleocr_online_token?: string
   paddleocr_online_mode?: string  // "spatial" | "perbox" | "hybrid"
   paddleocr_online_endpoint?: string
+  ai_vision_api_key?: string
+  ai_vision_endpoint_id?: string  // Doubao Endpoint ID (ep-...)
   theme?: string  // "auto" | "light" | "dark"
   [key: string]: unknown
 }
