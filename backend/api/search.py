@@ -586,12 +586,31 @@ async def check_ai_vision(body: Dict[str, Any]):
     elif provider == "custom":
         provider = "openai_compatible"
 
-    # Ensure endpoint ends with /v1 (skip for azure and gemini)
-    if provider not in ("azure", "gemini") and not endpoint.rstrip('/').endswith('/v1'):
+    # Ensure endpoint ends with /v1 (skip for providers with their own version path)
+    if provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
         endpoint = endpoint.rstrip('/') + '/v1'
 
     try:
         import httpx
+
+        if provider in ("ollama", "lmstudio"):
+            url = f"{endpoint.rstrip('/')}/models"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                return {"ok": False, "message": f"API 返回 {resp.status_code}: {resp.text[:200]}"}
+            return {"ok": True, "message": "连接正常"}
+
+        elif provider == "doubao":
+            url = f"{endpoint.rstrip('/')}/chat/completions"
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+            payload = {"model": model, "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 5}
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code in (200, 400, 401):
+                ok = resp.status_code == 200
+                return {"ok": ok, "message": "连接正常" if ok else f"API 返回 {resp.status_code}: {resp.text[:200]}"}
+            return {"ok": False, "message": f"API 返回 {resp.status_code}: {resp.text[:200]}"}
 
         if provider == "azure":
             url = f"{endpoint.rstrip('/')}/openai/deployments/{model}/chat/completions?api-version=2024-02-15-preview"
@@ -702,8 +721,8 @@ async def fetch_models(body: Dict[str, Any]):
     elif provider in ("openai_responses",):
         provider = "responses"
 
-    # Ensure /v1 suffix
-    if provider not in ("azure", "gemini") and not endpoint.rstrip('/').endswith('/v1'):
+    # Ensure /v1 suffix (skip for providers with their own version path)
+    if provider not in ("azure", "gemini", "zhipu", "doubao", "ollama", "lmstudio") and not endpoint.rstrip('/').endswith('/v1'):
         endpoint = endpoint.rstrip('/') + '/v1'
 
     results = []
