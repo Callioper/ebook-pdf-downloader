@@ -21,6 +21,50 @@ body {
   @apply bg-blue-700 text-white;
 }
 
+@layer components {
+  /* ── Structural surfaces ── */
+  .dark header,
+  .dark footer { @apply bg-gray-800 border-gray-700; }
+
+  /* ── Borders ── */
+  .dark .border-gray-200 { @apply border-gray-700; }
+  .dark .border-gray-300 { @apply border-gray-600; }
+
+  /* ── Backgrounds ── */
+  .dark [class*="bg-white"] { @apply bg-gray-800; }
+  .dark .hover\:bg-gray-50:hover { @apply bg-gray-700; }
+  .dark .hover\:bg-gray-100:hover { @apply bg-gray-700; }
+  .dark [class*="bg-gray-200"] { @apply bg-gray-700; }
+
+  /* ── Text colors ── */
+  .dark [class*="text-gray-500"] { @apply text-gray-400; }
+  .dark [class*="text-gray-600"] { @apply text-gray-300; }
+  .dark [class*="text-gray-700"] { @apply text-gray-200; }
+  .dark [class*="text-gray-800"] { @apply text-gray-100; }
+  .dark .hover\:text-gray-600:hover { @apply text-gray-300; }
+  .dark .hover\:text-gray-800:hover { @apply text-gray-100; }
+  .dark .hover\:text-gray-900:hover { @apply text-gray-100; }
+  .dark [class*="text-gray-400"] { @apply text-gray-400; }
+
+  /* ── Blue accents (keep visual identity) ── */
+  .dark [class*="bg-blue-50"] { @apply bg-blue-900/25; }
+  .dark [class*="text-blue-600"] { @apply text-blue-400; }
+  .dark [class*="text-blue-700"] { @apply text-blue-300; }
+
+  /* ── Form controls ── */
+  .dark input[type="text"],
+  .dark input[type="password"],
+  .dark input:not([type]),
+  .dark select,
+  .dark textarea { @apply bg-gray-700 border-gray-600 text-gray-100; }
+
+  /* ── Engine cards ── */
+  .dark .border-gray-200.rounded-lg { @apply border-gray-700 bg-gray-800; }
+
+  /* ── Disabled buttons ── */
+  .dark .disabled\:opacity-50:disabled { @apply opacity-30; }
+}
+
 .task-log-stream {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
