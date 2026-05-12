@@ -877,7 +877,16 @@ async def _download_via_aa_and_stacks(
         stacks_session = None
         stacks_username = config.get("stacks_username", "")
         stacks_password = config.get("stacks_password", "")
-        if stacks_username and stacks_password:
+
+        # Try cached session first (from auto-login on startup)
+        if not stacks_session and stacks_username:
+            from config import get_stacks_cached_session
+            cached = get_stacks_cached_session()
+            if cached:
+                stacks_session = cached
+                task_store.add_log(task_id, f"AA: using cached stacks session")
+
+        if not stacks_session and stacks_username and stacks_password:
             try:
                 lr = _req.post(f"{stacks_url}/login",
                                json={"username": stacks_username, "password": stacks_password},
@@ -886,6 +895,8 @@ async def _download_via_aa_and_stacks(
                     stacks_session = lr.cookies.get("session")
                     if stacks_session:
                         task_store.add_log(task_id, f"AA: stacks login OK (user: {stacks_username})")
+                        from config import set_stacks_cached_session
+                        set_stacks_cached_session(stacks_session)
                 else:
                     task_store.add_log(task_id, f"AA: stacks login failed ({lr.status_code})")
             except Exception as e:
@@ -2749,7 +2760,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         loop = asyncio.get_event_loop()
                         page_texts = await loop.run_in_executor(
                             None, embed_with_perbox_paddleocr,
-                            pdf_path, surya_boxes, paddle_token, 200, 3,
+                            pdf_path, surya_boxes, paddle_token, 200, 5,
                         )
                     else:  # hybrid
                         from backend.engine.pdf_api_embed import hybrid_perbox_with_fallback
@@ -2758,7 +2769,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         loop = asyncio.get_event_loop()
                         page_texts = await loop.run_in_executor(
                             None, hybrid_perbox_with_fallback,
-                            pdf_path, surya_boxes, paddle_token, api_layout, 200, 3,
+                            pdf_path, surya_boxes, paddle_token, api_layout, 200, 5,
                         )
 
                 total_text = sum(len(t) for v in page_texts.values() for t in v if t)

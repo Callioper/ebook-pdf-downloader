@@ -238,20 +238,17 @@ def embed_with_perbox_paddleocr(
     surya_boxes: Dict[int, List[List[float]]],
     paddle_token: str,
     dpi: int = 300,
-    max_concurrency: int = 3,
+    max_concurrency: int = 5,
 ) -> Dict[int, List[str]]:
     """Per-box crop OCR pipeline using PaddleOCR-VL-1.5 API.
 
-    For each Surya text-line bbox, crops the page image and submits
-    it to PaddleOCR-VL-1.5 for per-line text recognition. Filters out
-    non-text shapes and upscales tiny crops before OCR.
-
-    Returns page_texts compatible with embed_with_surya_boxes().
-    Caller is responsible for calling embed_with_surya_boxes() after.
+    Renders all pages, prepares crops, submits ALL crops globally in one
+    parallel batch (semaphore-limited), mapping results back to pages.
     """
     import asyncio
     import io
     import json
+    import sys
     from datetime import datetime, timezone
 
     import fitz
@@ -259,7 +256,13 @@ def embed_with_perbox_paddleocr(
     from PIL import Image
 
     doc = fitz.open(input_path)
-    page_texts: Dict[int, List[str]] = {}
+
+    # ── Phase 1: prepare all crops across all pages ──
+    # crop_list: [(page_idx, box_idx, png_bytes)]
+    crop_list: list[tuple[int, int, bytes]] = []
+    box_counts: Dict[int, int] = {}  # page_idx -> total boxes (for text array init)
+    total_prepared = 0
+    total_skipped = 0
 
     for pg in sorted(surya_boxes.keys()):
         page = doc[pg]
@@ -267,137 +270,138 @@ def embed_with_perbox_paddleocr(
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         pw, ph = pix.width, pix.height
         boxes = surya_boxes[pg]
-        texts = [""] * len(boxes)
-        crop_tasks = []  # [(box_idx, png_bytes)]
-        skip_count = 0
+        box_counts[pg] = len(boxes)
 
         for i, bbox in enumerate(boxes):
             if len(bbox) < 4:
                 continue
-
             x0 = int(max(0, bbox[0] * pw - 3))
             y0 = int(max(0, bbox[1] * ph - 3))
             x1 = int(min(pw, bbox[2] * pw + 3))
             y1 = int(min(ph, bbox[3] * ph + 3))
-
             if x1 <= x0 or y1 <= y0:
                 continue
-
             bw = x1 - x0
             bh = y1 - y0
-
-            # Filter non-text shapes
             aspect = max(bw, bh) / max(1, min(bw, bh))
-            if aspect > 100:  # skip decorative lines (>100:1)
-                skip_count += 1
+            if aspect > 100:
+                total_skipped += 1
                 continue
-
-            min_area = max(80, int(150 * dpi * dpi / 90000))  # scale with DPI
+            min_area = max(80, int(150 * dpi * dpi / 90000))
             if bw * bh < min_area:
-                skip_count += 1
+                total_skipped += 1
                 continue
-
             crop = img.crop((x0, y0, x1, y1))
-
-            # Upscale tiny crops
             if bh < 40:
                 scale = 48.0 / bh
                 new_w = max(8, int(bw * scale))
-                new_h = 48
-                crop = crop.resize((new_w, new_h), Image.LANCZOS)
-
+                crop = crop.resize((new_w, 48), Image.LANCZOS)
             buf = io.BytesIO()
             crop.save(buf, format="PNG")
-            crop_tasks.append((i, buf.getvalue()))
-
-        if not crop_tasks:
-            page_texts[pg] = texts
-            continue
-
-        # Run OCR in parallel with semaphore
-        async def _run(paddle_token, crop_tasks):
-            sem = asyncio.Semaphore(max_concurrency)
-
-            async def _ocr_one(client, box_idx, crop_bytes):
-                async with sem:
-                    files = {"file": (f"crop_{box_idx}.png", io.BytesIO(crop_bytes), "image/png")}
-                    data = {
-                        "model": "PaddleOCR-VL-1.5",
-                        "optionalPayload": json.dumps({
-                            "useDocOrientationClassify": False,
-                            "useDocUnwarping": False,
-                            "useChartRecognition": False,
-                        }),
-                    }
-                    try:
-                        resp = await client.post(
-                            "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs",
-                            data=data, files=files,
-                        )
-                        if resp.status_code != 200:
-                            return (box_idx, "")
-                        jid = resp.json().get("data", {}).get("jobId", "")
-                        if not jid:
-                            return (box_idx, "")
-
-                        url = f"https://paddleocr.aistudio-app.com/api/v2/ocr/jobs/{jid}"
-                        for _ in range(240):  # 240 * 0.5s = 120s timeout
-                            await asyncio.sleep(0.5)
-                            r2 = await client.get(url)
-                            if r2.status_code != 200:
-                                continue
-                            j2 = r2.json()
-                            state = j2.get("data", {}).get("state", "?")
-                            if state == "done":
-                                jurl = j2.get("data", {}).get("resultUrl", {}).get("jsonUrl", "")
-                                async with httpx.AsyncClient(timeout=30) as bc:
-                                    r3 = await bc.get(jurl, headers={
-                                        "date": datetime.now(timezone.utc).strftime(
-                                            "%a, %d %b %Y %H:%M:%S GMT"
-                                        )
-                                    })
-                                    if r3.status_code != 200:
-                                        return (box_idx, "")
-                                    rec = json.loads(r3.text.strip().split("\n")[0])
-                                    parsing = (
-                                        rec.get("result", {})
-                                        .get("layoutParsingResults", [{}])[0]
-                                        .get("prunedResult", {})
-                                        .get("parsing_res_list", [])
-                                    )
-                                    text = (parsing[0].get("block_content") or "").strip() if parsing else ""
-                                    return (box_idx, text)
-                            elif state == "failed":
-                                return (box_idx, "")
-                        return (box_idx, "")
-                    except Exception as e:
-                        import sys
-                        print(f"  [perbox] box {box_idx} failed: {type(e).__name__}: {e}", file=sys.stderr)
-                        return (box_idx, "")
-
-            async with httpx.AsyncClient(
-                headers={"Authorization": f"bearer {paddle_token}"},
-                timeout=180,
-            ) as client:
-                tasks = [_ocr_one(client, idx, cb) for idx, cb in crop_tasks]
-                return await asyncio.gather(*tasks)
-
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(_run(paddle_token, crop_tasks))
-        finally:
-            loop.close()
-
-        for box_idx, text in results:
-            if text and box_idx < len(texts):
-                texts[box_idx] = text
-
-        perbox_matches = sum(1 for t in texts if t)
-        print(f"  [perbox] page {pg}: {perbox_matches}/{len(boxes)} matched ({skip_count} skipped, {len(crop_tasks)} OCR'd)", flush=True)
-
-        page_texts[pg] = texts
+            crop_list.append((pg, i, buf.getvalue()))
+            total_prepared += 1
 
     doc.close()
+
+    print(f"  [perbox] {total_prepared} crops prepared ({total_skipped} skipped), starting global OCR...", flush=True)
+
+    if not crop_list:
+        return {pg: [""] * box_counts.get(pg, 0) for pg in sorted(surya_boxes.keys())}
+
+    # ── Phase 2: global parallel OCR ──
+    async def _run_global():
+        sem = asyncio.Semaphore(max_concurrency)
+        done_count = [0]
+        total = len(crop_list)
+
+        async def _ocr_one(client, pg, box_idx, crop_bytes):
+            async with sem:
+                files = {"file": (f"p{pg}_b{box_idx}.png", io.BytesIO(crop_bytes), "image/png")}
+                data = {
+                    "model": "PaddleOCR-VL-1.5",
+                    "optionalPayload": json.dumps({
+                        "useDocOrientationClassify": False,
+                        "useDocUnwarping": False,
+                        "useChartRecognition": False,
+                    }),
+                }
+                try:
+                    resp = await client.post(
+                        "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs",
+                        data=data, files=files,
+                    )
+                    if resp.status_code != 200:
+                        return (pg, box_idx, "")
+                    jid = resp.json().get("data", {}).get("jobId", "")
+                    if not jid:
+                        return (pg, box_idx, "")
+
+                    url = f"https://paddleocr.aistudio-app.com/api/v2/ocr/jobs/{jid}"
+                    for _ in range(120):  # 120 × 0.5s = 60s timeout
+                        await asyncio.sleep(0.5)
+                        r2 = await client.get(url)
+                        if r2.status_code != 200:
+                            continue
+                        j2 = r2.json()
+                        state = j2.get("data", {}).get("state", "?")
+                        if state == "done":
+                            jurl = j2.get("data", {}).get("resultUrl", {}).get("jsonUrl", "")
+                            async with httpx.AsyncClient(timeout=30) as bc:
+                                r3 = await bc.get(jurl, headers={
+                                    "date": datetime.now(timezone.utc).strftime(
+                                        "%a, %d %b %Y %H:%M:%S GMT"
+                                    )
+                                })
+                                if r3.status_code != 200:
+                                    return (pg, box_idx, "")
+                                rec = json.loads(r3.text.strip().split("\n")[0])
+                                parsing = (
+                                    rec.get("result", {})
+                                    .get("layoutParsingResults", [{}])[0]
+                                    .get("prunedResult", {})
+                                    .get("parsing_res_list", [])
+                                )
+                                text = (parsing[0].get("block_content") or "").strip() if parsing else ""
+                                return (pg, box_idx, text)
+                        elif state == "failed":
+                            return (pg, box_idx, "")
+                    return (pg, box_idx, "")
+                except Exception as e:
+                    return (pg, box_idx, "")
+                finally:
+                    done_count[0] += 1
+                    if done_count[0] % 50 == 0:
+                        print(f"  [perbox] {done_count[0]}/{total} crops processed", flush=True)
+
+        async with httpx.AsyncClient(
+            headers={"Authorization": f"bearer {paddle_token}"},
+            timeout=180,
+        ) as client:
+            tasks = [_ocr_one(client, pg, idx, cb) for pg, idx, cb in crop_list]
+            results = await asyncio.gather(*tasks)
+
+        print(f"  [perbox] all {total} crops done", flush=True)
+        return results
+
+    loop = asyncio.new_event_loop()
+    try:
+        results = loop.run_until_complete(_run_global())
+    finally:
+        loop.close()
+
+    # ── Phase 3: map results to pages ──
+    page_texts: Dict[int, List[str]] = {}
+    for pg in sorted(box_counts.keys()):
+        page_texts[pg] = [""] * box_counts[pg]
+
+    matched = 0
+    for pg, box_idx, text in results:
+        if text and pg in page_texts and box_idx < len(page_texts[pg]):
+            page_texts[pg][box_idx] = text
+            matched += 1
+
+    total_boxes = sum(box_counts.values())
+    print(f"  [perbox] final: {matched}/{total_boxes} ({matched*100//max(1,total_boxes)}%)", flush=True)
     return page_texts
 
 

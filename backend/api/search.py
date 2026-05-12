@@ -1099,9 +1099,13 @@ async def check_stacks_login(req: StacksLoginRequest):
                           timeout=10)
         if lr.status_code != 200:
             return {"ok": False, "message": f"登录失败: HTTP {lr.status_code}"}
-        # Verify session works by checking status
         sr = session.get(f"{req.url}/api/status", timeout=10)
         if sr.status_code == 200:
+            # Cache session cookie for pipeline reuse
+            session_cookie = lr.cookies.get("session", "")
+            if session_cookie:
+                from config import set_stacks_cached_session
+                set_stacks_cached_session(session_cookie)
             return {"ok": True, "message": "登录成功"}
         return {"ok": False, "message": f"登录成功但状态查询失败: HTTP {sr.status_code}"}
     except Exception as e:
@@ -1759,7 +1763,13 @@ async def system_status():
                 passwd = cfg.get("stacks_password", "")
                 if uname and passwd:
                     lr = await c.post(f"{url}/login", json={"username": uname, "password": passwd})
-                    return "stacks", {"ok": lr.status_code == 200, "detail": "已登录" if lr.status_code == 200 else f"登录 HTTP {lr.status_code}"}
+                    if lr.status_code == 200:
+                        session_cookie = lr.cookies.get("session", "")
+                        if session_cookie:
+                            from config import set_stacks_cached_session
+                            set_stacks_cached_session(session_cookie)
+                        return "stacks", {"ok": True, "detail": "已登录"}
+                    return "stacks", {"ok": False, "detail": f"登录 HTTP {lr.status_code}"}
                 return "stacks", {"ok": True, "detail": "可连接"}
         except Exception as ex:
             return "stacks", {"ok": False, "detail": str(ex)[:50]}

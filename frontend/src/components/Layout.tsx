@@ -78,6 +78,31 @@ export default function Layout() {
   // Auto-run system status check on mount
   useEffect(() => { checkSystemStatus() }, [])
 
+  // Auto-login to Stacks on startup
+  const stacksAutoRef = useRef(false)
+  useEffect(() => {
+    if (stacksAutoRef.current) return
+    stacksAutoRef.current = true
+    fetch('/api/v1/config')
+      .then(r => r.json())
+      .then(cfg => {
+        const url = cfg.stacks_base_url || 'http://localhost:7788'
+        const uname = cfg.stacks_username || ''
+        const passwd = cfg.stacks_password || ''
+        if (!uname || !passwd) return
+        return fetch('/api/v1/check-stacks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, username: uname, password: passwd }),
+        })
+      })
+      .then(r => r?.json())
+      .then(d => {
+        if (d?.ok) console.log('[auto-login] Stacks login OK')
+      })
+      .catch(() => {})
+  }, [])
+
   // Shutdown backend when page/electron window is closed
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -301,8 +326,10 @@ export default function Layout() {
                       const zlBal = zl?.balance || zl?.detail || '';
                       return `√ 全部正常 · ${el}` + (zlBal ? ` · ZL:${zlBal}` : '');
                     })()
-                  : '× 请检查设置'
-                }
+                  : (sysStatus.failures && sysStatus.failures.length > 0
+                      ? `× ${sysStatus.failures.slice(0, 3).join(' · ')}`
+                      : '× 请检查设置'
+                    )}
               </span>
             )}
           </div>

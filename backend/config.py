@@ -140,6 +140,25 @@ def get_config() -> Dict[str, Any]:
     return CONFIG
 
 
+# Cached Stacks session for reuse across tasks
+_stacks_cached_session: str = ""
+_stacks_cached_expiry: float = 0.0
+
+
+def get_stacks_cached_session() -> str:
+    import time
+    if _stacks_cached_session and time.time() < _stacks_cached_expiry:
+        return _stacks_cached_session
+    return ""
+
+
+def set_stacks_cached_session(session_cookie: str, ttl: int = 3600) -> None:
+    global _stacks_cached_session, _stacks_cached_expiry
+    import time
+    _stacks_cached_session = session_cookie
+    _stacks_cached_expiry = time.time() + ttl
+
+
 def update_config(data: Dict[str, Any]) -> Dict[str, Any]:
     global CONFIG
     CONFIG.update(data)
