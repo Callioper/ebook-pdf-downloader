@@ -2623,30 +2623,48 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 task_store.add_log(task_id, f"MinerU: Surya detected {total_boxes} boxes across {len(surya_boxes)} pages")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": f"Surya: {total_boxes} boxes"})
 
-                # Step 2: MinerU API for text
-                task_store.add_log(task_id, "MinerU: calling API for text content...")
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "MinerU API — uploading..."})
+                # Step 2: Pre-flight + chunked MinerU API
+                from backend.engine.pdf_utils import get_pdf_info, split_pdf, cleanup_chunks
+                pages, fsize = get_pdf_info(pdf_path)
+                MAX_PAGES = 200
+                MAX_SIZE = 200 * 1024 * 1024
 
-                def _mineru_progress(extracted, total_pages, state):
-                    pct = int(extracted * 100 / max(total_pages, 1))
-                    overall = 25 + int(pct * 0.55)  # 25% → 80%
-                    asyncio.run_coroutine_threadsafe(
-                        _emit(task_id, "step_progress", {"step": "ocr", "progress": overall, "detail": f"MinerU: {state} ({extracted}/{total_pages} pages)"}),
-                        loop,
-                    )
+                if fsize > MAX_SIZE:
+                    task_store.add_log(task_id, f"MinerU: file too large ({fsize//1024//1024}MB > 200MB), aborting")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                    return report
 
-                client = MinerUClient(token=mineru_token)
-                try:
-                    with open(pdf_path, "rb") as f:
-                        pdf_bytes = f.read()
-                    zip_bytes = await client.process_pdf(
-                        pdf_bytes, file_name=os.path.basename(pdf_path),
-                        model_version=mineru_model,
-                        progress_callback=_mineru_progress,
-                    )
-                    layout = parse_layout_from_zip(zip_bytes)
-                finally:
-                    await client.close()
+                pdf_chunks = split_pdf(pdf_path, max_pages=100) if pages > MAX_PAGES else [pdf_path]
+                if len(pdf_chunks) > 1:
+                    task_store.add_log(task_id, f"MinerU: PDF {pages} pages, split into {len(pdf_chunks)} chunks")
+
+                all_layouts = []
+                for ci, chunk_path in enumerate(pdf_chunks):
+                    n = len(pdf_chunks)
+                    pct = 25 + int(ci * 55 / max(n, 1))
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": pct, "detail": f"MinerU: chunk {ci+1}/{n}"})
+                    task_store.add_log(task_id, f"MinerU: chunk {ci+1}/{n} ({os.path.basename(chunk_path)})")
+
+                    client = MinerUClient(token=mineru_token)
+                    try:
+                        with open(chunk_path, "rb") as f:
+                            chunk_bytes = f.read()
+                        zip_bytes = await client.process_pdf(
+                            chunk_bytes, file_name=os.path.basename(chunk_path),
+                            model_version=mineru_model,
+                        )
+                        all_layouts.append(parse_layout_from_zip(zip_bytes))
+                    finally:
+                        await client.close()
+
+                # Merge layouts with page offset
+                layout = {}
+                for ci, chunk_layout in enumerate(all_layouts):
+                    offset = ci * 100
+                    for pg, blocks in chunk_layout.items():
+                        layout[pg + offset] = blocks
+
+                cleanup_chunks(pdf_chunks, pdf_path)
 
                 total_blocks = sum(len(v) for v in layout.values())
                 task_store.add_log(task_id, f"MinerU: API returned {len(layout)} pages, {total_blocks} text blocks")
