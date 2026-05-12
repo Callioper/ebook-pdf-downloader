@@ -28,9 +28,8 @@ interface AppConfig {
   ai_vision_model: string
   ai_vision_api_key: string
   ai_vision_provider: string
-  ai_vision_messages_api: boolean  // custom: use Anthropic Messages API instead of OpenAI
+  ai_vision_endpoint_id: string  // Doubao Endpoint ID (ep-...)
   ai_vision_max_pages: number
-  ai_vision_dpi: number
   llm_ocr_endpoint: string
   llm_ocr_model: string
   llm_ocr_concurrency: number
@@ -168,9 +167,7 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_api_key: '',
   ai_vision_endpoint_id: '',
   ai_vision_provider: 'openai_compatible',
-  ai_vision_messages_api: false,
   ai_vision_max_pages: 5,
-  ai_vision_dpi: 150,
   llm_ocr_endpoint: 'http://127.0.0.1:1234/v1',
   llm_ocr_model: '',
   llm_ocr_concurrency: 1,
@@ -2130,25 +2127,96 @@ export default function ConfigSettings() {
               onChange={(e) => updateForm({ ai_vision_enabled: e.target.checked })} className="rounded" />
             <label htmlFor="ai_vision_enabled" className="text-xs">启用 AI Vision 目录提取</label>
           </div>
+
+          {/* API 提供商 */}
           <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">API 端点</label>
+            <label className="text-xs font-medium text-gray-600 block mb-1.5">API 提供商</label>
+            <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
+              {AI_VISION_PROVIDERS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    const p = AI_VISION_PROVIDERS.find(p2 => p2.key === key)!
+                    updateForm({
+                      ai_vision_provider: key,
+                      ai_vision_endpoint: p.endpoint,
+                      ai_vision_model: key === 'zhipu' ? 'glm-4.6v-flash' : form.ai_vision_model,
+                    })
+                  }}
+                  className={`flex-1 py-1.5 text-center transition-colors ${
+                    (form.ai_vision_provider || 'ollama') === key
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(() => {
+              const p = AI_VISION_PROVIDERS.find(p2 => p2.key === (form.ai_vision_provider || 'ollama'))
+              return p ? <p className="text-[11px] text-gray-400 mt-1">{p.desc}</p> : null
+            })()}
+          </div>
+
+          {/* API 端点 */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">API 端点</label>
             <input type="text" value={form.ai_vision_endpoint || ''}
               onChange={(e) => updateForm({ ai_vision_endpoint: e.target.value })}
-              placeholder={
-                form.ai_vision_provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' :
-                form.ai_vision_provider === 'azure' ? 'https://{resource}.openai.azure.com' :
-                form.ai_vision_provider === 'anthropic' || form.ai_vision_provider === 'minimax_anthropic' ? 'https://api.anthropic.com' :
-                form.ai_vision_provider === 'minimax_openai' ? 'https://api.minimaxi.com/v1' :
-                'http://127.0.0.1:12345/v1'
-              }
+              placeholder="https://..."
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
+
+          {/* Doubao Endpoint ID */}
+          {form.ai_vision_provider === 'doubao' && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Endpoint ID</label>
+              <input type="text" value={form.ai_vision_endpoint_id ?? ''}
+                onChange={(e) => updateForm({ ai_vision_endpoint_id: e.target.value })}
+                placeholder="ep-2025xxxx-xxxxx"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
+              <details className="mt-2">
+                <summary className="text-[11px] text-blue-500 cursor-pointer">Doubao 配置教程</summary>
+                <div className="mt-1 text-[11px] text-gray-500 space-y-1">
+                  <p>Endpoint ID 是火山引擎 ARK 平台的推理接入点 ID，格式为 <code className="text-gray-600 bg-gray-100 px-1 rounded">ep-...</code>。</p>
+                  <p><b>获取步骤：</b></p>
+                  <ol className="list-decimal list-inside space-y-0.5">
+                    <li>访问 <a href="https://console.volcengine.com/ark" target="_blank" className="text-blue-500">火山引擎 ARK 控制台</a></li>
+                    <li>开通服务：在「模型推理」页面开通 ARK 服务</li>
+                    <li>创建接入点：点击「创建接入点」，选择 Doubao 模型</li>
+                    <li>复制生成的 Endpoint ID（<code className="text-gray-600 bg-gray-100 px-1 rounded">ep-2025xxxx-xxxxx</code>）</li>
+                  </ol>
+                  <p><b>建议模型：</b>Doubao-1.5-vision-pro-32k / Doubao-1.5-vision-lite / Doubao-1.5-vision-pro</p>
+                  <p><b>API Key：</b>在 ARK 控制台「API Key 管理」创建，填写到下方 API Key 字段。</p>
+                </div>
+              </details>
+            </div>
+          )}
+
+          {/* Zhipu guide */}
+          {form.ai_vision_provider === 'zhipu' && (
+            <details className="mt-1">
+              <summary className="text-[11px] text-blue-500 cursor-pointer">Zhipu 配置说明</summary>
+              <div className="mt-1 text-[11px] text-gray-500 space-y-1">
+                <p>使用 <code className="text-gray-600 bg-gray-100 px-1 rounded">glm-4.6v-flash</code>，最新免费的视觉理解模型。</p>
+                <p>访问 <a href="https://open.bigmodel.cn" target="_blank" className="text-blue-500">智谱 AI 开放平台</a>，创建 API Key 后填写到下方 API Key 字段即可使用。</p>
+              </div>
+            </details>
+          )}
+
+          {/* 模型名称 */}
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
             <div className="flex gap-1">
               <input type="text" value={form.ai_vision_model || ''}
                 onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
-                placeholder="sabafallah/deepseek-ocr"
+                placeholder={
+                  form.ai_vision_provider === 'zhipu' ? 'glm-4.6v-flash' :
+                  form.ai_vision_provider === 'doubao' ? 'doubao-vision-pro-32k' :
+                  'minicpm-v'
+                }
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
               <button
                 type="button"
@@ -2163,6 +2231,7 @@ export default function ConfigSettings() {
                         endpoint: form.ai_vision_endpoint,
                         api_key: form.ai_vision_api_key,
                         provider: form.ai_vision_provider,
+                        endpoint_id: form.ai_vision_endpoint_id,
                       }),
                     })
                     const data = await res.json()
@@ -2179,14 +2248,12 @@ export default function ConfigSettings() {
                 }}
                 disabled={fetchingModels || !form.ai_vision_endpoint}
                 className="px-2 py-1.5 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
-                title="从提供商拉取可用模型列表"
               >
                 {fetchingModels ? '...' : '获取模型'}
               </button>
             </div>
             {aiModels.length > 0 && (
-              <select
-                value={form.ai_vision_model || ''}
+              <select value={form.ai_vision_model || ''}
                 onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
                 className="w-full mt-1 rounded border border-blue-300 px-2 py-1 text-xs font-mono"
                 size={Math.min(aiModels.length + 1, 8)}
@@ -2203,6 +2270,8 @@ export default function ConfigSettings() {
               </p>
             )}
           </div>
+
+          {/* API Key */}
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
             <input type="password" value={form.ai_vision_api_key || ''}
@@ -2210,46 +2279,8 @@ export default function ConfigSettings() {
               placeholder="sk-...  (支持 {env:VAR_NAME})"
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">API 格式</label>
-            <select value={form.ai_vision_provider || 'openai_compatible'}
-              onChange={(e) => {
-                const newProvider = e.target.value
-                const defaultEndpoint = AI_VISION_PROVIDERS.find(p => p.key === newProvider)?.endpoint || ''
-                updateForm({
-                  ai_vision_provider: newProvider,
-                  ai_vision_endpoint: defaultEndpoint,
-                })
-              }}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
-              <option value="openai_compatible">OpenAI / DeepSeek / 智谱 / Qwen / Ollama / lmstudio</option>
-              <option value="openai_responses">OpenAI Responses (新版 /v1/responses)</option>
-              <option value="azure">Azure OpenAI</option>
-              <option value="anthropic">Anthropic Claude</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="minimax_openai">MiniMax (OpenAI 兼容 · 国内/国际通用)</option>
-              <option value="minimax_anthropic">MiniMax (Anthropic 兼容 · Token Plan)</option>
-              <option value="custom">自定义 (Custom)</option>
-            </select>
-          </div>
-          {form.ai_vision_provider === 'custom' && (
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="ai_vision_messages_api"
-                checked={form.ai_vision_messages_api ?? false}
-                onChange={(e) => updateForm({ ai_vision_messages_api: e.target.checked })} className="rounded" />
-              <label htmlFor="ai_vision_messages_api" className="text-xs font-medium text-gray-600 block mb-1">
-                使用 Anthropic Messages API 格式 (默认 OpenAI Chat Completions)
-              </label>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">DPI</label>
-              <input type="number" value={form.ai_vision_dpi ?? 150}
-                onChange={(e) => updateForm({ ai_vision_dpi: parseInt(e.target.value) || 150 })}
-                min={72} max={300} className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs" />
-            </div>
-          </div>
+
+          {/* 检测按钮 */}
           <button
             type="button"
             onClick={async () => {
@@ -2263,7 +2294,7 @@ export default function ConfigSettings() {
                     model: form.ai_vision_model,
                     api_key: form.ai_vision_api_key,
                     provider: form.ai_vision_provider,
-                    messages_api: form.ai_vision_messages_api,
+                    endpoint_id: form.ai_vision_endpoint_id,
                   }),
                 });
                 const data = await res.json();
@@ -2284,17 +2315,14 @@ export default function ConfigSettings() {
               {aiVisionMsg}
             </p>
           )}
-          <p className="text-xs text-gray-400">
-            阶段1 从 OCR 文字层提取目录（免费），阶段2 用 AI Vision 从目录页图片提取。
-            支持 OpenAI 兼容 / Gemini / MiniMax 格式。
-          </p>
 
-          <div className="flex items-center gap-2">
+          {/* 确认对话框 */}
+          <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
             <input type="checkbox" id="bookmark_confirm_enabled"
               checked={form.bookmark_confirm_enabled ?? false}
               onChange={(e) => updateForm({ bookmark_confirm_enabled: e.target.checked })}
               className="rounded" />
-            <label htmlFor="bookmark_confirm_enabled" className="text-xs font-medium text-gray-600 block mb-1">
+            <label htmlFor="bookmark_confirm_enabled" className="text-xs font-medium text-gray-600">
               管道执行到书签步骤时弹出确认对话框
             </label>
           </div>
