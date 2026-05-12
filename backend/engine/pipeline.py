@@ -2558,12 +2558,49 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 return report
 
             mineru_model = config.get("mineru_model", "vlm")
-            task_store.add_log(task_id, f"MinerU OCR: API (model={mineru_model}), block-level layout")
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "MinerU API OCR..."})
+            task_store.add_log(task_id, f"MinerU OCR (hybrid): Surya detection + MinerU API spatial (model={mineru_model})")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Running Surya detection..."})
 
             try:
+                from backend.engine.surya_detect import run_surya_detect, SuryaDetectError
                 from backend.engine.mineru_client import MinerUClient, parse_layout_from_zip
-                from backend.engine.pdf_api_embed import embed_api_text_layer
+                from backend.engine.pdf_api_embed import allocate_text_to_surya_boxes, embed_with_surya_boxes
+
+                # Step 1: Surya line detection
+                try:
+                    surya_boxes = await run_surya_detect(pdf_path, dpi=200)
+                except SuryaDetectError as e:
+                    task_store.add_log(task_id, f"MinerU: Surya detection failed — {e}. Falling back to block-level layout.")
+                    from backend.engine.pdf_api_embed import embed_api_text_layer
+                    client = MinerUClient(token=mineru_token)
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+                        zip_bytes = await client.process_pdf(
+                            pdf_bytes, file_name=os.path.basename(pdf_path),
+                            model_version=mineru_model,
+                        )
+                        layout = parse_layout_from_zip(zip_bytes)
+                    finally:
+                        await client.close()
+                    task_store.add_log(task_id, f"MinerU fallback: parsed {len(layout)} pages")
+                    output_pdf = pdf_path + ".mineru.pdf"
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, embed_api_text_layer, pdf_path, output_pdf, layout)
+                    if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                        os.replace(output_pdf, pdf_path)
+                        report["ocr_done"] = True
+                        task_store.add_log(task_id, "MinerU OCR complete (fallback: block-level layout)")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
+                    return report
+
+                total_boxes = sum(len(v) for v in surya_boxes.values())
+                task_store.add_log(task_id, f"MinerU: Surya detected {total_boxes} boxes across {len(surya_boxes)} pages")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": f"Surya: {total_boxes} boxes"})
+
+                # Step 2: MinerU API for text
+                task_store.add_log(task_id, "MinerU: calling API for text content...")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "MinerU API OCR..."})
 
                 client = MinerUClient(token=mineru_token)
                 try:
@@ -2578,17 +2615,28 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     await client.close()
 
                 total_blocks = sum(len(v) for v in layout.values())
-                task_store.add_log(task_id, f"MinerU: parsed {len(layout)} pages, {total_blocks} text blocks")
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 80, "detail": f"{total_blocks} blocks"})
+                task_store.add_log(task_id, f"MinerU: API returned {len(layout)} pages, {total_blocks} text blocks")
 
+                # Step 3: Spatial allocation — map MinerU block text to Surya line boxes
+                page_texts = allocate_text_to_surya_boxes(surya_boxes, layout)
+                total_text = sum(len(t) for v in page_texts.values() for t in v if t)
+                all_boxes_count = sum(len(v) for v in page_texts.values())
+                matched = sum(1 for v in page_texts.values() for t in v if t)
+                task_store.add_log(task_id, f"MinerU: spatial allocation: {matched}/{all_boxes_count} boxes received text ({total_text} chars)")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 85, "detail": f"{matched} boxes matched"})
+
+                # Step 4: Embed with Surya bboxes
                 output_pdf = pdf_path + ".mineru.pdf"
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, embed_api_text_layer, pdf_path, output_pdf, layout)
+                await loop.run_in_executor(
+                    None, embed_with_surya_boxes,
+                    pdf_path, output_pdf, surya_boxes, page_texts,
+                )
 
                 if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
                     os.replace(output_pdf, pdf_path)
                     report["ocr_done"] = True
-                    task_store.add_log(task_id, "MinerU OCR complete")
+                    task_store.add_log(task_id, "MinerU OCR complete (hybrid: Surya boxes + MinerU text, spatial allocation)")
                 else:
                     raise RuntimeError("MinerU: embedding produced empty file")
 
