@@ -461,6 +461,32 @@ export default function ConfigSettings() {
 
   useEffect(() => { fetchConfig() }, [fetchConfig])
 
+  // Persist AI Vision settings to localStorage (avoid re-entering after clear)
+  useEffect(() => {
+    const keys: (keyof AppConfig)[] = ['ai_vision_model', 'ai_vision_endpoint_id', 'ai_vision_zhipu_key', 'ai_vision_doubao_key', 'ai_vision_provider', 'ai_vision_endpoint']
+    const saved: Record<string, string> = {}
+    keys.forEach(k => { const v = form[k]; if (v) saved[k] = String(v) })
+    if (Object.keys(saved).length > 0) localStorage.setItem('ai_vision_cache', JSON.stringify(saved))
+  }, [form.ai_vision_model, form.ai_vision_endpoint_id, form.ai_vision_zhipu_key, form.ai_vision_doubao_key, form.ai_vision_provider, form.ai_vision_endpoint])
+
+  // Restore AI Vision from localStorage on mount
+  useEffect(() => {
+    if (!config) return
+    try {
+      const raw = localStorage.getItem('ai_vision_cache')
+      if (!raw) return
+      const saved = JSON.parse(raw)
+      const updates: Partial<AppConfig> = {}
+      if (saved.ai_vision_model) updates.ai_vision_model = saved.ai_vision_model
+      if (saved.ai_vision_endpoint_id) updates.ai_vision_endpoint_id = saved.ai_vision_endpoint_id
+      if (saved.ai_vision_zhipu_key) updates.ai_vision_zhipu_key = saved.ai_vision_zhipu_key
+      if (saved.ai_vision_doubao_key) updates.ai_vision_doubao_key = saved.ai_vision_doubao_key
+      if (saved.ai_vision_provider) updates.ai_vision_provider = saved.ai_vision_provider
+      if (saved.ai_vision_endpoint) updates.ai_vision_endpoint = saved.ai_vision_endpoint
+      if (Object.keys(updates).length > 0) setForm(prev => ({ ...prev, ...updates }))
+    } catch {}
+  }, [config])
+
   // Restore Z-Lib login state from stored credentials
   useEffect(() => {
     if (!config || !form.zlib_email || !form.zlib_password) return
@@ -2178,7 +2204,7 @@ export default function ConfigSettings() {
             <input type="checkbox" id="ai_vision_enabled"
               checked={form.ai_vision_enabled ?? true}
               onChange={(e) => updateForm({ ai_vision_enabled: e.target.checked })} className="rounded" />
-            <label htmlFor="ai_vision_enabled" className="text-xs">启用 AI Vision 目录提取</label>
+            <label htmlFor="ai_vision_enabled" className="text-xs">启用智能目录提取</label>
           </div>
 
           {/* API 提供商 */}
