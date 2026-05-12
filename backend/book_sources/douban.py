@@ -5,6 +5,8 @@ from bs4 import BeautifulSoup
 from typing import Optional, Dict, Any, List
 
 DOUBAN_SEARCH = "https://www.douban.com/search"
+DOUBAN_SEARCH_JSON = "https://www.douban.com/j/search"
+DOUBAN_BOOK_URL_PATTERN = re.compile(r".*/subject/(\d+)/?")
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -15,12 +17,31 @@ HEADERS = {
 
 def _search_by_isbn(isbn: str) -> Optional[str]:
     """Search Douban by ISBN and return the first book detail URL."""
+    import json as _json
     params = {"cat": "1001", "q": isbn}
+    headers = {**HEADERS, "Referer": "https://www.douban.com/search"}
     try:
-        r = requests.get(DOUBAN_SEARCH, params=params, headers=HEADERS, timeout=10)
-        if r.status_code != 200:
+        # Prefer JSON API (faster, no HTML parsing)
+        r = requests.get(DOUBAN_SEARCH_JSON, params=params, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = _json.loads(r.text)
+            items = data.get("items", []) if isinstance(data, dict) else data
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        href = item.get("url", "")
+                    elif isinstance(item, str):
+                        href = item
+                    else:
+                        continue
+                    if "/subject/" in href:
+                        return href
+
+        # Fallback to HTML parsing
+        r2 = requests.get(DOUBAN_SEARCH, params=params, headers=HEADERS, timeout=10)
+        if r2.status_code != 200:
             return None
-        soup = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(r2.text, "html.parser")
         for a in soup.select("a.nbg"):
             href = a.get("href", "")
             if "book.douban.com/subject/" in href:
