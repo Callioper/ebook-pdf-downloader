@@ -354,6 +354,8 @@ export default function ConfigSettings() {
   const [aiModels, setAiModels] = useState<{ id: string; name: string }[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchModelsMsg, setFetchModelsMsg] = useState('')
+  const [bookmarking, setBookmarking] = useState(false)
+  const [bookmarkMsg, setBookmarkMsg] = useState('')
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({})
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
@@ -2524,6 +2526,38 @@ export default function ConfigSettings() {
         >
           {updateChecking ? '检测中...' : '检查更新'}
         </button>
+        <button
+          type="button"
+          onClick={async () => {
+            setBookmarking(true)
+            setBookmarkMsg('')
+            try {
+              const res = await fetch('/api/v1/select-file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filters: [{ name: 'PDF', extensions: ['pdf'] }] }),
+              })
+              const data = await res.json()
+              if (!data.path) { setBookmarkMsg('未选择文件'); return }
+
+              setBookmarkMsg('正在识别目录...')
+              const r2 = await fetch('/api/v1/toc/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pdf_path: data.path }),
+              })
+              const d2 = await r2.json()
+              setBookmarkMsg(d2.message || (d2.ok ? '完成' : '失败'))
+            } catch (e) {
+              setBookmarkMsg(String(e))
+            }
+            setBookmarking(false)
+          }}
+          disabled={bookmarking}
+          className="px-5 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
+        >
+          {bookmarking ? '处理中...' : '智能书签'}
+        </button>
         {saveMsg && (
           <span className={`text-xs ${saveMsg.includes('成功') ? 'text-green-600' : 'text-red-500'}`}>
             {saveMsg}
@@ -2532,6 +2566,11 @@ export default function ConfigSettings() {
         {updateResult && (
           <span className={`text-xs px-2 py-1 rounded ${updateResult.includes('失败') ? 'text-red-600 bg-red-50' : updateResult.includes('新版本') ? 'text-blue-600 bg-blue-50 font-semibold' : 'text-green-600 bg-green-50'}`}>
             {updateResult}
+          </span>
+        )}
+        {bookmarkMsg && (
+          <span className={`text-xs ${bookmarkMsg.includes('失败') || bookmarkMsg.includes('未选择') ? 'text-red-500' : 'text-green-600'}`}>
+            {bookmarkMsg}
           </span>
         )}
       </div>
