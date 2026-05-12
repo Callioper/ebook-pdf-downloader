@@ -1,4 +1,1 @@
-from backend.engine.pdf_bw_compress import bw_compress_pdf_blocking
-from backend.engine.mineru_client import MinerUClient, MinerUAPIError, MinerUTimeoutError, parse_layout_from_zip
-from backend.engine.paddleocr_online_client import PaddleOCRClient, PaddleOCRAPIError, parse_jsonl_result
-from backend.engine.pdf_api_embed import embed_api_text_layer, embed_with_surya_boxes
+# engine package — heavy modules imported lazily inside functions
