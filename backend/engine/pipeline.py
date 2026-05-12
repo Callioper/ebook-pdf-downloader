@@ -481,8 +481,31 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
             await _fetch_nlc_metadata(task_id, report, config)
 
     # ═══════════════ Phase 3: 书葵网书签 ═══════════════
-    # （书签获取在 Step 6 通过 NLC/SS码 处理，不使用 ISBN）
     await _emit(task_id, "step_progress", {"step": "fetch_isbn", "progress": 80})
+
+    # 从书葵网获取书签（优先级最高，通常含页码）
+    shukui_bookmark = ""
+    isbn_or_ss = report.get("isbn", "") or report.get("ss_code", "")
+    if isbn_or_ss:
+        try:
+            from addbookmark.bookmarkget import get_bookmark, get_bookmark_by_title
+            shukui_bookmark = await get_bookmark(isbn_or_ss)
+            if shukui_bookmark:
+                report["shukui_toc"] = shukui_bookmark
+                task_store.add_log(task_id, f"Shukui: bookmark fetched via ISBN/SS ({len(shukui_bookmark)} chars)")
+        except Exception as e:
+            task_store.add_log(task_id, f"Shukui bookmark error: {e}")
+
+    title_search = report.get("title", "")
+    if not shukui_bookmark and title_search:
+        try:
+            from addbookmark.bookmarkget import get_bookmark_by_title
+            shukui_bookmark = await get_bookmark_by_title(title_search)
+            if shukui_bookmark:
+                report["shukui_toc"] = shukui_bookmark
+                task_store.add_log(task_id, f"Shukui: bookmark fetched via title ({len(shukui_bookmark)} chars)")
+        except Exception as e:
+            task_store.add_log(task_id, f"Shukui title search error: {e}")
 
     # 记录完成状态并回写到 task_store（只补全非空字段，不覆盖已有数据）
     update_fields = {}
@@ -529,12 +552,13 @@ async def _step_fetch_isbn(task_id: str, task: Dict[str, Any], config: Dict[str,
         except Exception as e:
             task_store.add_log(task_id, f"NLC TOC error: {e}")
 
-        # Merge all TOC sources into unified bookmark
-        if any([report.get("bookmark"), report.get("douban_toc"), report.get("nlc_toc")]):
+        # Merge all TOC sources: shukui > douban > nlc
+        has_sources = report.get("shukui_toc") or report.get("douban_toc") or report.get("nlc_toc")
+        if has_sources:
             try:
                 from addbookmark.bookmark_merger import merge_bookmarks
                 merged = merge_bookmarks(
-                    shukui=report.get("bookmark") or "",
+                    shukui=report.get("shukui_toc") or "",
                     douban_toc=report.get("douban_toc") or "",
                     nlc_toc=report.get("nlc_toc") or "",
                 )
@@ -2903,28 +2927,20 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
     task_store.add_log(task_id, "Step 6/7: Processing bookmarks/TOC...")
     await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 0})
 
-    bookmark = task.get("bookmark", "")
+    bookmark = task.get("bookmark", "") or report.get("bookmark", "")
     pdf_path = report.get("pdf_path", "")
 
-    # Build config summary for the confirmation dialog
-    config_info = {
-        "外源书签": "已提供" if task.get("bookmark") else "自动获取",
-        "ISBN": report.get("isbn", "") or "未获取",
-        "智能TOC": "已启用" if pdf_path else "无PDF",
-        "AI Vision": "已启用" if config.get("ai_vision_enabled") else "未启用",
-    }
+    if bookmark:
+        src = "user" if task.get("bookmark") else f"Step2 ({'+'.join(k for k,v in report.get('raw_sources',{}).items() if v) or 'merged'})"
+        task_store.add_log(task_id, f"Bookmark from {src}: {len(bookmark)} chars")
 
-    # Check Step 2 merged result before trying online sources
-    if not bookmark:
-        merged = report.get("bookmark", "")
-        if merged:
-            sources = report.get("raw_sources", {})
-            src_str = "+".join(k for k, v in sources.items() if v) or "merged"
-            bookmark = merged
-            task_store.add_log(task_id, f"Bookmark from Step 2 merge ({src_str}): {len(merged)} chars")
-
-    confirmed = True  # default skip, controlled by bookmark_confirm_enabled
+    confirmed = True
     if config.get("bookmark_confirm_enabled", False):
+        config_info = {
+            "外源书签": "已提供" if task.get("bookmark") or report.get("bookmark") else "自动获取",
+            "ISBN": report.get("isbn", "") or "未获取",
+            "智能TOC": "已启用" if pdf_path else "无PDF",
+        }
         confirmed = await _wait_for_step_confirmation(
         task_id=task_id,
         step_name="bookmark",
@@ -2935,37 +2951,7 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 100})
         return report
 
-    if not bookmark:
-        task_store.add_log(task_id, "No bookmark provided, trying addbookmark...")
-        try:
-            from addbookmark.bookmarkget import get_bookmark, get_bookmark_by_title
-            isbn = report.get("isbn", "")
-            title = report.get("title", "")
-            if isbn:
-                bookmark = await get_bookmark(isbn)
-                if bookmark:
-                    task_store.add_log(task_id, "Bookmark fetched from addbookmark (ISBN)")
-                    report["bookmark"] = bookmark
-
-            # Title-based fallback when ISBN is missing or failed
-            if not bookmark:
-                if title:
-                    bookmark = await get_bookmark_by_title(title)
-                    if bookmark:
-                        task_store.add_log(task_id, "Bookmark fetched from addbookmark (title)")
-                        report["bookmark"] = bookmark
-
-            if not bookmark:
-                if isbn or title:
-                    task_store.add_log(task_id, "Bookmark not found via addbookmark")
-                else:
-                    task_store.add_log(task_id, "No ISBN or title available for bookmark lookup")
-        except ImportError:
-            task_store.add_log(task_id, "addbookmark module not available")
-        except Exception as e:
-            task_store.add_log(task_id, f"Bookmark fetch error: {e}")
-
-    # 两阶段 TOC 提取：OCR 文字层 → AI Vision 兜底
+    # ── AI Vision fallback (only if no bookmark or no page numbers) ──
     if not bookmark and pdf_path and os.path.exists(pdf_path):
         task_store.add_log(task_id, "尝试智能 TOC 提取...")
         await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 30, "detail": "智能目录提取中..."})
