@@ -2613,7 +2613,15 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
                 # Step 2: MinerU API for text
                 task_store.add_log(task_id, "MinerU: calling API for text content...")
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "MinerU API OCR..."})
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "MinerU API — uploading..."})
+
+                def _mineru_progress(extracted, total_pages, state):
+                    pct = int(extracted * 100 / max(total_pages, 1))
+                    overall = 25 + int(pct * 0.55)  # 25% → 80%
+                    asyncio.run_coroutine_threadsafe(
+                        _emit(task_id, "step_progress", {"step": "ocr", "progress": overall, "detail": f"MinerU: {state} ({extracted}/{total_pages} pages)"}),
+                        loop,
+                    )
 
                 client = MinerUClient(token=mineru_token)
                 try:
@@ -2622,6 +2630,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                     zip_bytes = await client.process_pdf(
                         pdf_bytes, file_name=os.path.basename(pdf_path),
                         model_version=mineru_model,
+                        progress_callback=_mineru_progress,
                     )
                     layout = parse_layout_from_zip(zip_bytes)
                 finally:
