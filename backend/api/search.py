@@ -1820,7 +1820,7 @@ async def system_status():
             if not token:
                 return "ocr", {"ok": False, "detail": "MinerU: 未配置 Token"}
             try:
-                async with _httpx.AsyncClient(timeout=10, trust_env=False) as c:
+                async with _httpx.AsyncClient(timeout=5, trust_env=False) as c:
                     r = await c.get("https://mineru.net/api/v4/extract-results/batch/test", headers={"Authorization": f"Bearer {token}"})
                     return "ocr", {"ok": r.status_code in (200, 404), "detail": "MinerU API"}
             except Exception as ex:
@@ -1862,10 +1862,7 @@ async def system_status():
             return "ai_vision", {"ok": False, "detail": str(ex)[:50]}
 
     tasks = [check_database(), check_zlib(), check_stacks(), check_flare(), check_proxy(), check_sources(), check_ocr(), check_ai_vision()]
-    try:
-        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=6)
-    except asyncio.TimeoutError:
-        results = [r for r in [(k, {"ok": False, "detail": "超时"}) for k in ["database", "zlib", "stacks", "flaresolverr", "proxy", "sources", "ocr", "ai_vision"]]]
+    results = await asyncio.gather(*tasks)
     for key, comp in results:
         result["components"][key] = comp
         if not comp["ok"] and key not in ("ai_vision",):
