@@ -565,6 +565,13 @@ async def check_ai_vision(body: Dict[str, Any]):
     api_key = body.get("api_key", "")
     provider = body.get("provider", "openai_compatible")
 
+    if provider == "zhipu":
+        api_key = api_key or body.get("ai_vision_zhipu_key", "")
+    elif provider == "doubao":
+        api_key = api_key or body.get("ai_vision_doubao_key", "")
+    elif provider in ("ollama", "lmstudio"):
+        api_key = ""
+
     # Resolve {env:VAR} if needed
     if api_key.startswith("{env:") and api_key.endswith("}"):
         var_name = api_key[5:-1]
@@ -708,6 +715,13 @@ async def fetch_models(body: Dict[str, Any]):
     endpoint = body.get("endpoint", "")
     api_key = body.get("api_key", "")
     provider = body.get("provider", "openai_compatible")
+
+    if provider == "zhipu":
+        api_key = api_key or body.get("ai_vision_zhipu_key", "")
+    elif provider == "doubao":
+        api_key = api_key or body.get("ai_vision_doubao_key", "")
+    elif provider in ("ollama", "lmstudio"):
+        api_key = ""
 
     # Resolve {env:VAR}
     if api_key.startswith("{env:") and api_key.endswith("}"):

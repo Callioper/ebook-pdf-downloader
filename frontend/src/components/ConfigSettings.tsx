@@ -27,6 +27,8 @@ interface AppConfig {
   ai_vision_endpoint: string
   ai_vision_model: string
   ai_vision_api_key: string
+  ai_vision_zhipu_key: string
+  ai_vision_doubao_key: string
   ai_vision_provider: string
   ai_vision_endpoint_id: string  // Doubao Endpoint ID (ep-...)
   ai_vision_max_pages: number
@@ -165,6 +167,8 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_vision_endpoint: '',
   ai_vision_model: '',
   ai_vision_api_key: '',
+  ai_vision_zhipu_key: '',
+  ai_vision_doubao_key: '',
   ai_vision_endpoint_id: '',
   ai_vision_provider: 'openai_compatible',
   ai_vision_max_pages: 5,
@@ -2278,7 +2282,7 @@ export default function ConfigSettings() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         endpoint: form.ai_vision_endpoint,
-                        api_key: form.ai_vision_api_key,
+                        api_key: form.ai_vision_provider === 'zhipu' ? form.ai_vision_zhipu_key : form.ai_vision_provider === 'doubao' ? form.ai_vision_doubao_key : (form.ai_vision_provider === 'ollama' || form.ai_vision_provider === 'lmstudio') ? '' : form.ai_vision_api_key,
                         provider: form.ai_vision_provider,
                         endpoint_id: form.ai_vision_endpoint_id,
                       }),
@@ -2320,24 +2324,58 @@ export default function ConfigSettings() {
             )}
           </div>
 
-          {/* API Key */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
-            <div className="relative">
-              <input type={visibleSecrets['aivision'] ? 'text' : 'password'}
-                value={form.ai_vision_api_key || ''}
-                onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
-                placeholder="sk-...  (支持 {env:VAR_NAME})"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
-              <button type="button"
-                onClick={() => setVisibleSecrets(prev => ({ ...prev, aivision: !prev['aivision'] }))}
-                className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
-                title={visibleSecrets['aivision'] ? '隐藏' : '显示'}
-              >
-                {visibleSecrets['aivision'] ? '🙈' : '👁'}
-              </button>
+          {/* API Key — conditional per provider */}
+          {form.ai_vision_provider === 'zhipu' && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
+              <div className="relative">
+                <input type={visibleSecrets['aivision_zhipu'] ? 'text' : 'password'}
+                  value={form.ai_vision_zhipu_key || ''}
+                  onChange={(e) => updateForm({ ai_vision_zhipu_key: e.target.value })}
+                  placeholder="智谱 API Key"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
+                <button type="button"
+                  onClick={() => setVisibleSecrets(prev => ({ ...prev, aivision_zhipu: !prev['aivision_zhipu'] }))}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
+                  {visibleSecrets['aivision_zhipu'] ? '🙈' : '👁'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+          {form.ai_vision_provider === 'doubao' && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
+              <div className="relative">
+                <input type={visibleSecrets['aivision_doubao'] ? 'text' : 'password'}
+                  value={form.ai_vision_doubao_key || ''}
+                  onChange={(e) => updateForm({ ai_vision_doubao_key: e.target.value })}
+                  placeholder="ARK API Key"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
+                <button type="button"
+                  onClick={() => setVisibleSecrets(prev => ({ ...prev, aivision_doubao: !prev['aivision_doubao'] }))}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
+                  {visibleSecrets['aivision_doubao'] ? '🙈' : '👁'}
+                </button>
+              </div>
+            </div>
+          )}
+          {form.ai_vision_provider === 'openai_compatible' && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">API Key</label>
+              <div className="relative">
+                <input type={visibleSecrets['aivision'] ? 'text' : 'password'}
+                  value={form.ai_vision_api_key || ''}
+                  onChange={(e) => updateForm({ ai_vision_api_key: e.target.value })}
+                  placeholder="sk-...  (支持 {env:VAR_NAME})"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 pr-8 text-xs font-mono" />
+                <button type="button"
+                  onClick={() => setVisibleSecrets(prev => ({ ...prev, aivision: !prev['aivision'] }))}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
+                  {visibleSecrets['aivision'] ? '🙈' : '👁'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 检测按钮 */}
           <button
@@ -2351,7 +2389,7 @@ export default function ConfigSettings() {
                   body: JSON.stringify({
                     endpoint: form.ai_vision_endpoint,
                     model: form.ai_vision_model,
-                    api_key: form.ai_vision_api_key,
+                    api_key: form.ai_vision_provider === 'zhipu' ? form.ai_vision_zhipu_key : form.ai_vision_provider === 'doubao' ? form.ai_vision_doubao_key : (form.ai_vision_provider === 'ollama' || form.ai_vision_provider === 'lmstudio') ? '' : form.ai_vision_api_key,
                     provider: form.ai_vision_provider,
                     endpoint_id: form.ai_vision_endpoint_id,
                   }),

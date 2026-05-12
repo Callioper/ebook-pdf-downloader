@@ -84,6 +84,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ai_vision_model": "",
     "ai_vision_api_key": "",
     "ai_vision_provider": "openai_compatible",
+    "ai_vision_zhipu_key": "",
+    "ai_vision_doubao_key": "",
     "ai_vision_max_pages": 5,
     "ai_vision_dpi": 300,
     "theme": "auto",

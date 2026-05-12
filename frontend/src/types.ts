@@ -137,6 +137,8 @@ export interface AppConfig {
   paddleocr_online_endpoint?: string
   ai_vision_api_key?: string
   ai_vision_endpoint_id?: string  // Doubao Endpoint ID (ep-...)
+  ai_vision_zhipu_key?: string
+  ai_vision_doubao_key?: string
   theme?: string  // "auto" | "light" | "dark"
   [key: string]: unknown
 }
