@@ -203,34 +203,23 @@ def allocate_text_to_surya_boxes(
             if not matching:
                 continue
 
-            # Width-proportional split with minimum meaningful allocation
+            # Width-proportional split: wider boxes get proportionally more characters
             total_w = sum(w for _, w in matching)
             text_len = len(block_text)
 
-            # Compute proportional allocations, skip tiny boxes (< 3 chars share)
+            # Compute proportional allocations
             alloc: list[tuple[int, int]] = []
-            total_alloc = 0
             for j, (idx, box_w) in enumerate(matching):
                 ratio = box_w / total_w
                 chars = round(text_len * ratio)
-                if chars < 3 and len(matching) > 2:
-                    chars = 0  # too narrow, leave empty
                 alloc.append((idx, chars))
-                total_alloc += chars
 
-            if total_alloc == 0:
-                continue  # all boxes skipped, nothing to allocate
-
-            # Redistribute rounding loss to last non-empty box
+            # Redistribute rounding loss to last box
             cursor = 0
-            non_empty = [(idx, c) for idx, c in alloc if c > 0]
             for j, (idx, chars) in enumerate(alloc):
-                if chars == 0:
-                    continue
                 end = cursor + chars
-                if idx == non_empty[-1][0]:
+                if j == len(alloc) - 1:
                     end = text_len
-                end = min(text_len, end)
                 chunk = block_text[cursor:end]
                 if chunk:
                     if texts[idx]:
