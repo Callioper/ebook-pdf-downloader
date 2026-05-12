@@ -453,17 +453,92 @@ def extract_toc_from_ocr_text(
 
 
 def build_vision_prompt() -> str:
-    """构建 Vision LLM 的 TOC 提取提示词。
+    """多语言智能目录书签生成提示词 — 返回层级缩进的目录文本。"""
+    return r"""你是一位资深的多语言文档结构分析专家。请从提供的目录页图片中提取完整目录内容。
 
-    策略：让模型只做文字提取（它擅长的），结构解析由我们自己的代码完成。
-    中英文双语 prompt 提高兼容性。
-    """
-    return (
-        "Extract all text from these images. Output exactly what you see, "
-        "preserving the original layout as much as possible. "
-        "Do not add any explanation, formatting, or extra text.\n"
-        "请提取这些图片中的所有文字。按原样输出，尽量保留原始排版。"
-    )
+## 输出格式（严格执行）
+每个条目一行，格式: [层级缩进][标题] [页数]
+- 层级0（章）: 无缩进
+- 层级1（节）: 1个制表符缩进
+- 层级2（条）: 2个制表符缩进
+- 层级3（项）: 3个制表符缩进
+
+## 层级判断规则
+- 0级: 第[一二三四五六七八九十百千\d]+章、第X部、第X篇、Chapter N、Part N
+- 1级: 第X节、\d+\.\d+、Section N、[A-Z]\.
+- 2级: [一二三四五]、\d+\.\d+\.\d+、[a-z]\.
+- 3级: （[一二三四五]）、\(\d+\)、•|◦|▪
+
+## 页数提取
+行尾的数字即为页数。若某行无页数，继承上一条的页数。
+中文页码（如"第五页""第123页"）转换为数字。
+罗马数字（i, ii, iii, iv...）保持不变。
+
+## 输出示例
+```
+前言
+第1章 绪论 1
+	1.1 研究背景 3
+		一、问题提出 3
+		二、研究意义 5
+	1.2 研究现状 8
+		一、国外研究现状 8
+		二、国内研究现状 10
+第2章 理论基础 15
+	2.1 基本概念 15
+	2.2 理论框架 18
+结论 200
+参考文献 205
+```
+
+## 关键要求
+1. 只输出目录内容，不添加任何解释
+2. 必须准确识别多级层次结构
+3. 页数必须准确提取
+4. 忽略非目录内容（页码装饰、页眉页脚等）
+5. 中文和英文混合处理，保持原语言文字
+"""
+
+
+def parse_tocify_response(response: str) -> str:
+    """Parse Vision LLM output into title<tab>page format for bookmark injection."""
+    import re
+    lines = []
+    last_page = 1
+
+    # Extract from code block if wrapped in ```
+    m = re.search(r'```(.*?)```', response, re.DOTALL)
+    text = m.group(1).strip() if m else response.strip()
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Count leading tabs for hierarchy (flatten: keep as indent for readability)
+        tabs = len(line) - len(line.lstrip('\t'))
+        title = line.lstrip('\t')
+
+        # Extract page number from end of line
+        pm = re.search(r'\s+(\d{1,5})\s*$', title)
+        if pm:
+            page = int(pm.group(1))
+            title = title[:pm.start()].strip()
+            last_page = page
+        else:
+            # Check for Roman numerals
+            pm2 = re.search(r'\s+([ivxlcdm]{1,5})\s*$', title, re.I)
+            if pm2:
+                # Keep Roman as-is, just stash as text
+                rm = pm2.group(1)
+                title = title[:pm2.start()].strip()
+                page = rm  # Roman numeral string
+            else:
+                page = str(last_page)
+
+        lines.append(f"{title}\t{page}")
+
+    return '\n'.join(lines)
 
 
 def parse_vision_response(
