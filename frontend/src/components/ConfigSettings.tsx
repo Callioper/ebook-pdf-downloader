@@ -2057,8 +2057,8 @@ export default function ConfigSettings() {
                <label className="text-xs font-medium text-gray-600 block mb-1.5">识别模式 <span className="text-[11px] text-blue-500 ml-1">推荐逐框识别，次选混合识别</span></label>
               <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
                 {[
-                  { key: 'spatial', label: '空间分配' },
-                  { key: 'perbox', label: '逐框识别' },
+                  { key: 'spatial', label: '空间分配（快）' },
+                  { key: 'perbox', label: '逐框识别（慢）' },
                   { key: 'hybrid', label: '混合识别' },
                 ].map(({ key, label }) => (
                   <button
