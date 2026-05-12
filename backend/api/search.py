@@ -22,8 +22,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import urllib3
-warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", message=".*InsecureRequestWarning.*")
 
 from fastapi import APIRouter, File, Query, Request, UploadFile
 from pydantic import BaseModel
