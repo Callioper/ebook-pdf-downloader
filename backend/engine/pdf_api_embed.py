@@ -206,19 +206,18 @@ def allocate_text_to_surya_boxes(
             if not matching:
                 continue
 
-            # Estimate number of lines from block height
+            # Estimate number of lines from block height (for display only)
             block_h = by1 - by0
             est_lines = max(1, round(block_h / avg_line_h))
 
-            n_chunks = min(len(matching), est_lines)
+            # Surya boxes are ground truth for line count
+            n_chunks = len(matching)
             text_len = len(block_text)
             chars_per_chunk = text_len // n_chunks
             remainder = text_len % n_chunks
 
             cursor = 0
             for j, idx in enumerate(matching):
-                if j >= n_chunks:
-                    break
                 chars = chars_per_chunk + (1 if j < remainder else 0)
                 end = min(text_len, cursor + chars)
                 chunk = block_text[cursor:end]
