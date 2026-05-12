@@ -1831,7 +1831,7 @@ async def system_status():
             try:
                 async with _httpx.AsyncClient(timeout=10) as c:
                     r = await c.get("https://paddleocr.aistudio-app.com/api/v2/ocr/jobs", headers={"Authorization": f"bearer {token}"}, params={"limit": 1})
-                    return "ocr", {"ok": r.status_code in (200, 401), "detail": "PaddleOCR-VL-1.5"}
+                    return "ocr", {"ok": r.status_code in (200, 401, 405), "detail": "PaddleOCR-VL-1.5"}
             except Exception as ex:
                 return "ocr", {"ok": False, "detail": f"PaddleOCR: {str(ex)[:50]}"}
         if eng == "llm_ocr":
