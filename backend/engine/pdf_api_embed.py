@@ -179,6 +179,10 @@ def allocate_text_to_surya_boxes(
         # Initialize all boxes with empty text
         texts = [""] * len(boxes)
 
+        # Compute average line height for this page
+        box_heights = [max(0.001, b[3] - b[1]) for b in boxes if len(b) >= 4]
+        avg_line_h = sum(box_heights) / len(box_heights) if box_heights else 0.02
+
         for block in blocks:
             block_text = (block.get("text") or "").strip()
             block_bbox = block.get("bbox")
@@ -202,18 +206,24 @@ def allocate_text_to_surya_boxes(
             if not matching:
                 continue
 
-            # Split block text proportionally by box width
-            total_w = sum(w for _, w in matching)
-            text_len = len(block_text)
-            cursor = 0
+            # Estimate number of lines from block height
+            block_h = by1 - by0
+            est_lines = max(1, round(block_h / avg_line_h)) if avg_line_h > 0 else len(matching)
 
-            for idx, box_w in matching:
-                ratio = box_w / total_w
-                chars = max(0, round(text_len * ratio))
+            # Use matching box count as upper bound on chunks
+            n_chunks = min(len(matching), est_lines)
+            text_len = len(block_text)
+            chars_per_chunk = text_len // n_chunks
+            remainder = text_len % n_chunks
+
+            cursor = 0
+            for j, (idx, box_w) in enumerate(matching):
+                if j >= n_chunks:
+                    break
+                chars = chars_per_chunk + (1 if j < remainder else 0)
                 end = min(text_len, cursor + chars)
-                # Last box in group gets remaining text to avoid truncation
                 if idx == matching[-1][0]:
-                    end = text_len
+                    end = text_len  # last box gets remaining
                 chunk = block_text[cursor:end]
                 if chunk:
                     if texts[idx]:
