@@ -183,10 +183,13 @@ def parse_paddleocr_blocks(jsonl_text: str) -> Dict[int, List[Dict[str, Any]]]:
                 if not text or not bbox or len(bbox) != 4:
                     continue
 
-                nx0 = float(bbox[0]) / width
-                ny0 = float(bbox[1]) / height
-                nx1 = float(bbox[2]) / width
-                ny1 = float(bbox[3]) / height
+                try:
+                    nx0 = float(bbox[0]) / width
+                    ny0 = float(bbox[1]) / height
+                    nx1 = float(bbox[2]) / width
+                    ny1 = float(bbox[3]) / height
+                except (TypeError, ValueError):
+                    continue
 
                 blocks.append({
                     "text": text,
