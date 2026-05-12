@@ -59,8 +59,6 @@ def _setup_logging():
 
     return log_file
 
-_setup_logging()
-
 
 def get_frontend_dir() -> Optional[str]:
     if getattr(sys, 'frozen', False):
@@ -164,6 +162,7 @@ else:
 
 
 def main():
+    _setup_logging()
     try:
         config = init_config()
         host = config.get("host", "0.0.0.0")
