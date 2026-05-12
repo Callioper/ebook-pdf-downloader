@@ -6,7 +6,6 @@
 import logging
 import logging.handlers
 import os
-import subprocess
 import sys
 import threading
 import time

@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 from config import get_config
 from task_store import task_store, STATUS_COMPLETED, STATUS_RUNNING, STATUS_PAUSED, STATUS_CANCELLED, STATUS_FAILED
 from ws_manager import ws_manager
-from engine.pdf_bw_compress import bw_compress_pdf_blocking
-
 PIPELINE_STEPS = [
     "fetch_metadata",
     "fetch_isbn",
@@ -2870,6 +2868,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         loop,
                     )
 
+                from engine.pdf_bw_compress import bw_compress_pdf_blocking
                 before, after = await loop.run_in_executor(
                     None,
                     bw_compress_pdf_blocking,
