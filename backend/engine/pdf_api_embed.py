@@ -392,10 +392,77 @@ def embed_with_perbox_paddleocr(
             if text and box_idx < len(texts):
                 texts[box_idx] = text
 
-        match_count = sum(1 for t in texts if t)
-        print(f"  [perbox] page {pg}: {match_count}/{len(boxes)} matched ({skip_count} skipped, {len(crop_tasks)} OCR'd)", flush=True)
+        perbox_matches = sum(1 for t in texts if t)
+        print(f"  [perbox] page {pg}: {perbox_matches}/{len(boxes)} matched ({skip_count} skipped, {len(crop_tasks)} OCR'd)", flush=True)
 
         page_texts[pg] = texts
 
     doc.close()
+    return page_texts
+
+
+def hybrid_perbox_with_fallback(
+    input_path: str,
+    surya_boxes: Dict[int, List[List[float]]],
+    paddle_token: str,
+    api_layout: PageTextBlocks,
+    dpi: int = 200,
+    max_concurrency: int = 3,
+) -> Dict[int, List[str]]:
+    """Per-box crop OCR with spatial-allocation fallback for empty boxes.
+
+    For each Surya box: tries per-box PaddleOCR first. If a box gets no text,
+    falls back to spatial allocation from the full-document API result.
+
+    This combines exact per-line text (where per-box succeeds) with
+    width-proportional split (where it fails), achieving near-100% match
+    while keeping exact text for most lines.
+    """
+    page_texts = embed_with_perbox_paddleocr(
+        input_path, surya_boxes, paddle_token, dpi, max_concurrency
+    )
+
+    # Fill empty boxes AND replace low-quality per-box results with spatial fallback
+    for pg in sorted(surya_boxes.keys()):
+        texts = page_texts.get(pg, [])
+        boxes = surya_boxes.get(pg, [])
+        # Gather all boxes that need fixing: empty OR too short for their width
+        fix_indices = [i for i, t in enumerate(texts) if not t]
+        low_quality = []
+        for i, t in enumerate(texts):
+            if t and len(t) < 4 and i < len(boxes) and len(boxes[i]) >= 4:
+                bw = boxes[i][2] - boxes[i][0]
+                if bw > 0.15:  # wide box with tiny text = likely wrong
+                    low_quality.append(i)
+                    fix_indices.append(i)
+
+        if not fix_indices:
+            continue
+
+        pg_blocks = api_layout.get(pg, [])
+        if not pg_blocks:
+            continue
+
+        spatial = allocate_text_to_surya_boxes(
+            {pg: surya_boxes.get(pg, [])}, {pg: pg_blocks}
+        )
+        spatial_texts = spatial.get(pg, [])
+
+        filled = 0
+        for i in fix_indices:
+            if i < len(spatial_texts) and spatial_texts[i]:
+                old = texts[i]
+                texts[i] = spatial_texts[i]
+                if old:
+                    print(f"  [hybrid] page {pg} box[{i}]: replaced junk {old[:20]!r} with {texts[i][:30]!r}", flush=True)
+                else:
+                    filled += 1
+
+        if fix_indices:
+            total = len(texts)
+            matched = sum(1 for t in texts if t)
+            print(f"  [hybrid] page {pg}: {matched}/{total} ({len(fix_indices)} fixed from spatial fallback)", flush=True)
+
+        page_texts[pg] = texts
+
     return page_texts
