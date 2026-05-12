@@ -157,8 +157,9 @@ def allocate_text_to_surya_boxes(
     """Distribute MinerU block-level text to Surya line-level bboxes.
 
     For each MinerU block on a page, finds all Surya boxes whose center
-    falls within the block's region. Splits the block text proportionally
-    by box width, allocating approximate portions to each matching box.
+    falls within the block's region. Splits the block text into equal
+    character chunks based on estimated line count from block height,
+    allocating one chunk per matching Surya box.
 
     Surya boxes with no matching MinerU block get empty strings.
     MinerU blocks with no matching Surya boxes are silently dropped.
@@ -192,7 +193,7 @@ def allocate_text_to_surya_boxes(
             bx0, by0, bx1, by1 = float(block_bbox[0]), float(block_bbox[1]), float(block_bbox[2]), float(block_bbox[3])
 
             # Find Surya boxes whose center falls within this MinerU block
-            matching: list[tuple[int, float]] = []  # [(box_index, box_width)]
+            matching: list[int] = []  # box indices whose center falls within block
             for i, bbox in enumerate(boxes):
                 if len(bbox) < 4:
                     continue
@@ -200,30 +201,26 @@ def allocate_text_to_surya_boxes(
                 cx = (sx0 + sx1) / 2.0
                 cy = (sy0 + sy1) / 2.0
                 if bx0 <= cx <= bx1 and by0 <= cy <= by1:
-                    box_w = max(0.001, sx1 - sx0)
-                    matching.append((i, box_w))
+                    matching.append(i)
 
             if not matching:
                 continue
 
             # Estimate number of lines from block height
             block_h = by1 - by0
-            est_lines = max(1, round(block_h / avg_line_h)) if avg_line_h > 0 else len(matching)
+            est_lines = max(1, round(block_h / avg_line_h))
 
-            # Use matching box count as upper bound on chunks
             n_chunks = min(len(matching), est_lines)
             text_len = len(block_text)
             chars_per_chunk = text_len // n_chunks
             remainder = text_len % n_chunks
 
             cursor = 0
-            for j, (idx, box_w) in enumerate(matching):
+            for j, idx in enumerate(matching):
                 if j >= n_chunks:
                     break
                 chars = chars_per_chunk + (1 if j < remainder else 0)
                 end = min(text_len, cursor + chars)
-                if idx == matching[-1][0]:
-                    end = text_len  # last box gets remaining
                 chunk = block_text[cursor:end]
                 if chunk:
                     if texts[idx]:
