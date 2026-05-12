@@ -148,3 +148,75 @@ def embed_with_surya_boxes(
 
     doc.save(output_path, garbage=3, deflate=True)
     doc.close()
+
+
+def allocate_text_to_surya_boxes(
+    surya_boxes: Dict[int, List[List[float]]],
+    mineru_blocks: PageTextBlocks,
+) -> Dict[int, List[str]]:
+    """Distribute MinerU block-level text to Surya line-level bboxes.
+
+    For each MinerU block on a page, finds all Surya boxes whose center
+    falls within the block's region. Splits the block text proportionally
+    by box width, allocating approximate portions to each matching box.
+
+    Surya boxes with no matching MinerU block get empty strings.
+    MinerU blocks with no matching Surya boxes are silently dropped.
+
+    Args:
+        surya_boxes: {page_idx: [[x0,y0,x1,y1], ...]} normalized [0..1]
+        mineru_blocks: {page_idx: [{"text": ..., "bbox": [x0,y0,x1,y1]}, ...]}
+
+    Returns:
+        {page_idx: ["line1 text", "line2 text", ...]} — one string per Surya box
+    """
+    page_texts: Dict[int, List[str]] = {}
+
+    for pg in sorted(surya_boxes.keys()):
+        boxes = surya_boxes[pg]
+        blocks = mineru_blocks.get(pg, [])
+
+        # Initialize all boxes with empty text
+        texts = [""] * len(boxes)
+
+        for block in blocks:
+            block_text = (block.get("text") or "").strip()
+            block_bbox = block.get("bbox")
+            if not block_text or not block_bbox or len(block_bbox) != 4:
+                continue
+
+            bx0, by0, bx1, by1 = float(block_bbox[0]), float(block_bbox[1]), float(block_bbox[2]), float(block_bbox[3])
+
+            # Find Surya boxes whose center falls within this MinerU block
+            matching: list[tuple[int, float]] = []  # [(box_index, box_width)]
+            for i, bbox in enumerate(boxes):
+                if len(bbox) < 4:
+                    continue
+                sx0, sy0, sx1, sy1 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+                cx = (sx0 + sx1) / 2.0
+                cy = (sy0 + sy1) / 2.0
+                if bx0 <= cx <= bx1 and by0 <= cy <= by1:
+                    box_w = max(0.001, sx1 - sx0)
+                    matching.append((i, box_w))
+
+            if not matching:
+                continue
+
+            # Split block text proportionally by box width
+            total_w = sum(w for _, w in matching)
+            text_len = len(block_text)
+            cursor = 0
+
+            for idx, box_w in matching:
+                ratio = box_w / total_w
+                chars = max(1, round(text_len * ratio))
+                end = min(text_len, cursor + chars)
+                # Last box in group gets remaining text to avoid truncation
+                if idx == matching[-1][0]:
+                    end = text_len
+                texts[idx] = block_text[cursor:end]
+                cursor = end
+
+        page_texts[pg] = texts
+
+    return page_texts
