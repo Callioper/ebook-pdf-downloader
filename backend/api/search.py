@@ -569,6 +569,7 @@ async def check_ai_vision(body: Dict[str, Any]):
         api_key = api_key or body.get("ai_vision_zhipu_key", "")
     elif provider == "doubao":
         api_key = api_key or body.get("ai_vision_doubao_key", "")
+        model = body.get("endpoint_id", "") or model  # Doubao uses endpoint_id as model
     elif provider in ("ollama", "lmstudio"):
         api_key = ""
 
