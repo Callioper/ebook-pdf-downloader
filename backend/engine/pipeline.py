@@ -2659,78 +2659,88 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            task_store.add_log(task_id, "PaddleOCR-VL-1.5 online: submitting to Baidu AI Studio")
-            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Submitting to PaddleOCR..."})
+            task_store.add_log(task_id, "PaddleOCR online (hybrid): Surya detection + PaddleOCR-VL-1.5 API spatial")
+            await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Running Surya detection..."})
 
             try:
-                from backend.engine.paddleocr_online_client import PaddleOCRClient
-                from backend.engine.pdf_api_embed import embed_api_text_layer
+                from backend.engine.surya_detect import run_surya_detect, SuryaDetectError
+                from backend.engine.paddleocr_online_client import PaddleOCRClient, parse_paddleocr_blocks
+                from backend.engine.pdf_api_embed import allocate_text_to_surya_boxes, embed_with_surya_boxes
 
-                client = PaddleOCRClient(token=paddle_token, timeout=config.get("ocr_timeout", 3600))
-
-                _paddle_last_pct = [0]
-
-                def _paddle_progress(extracted, total, state):
-                    if total > 0:
-                        pct = min(5 + int(extracted * 85 / total), 90)
-                    else:
-                        pct = 10
-                    detail = f"PaddleOCR: {state} ({extracted}/{total})"
-                    if pct != _paddle_last_pct[0]:
-                        _paddle_last_pct[0] = pct
-                        asyncio.run_coroutine_threadsafe(
-                            _emit(task_id, "step_progress", {"step": "ocr", "progress": pct, "detail": detail}),
-                            asyncio.get_event_loop(),
-                        )
-
-                async def _run_paddleocr():
+                # Step 1: Surya line detection
+                try:
+                    surya_boxes = await run_surya_detect(pdf_path, dpi=200)
+                except SuryaDetectError as e:
+                    task_store.add_log(task_id, f"PaddleOCR: Surya detection failed — {e}. Falling back to markdown-only embed.")
+                    client = PaddleOCRClient(token=paddle_token)
                     try:
                         with open(pdf_path, "rb") as f:
                             pdf_bytes = f.read()
-
-                        pages = await client.process_pdf(
-                            pdf_bytes,
-                            file_name=os.path.basename(pdf_path),
-                            progress_callback=_paddle_progress,
-                        )
-                        task_store.add_log(task_id, f"PaddleOCR-VL-1.5: got {len(pages)} pages")
-
-                        layout = {}
-                        for i, page in enumerate(pages):
-                            md_text = page.get("markdown", "")
-                            lines = [line.strip() for line in md_text.split("\n") if line.strip()]
-                            layout[i] = [
-                                {"text": line, "bbox": None, "category_id": 2}
-                                for line in lines
-                            ]
-
-                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 92, "detail": "Embedding text layer..."})
-
-                        output_pdf = pdf_path + ".paddleocr.pdf"
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(
-                            None,
-                            embed_api_text_layer,
-                            pdf_path,
-                            output_pdf,
-                            layout,
-                        )
-
-                        if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
-                            os.replace(output_pdf, pdf_path)
-                            report["ocr_done"] = True
-                            task_store.add_log(task_id, "PaddleOCR-VL-1.5 online OCR complete")
-                        else:
-                            raise RuntimeError("PaddleOCR: embedding produced empty file")
+                        pages_data = await client.process_pdf(pdf_bytes, file_name=os.path.basename(pdf_path))
                     finally:
                         await client.close()
+                    task_store.add_log(task_id, f"PaddleOCR fallback: {len(pages_data)} pages with markdown")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100, "detail": "Fallback: markdown only"})
+                    return report
 
-                await asyncio.wait_for(_run_paddleocr(), timeout=config.get("ocr_timeout", 3600))
+                total_boxes = sum(len(v) for v in surya_boxes.values())
+                task_store.add_log(task_id, f"PaddleOCR: Surya detected {total_boxes} boxes across {len(surya_boxes)} pages")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": f"Surya: {total_boxes} boxes"})
+
+                # Step 2: PaddleOCR-VL-1.5 API
+                task_store.add_log(task_id, "PaddleOCR: calling API...")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "PaddleOCR-VL-1.5 API..."})
+
+                client = PaddleOCRClient(token=paddle_token)
+                try:
+                    with open(pdf_path, "rb") as f:
+                        pdf_bytes = f.read()
+                    job_id = await client.submit_job_file(pdf_path, pdf_bytes)
+                    result_data = await client.poll_job(job_id, progress_callback=None)
+                    jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
+                    import httpx
+                    async with httpx.AsyncClient(timeout=120) as http:
+                        r = await http.get(jsonl_url)
+                        raw_jsonl = r.text
+                finally:
+                    await client.close()
+
+                layout = parse_paddleocr_blocks(raw_jsonl)
+                total_blocks = sum(len(v) for v in layout.values())
+                task_store.add_log(task_id, f"PaddleOCR: API returned {len(layout)} pages, {total_blocks} text blocks")
+
+                # Step 3: Spatial allocation
+                page_texts = allocate_text_to_surya_boxes(surya_boxes, layout)
+                total_text = sum(len(t) for v in page_texts.values() for t in v if t)
+                all_boxes_count = sum(len(v) for v in page_texts.values())
+                matched = sum(1 for v in page_texts.values() for t in v if t)
+                task_store.add_log(task_id, f"PaddleOCR: spatial allocation: {matched}/{all_boxes_count} boxes received text ({total_text} chars)")
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 85, "detail": f"{matched} boxes matched"})
+
+                # Step 4: Embed with Surya bboxes
+                output_pdf = pdf_path + ".paddleocr.pdf"
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, embed_with_surya_boxes,
+                    pdf_path, output_pdf, surya_boxes, page_texts,
+                )
+
+                if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                    os.replace(output_pdf, pdf_path)
+                    report["ocr_done"] = True
+                    task_store.add_log(task_id, "PaddleOCR online complete (hybrid: Surya boxes + PaddleOCR text, spatial allocation)")
+                else:
+                    raise RuntimeError("PaddleOCR: embedding produced empty file")
+
+                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
 
             except asyncio.TimeoutError:
                 task_store.add_log(task_id, "PaddleOCR online timed out")
             except Exception as e:
-                task_store.add_log(task_id, f"PaddleOCR online error: {str(e)[:200]}")
+                import traceback
+                tb = traceback.format_exc()
+                last_lines = "\n".join(tb.split(chr(10))[-5:])
+                task_store.add_log(task_id, f"PaddleOCR online error: {e} | {last_lines}"[:500])
 
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
     except FileNotFoundError:
