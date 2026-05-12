@@ -135,6 +135,7 @@ export interface AppConfig {
   paddleocr_online_token?: string
   paddleocr_online_mode?: string  // "spatial" | "perbox" | "hybrid"
   paddleocr_online_endpoint?: string
+  theme?: string  // "auto" | "light" | "dark"
   [key: string]: unknown
 }
 

@@ -36,6 +36,25 @@ export default function Layout() {
   const [sysChecking, setSysChecking] = useState(false)
   const sysCheckedRef = useRef(false)
 
+  // ── Theme ──
+  const applyTheme = (theme: string) => {
+    const root = document.documentElement
+    if (theme === 'dark') {
+      root.classList.add('dark')
+    } else if (theme === 'light') {
+      root.classList.remove('dark')
+    } else {
+      // auto: follow OS preference
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
+      if (mq.matches) { root.classList.add('dark') } else { root.classList.remove('dark') }
+      const handler = (e: MediaQueryListEvent) => {
+        if (e.matches) { root.classList.add('dark') } else { root.classList.remove('dark') }
+      }
+      mq.addEventListener('change', handler)
+      return () => mq.removeEventListener('change', handler)
+    }
+  }
+
   const checkUpdate = () => {
     setChecking(true)
     fetch(`${API_BASE}/check-update`)
@@ -77,6 +96,18 @@ export default function Layout() {
 
   // Auto-run system status check on mount
   useEffect(() => { checkSystemStatus() }, [])
+
+  // Theme
+  useEffect(() => {
+    fetch('/api/v1/config')
+      .then(r => r.json())
+      .then(cfg => {
+        const theme = cfg.theme || 'auto'
+        const cleanup = applyTheme(theme)
+        return cleanup
+      })
+      .catch(() => {})
+  }, [])
 
   // Auto-login to Stacks on startup
   const stacksAutoRef = useRef(false)

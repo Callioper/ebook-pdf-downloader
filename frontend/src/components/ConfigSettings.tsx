@@ -44,6 +44,7 @@ interface AppConfig {
   bookmark_confirm_enabled: boolean
   pdf_compress: boolean
   pdf_compress_half: boolean
+  theme: string
   [key: string]: unknown
 }
 
@@ -147,6 +148,7 @@ const DEFAULT_CONFIG: AppConfig = {
   stacks_base_url: 'http://localhost:7788',
   stacks_username: '',
   stacks_password: '',
+  theme: 'auto',
   zfile_base_url: 'http://192.168.0.7:32771',
   zfile_external_url: '',
   zfile_storage_key: '1',
@@ -2308,6 +2310,31 @@ export default function ConfigSettings() {
           </div>
         </div>
       )}
+
+      {/* ======== 主题 ======== */}
+      <div className="border-t border-gray-200 pt-3">
+        <label className="text-xs font-medium text-gray-600 block mb-1.5">主题</label>
+        <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
+          {[
+            { key: 'auto', label: '自动' },
+            { key: 'light', label: '白昼' },
+            { key: 'dark', label: '黑夜' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => updateForm({ theme: key })}
+              className={`flex-1 py-1.5 text-center transition-colors ${
+                (form.theme || 'auto') === key
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* ============ 保存按钮 ============ */}
       <div className="flex items-center gap-3 pt-2">
