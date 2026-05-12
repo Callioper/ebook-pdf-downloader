@@ -446,14 +446,28 @@ export default function ConfigSettings() {
     }
   }, [])
 
-  const fetchConfig = useCallback(async () => {
+  const fetchConfigStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/config')
+      const res = await fetch('/api/v1/config-status')
       const data = await res.json()
       if (!mountedRef.current) return
+      const auto = data._auto || {}
+      delete data._auto
+
       setConfig(data)
       const merged = { ...DEFAULT_CONFIG, ...data }
       setForm(merged)
+
+      // Apply auto-detect results from consolidated response
+      if (auto.database?.ok) {
+        setDbStatus('green')
+        if (auto.database.databases?.length > 0) setDbDetecting(false)
+      }
+      if (auto.ocr?.ok) {
+        const langs = auto.ocr.languages || []
+        setOcrMsg(langs.length ? `${langs.length} languages` : '已安装')
+        setOcrChecking(false)
+      }
     } catch (e) {
       if (mountedRef.current) setConfig(DEFAULT_CONFIG)
     } finally {
@@ -461,7 +475,7 @@ export default function ConfigSettings() {
     }
   }, [])
 
-  useEffect(() => { fetchConfig() }, [fetchConfig])
+  useEffect(() => { fetchConfigStatus() }, [fetchConfigStatus])
 
   // Persist AI Vision settings to localStorage (avoid re-entering after clear)
   useEffect(() => {
@@ -613,60 +627,7 @@ export default function ConfigSettings() {
     checkFlare()
   }, [checkFlare])
 
-  // Auto-detect SQLite database status after config loads
-  useEffect(() => {
-    if (!config) return
-    const autoDetectDb = async () => {
-      try {
-        const res = await fetch('/api/v1/available-dbs')
-        const data = await res.json()
-        if (!mountedRef.current) return
-        const dbs = data.dbs || []
-        setDbNames(dbs)
-        setDbStatus(dbs.length > 0 ? 'green' : 'yellow')
-      } catch (e) {
-        if (mountedRef.current) setDbStatus('red')
-      }
-    }
-    autoDetectDb()
-  }, [config])
 
-  // Auto-detect OCR engine statuses after config + form are ready
-  const autoOcrRef = useRef(false)
-  useEffect(() => {
-    if (!config || autoOcrRef.current) return
-    autoOcrRef.current = true
-    const engines = ['tesseract', 'paddleocr']
-    engines.forEach((eng) => {
-      fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(eng)}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (!mountedRef.current) return
-          setOcrEngines((prev) => ({
-            ...prev,
-            [eng]: {
-              installed: data.ok || false,
-              installing: false,
-              msg: data.version || data.message || (data.ok ? '已安装' : '未检测到'),
-              has_chi_sim: data.has_chi_sim,
-              languages: data.languages,
-              venv: data.venv,
-            },
-          }))
-        })
-        .catch(() => {})
-    })
-    // Also check the default OCR engine for the main OCR status
-    const defaultEngine = form.ocr_engine || 'tesseract'
-    fetch(`/api/v1/check-ocr?engine=${encodeURIComponent(defaultEngine)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!mountedRef.current) return
-        setOcrStatus(data.ok ? 'green' : 'red')
-        setOcrMsg(data.version || data.message || (data.ok ? '已安装' : '未检测到'))
-      })
-      .catch(() => {})
-  }, [config, form.ocr_engine])
 
 
   // Update OCR header status when engine selection or engine states change
@@ -2220,7 +2181,7 @@ export default function ConfigSettings() {
       {/* ============ 书签 ============ */}
       <SectionHeader
         title="书签"
-        summary={form.ai_vision_enabled ? (form.ai_vision_model || '已启用') : 'AI Vision 未启用'}
+        summary={form.ai_vision_enabled ? (form.ai_vision_provider === 'doubao' ? (form.ai_vision_endpoint_id || 'Doubao') : (form.ai_vision_model || '已启用')) : '智能目录未启用'}
         color="gray"
         expanded={expanded.bookmarks}
         onToggle={() => toggleSection('bookmarks')}
