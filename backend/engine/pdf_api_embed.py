@@ -209,12 +209,17 @@ def allocate_text_to_surya_boxes(
 
             for idx, box_w in matching:
                 ratio = box_w / total_w
-                chars = max(1, round(text_len * ratio))
+                chars = max(0, round(text_len * ratio))
                 end = min(text_len, cursor + chars)
                 # Last box in group gets remaining text to avoid truncation
                 if idx == matching[-1][0]:
                     end = text_len
-                texts[idx] = block_text[cursor:end]
+                chunk = block_text[cursor:end]
+                if chunk:
+                    if texts[idx]:
+                        texts[idx] = texts[idx] + " " + chunk
+                    else:
+                        texts[idx] = chunk
                 cursor = end
 
         page_texts[pg] = texts
