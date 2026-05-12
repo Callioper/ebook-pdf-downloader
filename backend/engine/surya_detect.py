@@ -42,6 +42,8 @@ async def run_surya_detect(
     dpi: int = 200,
     pages: Optional[str] = None,
     detect_batch_size: int = 20,
+    text_threshold: Optional[float] = None,
+    blank_threshold: Optional[float] = None,
 ) -> Dict[int, List[List[float]]]:
     """Run Surya detection on a PDF, return {page_idx: [[x0,y0,x1,y1], ...]} with normalized coords."""
 
@@ -61,6 +63,10 @@ async def run_surya_detect(
     if pages:
         cmd.extend(["--pages", pages])
     cmd.extend(["--detect-batch-size", str(detect_batch_size)])
+    if text_threshold is not None:
+        cmd.extend(["--text-threshold", str(text_threshold)])
+    if blank_threshold is not None:
+        cmd.extend(["--blank-threshold", str(blank_threshold)])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
