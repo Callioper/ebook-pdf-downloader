@@ -1676,51 +1676,6 @@ async def install_update():
         return {"ok": False, "error": str(e)}
 
 
-@router.post("/check-mineru")
-async def check_mineru(req: Request):
-    """Test MinerU API connectivity."""
-    import httpx
-    body = await req.json()
-    token = (body.get("token", "") or "").strip()
-    if not token:
-        return {"ok": False, "message": "缺少 API Token"}
-    try:
-        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
-            resp = await client.get(
-                "https://mineru.net/api/v4/extract-results/batch/test",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            if resp.status_code in (200, 404):
-                return {"ok": True, "message": "MinerU API 连接正常"}
-            return {"ok": False, "message": f"MinerU API 返回 HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"ok": False, "message": f"MinerU 连接失败: {str(e)[:150]}"}
-
-
-@router.post("/check-paddleocr-online")
-async def check_paddleocr_online(req: Request):
-    """Test PaddleOCR-VL-1.5 API connectivity."""
-    import httpx
-    body = await req.json()
-    token = (body.get("token", "") or "").strip()
-    if not token:
-        return {"ok": False, "message": "缺少 Access Token"}
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs",
-                headers={"Authorization": f"bearer {token}"},
-                params={"limit": 1},
-            )
-            if resp.status_code in (200, 401, 405):
-                if resp.status_code in (200, 405):
-                    return {"ok": True, "message": "PaddleOCR API 连接正常"}
-                return {"ok": False, "message": "Token 无效"}
-            return {"ok": False, "message": f"PaddleOCR API 返回 HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"ok": False, "message": f"PaddleOCR 连接失败: {str(e)[:150]}"}
-
-
 @router.get("/system-status")
 async def system_status():
     """Check all system component statuses in one call (parallelized)."""
