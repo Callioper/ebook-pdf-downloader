@@ -487,6 +487,31 @@ export default function ConfigSettings() {
     } catch {}
   }, [config])
 
+  // Auto-detect AI Vision connectivity on startup
+  const aiVisionAutoRef = useRef(false)
+  useEffect(() => {
+    if (!config || aiVisionAutoRef.current) return
+    aiVisionAutoRef.current = true
+    const p = config.ai_vision_provider || 'ollama'
+    const ep = config.ai_vision_endpoint || ''
+    const model = p === 'doubao' ? (config.ai_vision_endpoint_id || '') : (config.ai_vision_model || '')
+    if (!ep || !model) return
+    setAiVisionTest('testing')
+    fetch('/api/v1/check-ai-vision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: ep, model, provider: p,
+        api_key: p === 'zhipu' ? (config.ai_vision_zhipu_key || '') : p === 'doubao' ? (config.ai_vision_doubao_key || '') : (config.ai_vision_api_key || ''),
+        endpoint_id: config.ai_vision_endpoint_id,
+      }),
+    }).then(r => r.json()).then(d => {
+      if (mountedRef.current) { setAiVisionTest(d.ok ? 'ok' : 'fail'); setAiVisionMsg(d.message || '') }
+    }).catch(() => {
+      if (mountedRef.current) { setAiVisionTest('fail'); setAiVisionMsg('连接失败') }
+    })
+  }, [config])
+
   // Restore Z-Lib login state from stored credentials
   useEffect(() => {
     if (!config || !form.zlib_email || !form.zlib_password) return
