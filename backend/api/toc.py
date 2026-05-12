@@ -164,3 +164,37 @@ async def _call_anthropic(images, prompt, endpoint, model, api_key):
         if r.status_code != 200:
             raise RuntimeError(f"Anthropic HTTP {r.status_code}: {r.text[:200]}")
         return r.json()["content"][0]["text"]
+
+
+class ApplyRequest(BaseModel):
+    pdf_path: str
+
+
+@router.post("/apply")
+async def apply_bookmark(req: ApplyRequest):
+    """Directly run AI Vision TOC extraction and inject into PDF."""
+    from config import get_config
+    cfg = get_config()
+
+    if not os.path.exists(req.pdf_path):
+        raise HTTPException(404, "PDF not found")
+
+    bookmark = ""
+    source = ""
+    try:
+        from addbookmark.ai_vision_toc import generate_toc
+        bookmark, source = await generate_toc(req.pdf_path, cfg)
+    except Exception as e:
+        return {"ok": False, "message": f"TOC extraction failed: {str(e)[:200]}"}
+
+    if not bookmark:
+        return {"ok": False, "message": "未能提取到目录内容"}
+
+    try:
+        from addbookmark.bookmark_injector import inject_bookmarks
+        inject_bookmarks(req.pdf_path, bookmark, req.pdf_path, offset=0)
+    except Exception as e:
+        return {"ok": False, "message": f"书签注入失败: {str(e)[:200]}"}
+
+    lines = bookmark.strip().split("\n")
+    return {"ok": True, "message": f"成功添加 {len(lines)} 条书签", "source": source}
