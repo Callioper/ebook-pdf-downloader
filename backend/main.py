@@ -23,6 +23,7 @@ from config import APP_DATA_DIR as _app_data
 from api.search import router as search_router
 from api.tasks import router as tasks_router
 from api.ws import router as ws_router
+from api.toc import router as toc_router
 from search_engine import search_engine
 from task_store import task_store
 from version import VERSION
@@ -101,6 +102,7 @@ app.add_middleware(
 app.include_router(search_router)
 app.include_router(tasks_router)
 app.include_router(ws_router)
+app.include_router(toc_router)
 
 _last_heartbeat = 0.0
 
