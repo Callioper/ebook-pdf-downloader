@@ -2659,7 +2659,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                 return report
 
-            task_store.add_log(task_id, "PaddleOCR online (hybrid): Surya detection + PaddleOCR-VL-1.5 API spatial")
+            paddle_mode = config.get("paddleocr_online_mode", "spatial")
+            task_store.add_log(task_id, f"PaddleOCR online ({paddle_mode}): Surya detection + PaddleOCR-VL-1.5 API")
             await _emit(task_id, "step_progress", {"step": "ocr", "progress": 5, "detail": "Running Surya detection..."})
 
             try:
@@ -2667,7 +2668,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 from backend.engine.paddleocr_online_client import PaddleOCRClient, parse_paddleocr_blocks
                 from backend.engine.pdf_api_embed import allocate_text_to_surya_boxes, embed_with_surya_boxes
 
-                # Step 1: Surya line detection
+                # Step 1: Surya line detection (shared by all modes)
                 try:
                     surya_boxes = await run_surya_detect(pdf_path, dpi=200)
                 except SuryaDetectError as e:
@@ -2702,36 +2703,71 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 task_store.add_log(task_id, f"PaddleOCR: Surya detected {total_boxes} boxes across {len(surya_boxes)} pages")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 20, "detail": f"Surya: {total_boxes} boxes"})
 
-                # Step 2: PaddleOCR-VL-1.5 API
-                task_store.add_log(task_id, "PaddleOCR: calling API...")
-                await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "PaddleOCR-VL-1.5 API..."})
+                # ── Mode branch ──
 
-                client = PaddleOCRClient(token=paddle_token)
-                try:
-                    with open(pdf_path, "rb") as f:
-                        pdf_bytes = f.read()
-                    job_id = await client.submit_job_file(pdf_path, pdf_bytes)
-                    result_data = await client.poll_job(job_id, progress_callback=None)
-                    jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
-                    if not jsonl_url:
-                        raise RuntimeError("PaddleOCR: no jsonl URL in completed job")
-                    raw_jsonl_text = await client.download_raw_jsonl(jsonl_url)
-                finally:
-                    await client.close()
+                if paddle_mode == "spatial":
+                    task_store.add_log(task_id, "PaddleOCR (spatial): calling API for block-level layout...")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "PaddleOCR-VL-1.5 API..."})
 
-                layout = parse_paddleocr_blocks(raw_jsonl_text)
-                total_blocks = sum(len(v) for v in layout.values())
-                task_store.add_log(task_id, f"PaddleOCR: API returned {len(layout)} pages, {total_blocks} text blocks")
+                    client = PaddleOCRClient(token=paddle_token)
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+                        job_id = await client.submit_job_file(pdf_path, pdf_bytes)
+                        result_data = await client.poll_job(job_id, progress_callback=None)
+                        jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
+                        if not jsonl_url:
+                            raise RuntimeError("PaddleOCR: no jsonl URL in completed job")
+                        raw_jsonl_text = await client.download_raw_jsonl(jsonl_url)
+                    finally:
+                        await client.close()
 
-                # Step 3: Spatial allocation
-                page_texts = allocate_text_to_surya_boxes(surya_boxes, layout)
+                    layout = parse_paddleocr_blocks(raw_jsonl_text)
+                    page_texts = allocate_text_to_surya_boxes(surya_boxes, layout)
+                else:
+                    task_store.add_log(task_id, f"PaddleOCR ({paddle_mode}): calling API...")
+                    await _emit(task_id, "step_progress", {"step": "ocr", "progress": 25, "detail": "PaddleOCR-VL-1.5 API..."})
+
+                    client = PaddleOCRClient(token=paddle_token)
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+                        job_id = await client.submit_job_file(pdf_path, pdf_bytes)
+                        result_data = await client.poll_job(job_id, progress_callback=None)
+                        jsonl_url = result_data.get("resultUrl", {}).get("jsonUrl", "")
+                        if not jsonl_url:
+                            raise RuntimeError("PaddleOCR: no jsonl URL in completed job")
+                        raw_jsonl_text = await client.download_raw_jsonl(jsonl_url)
+                        api_layout = parse_paddleocr_blocks(raw_jsonl_text)
+                    finally:
+                        await client.close()
+
+                    if paddle_mode == "perbox":
+                        from backend.engine.pdf_api_embed import embed_with_perbox_paddleocr
+                        task_store.add_log(task_id, "PaddleOCR (perbox): running per-box crop OCR...")
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30, "detail": "Per-box OCR..."})
+                        loop = asyncio.get_event_loop()
+                        page_texts = await loop.run_in_executor(
+                            None, embed_with_perbox_paddleocr,
+                            pdf_path, surya_boxes, paddle_token, 200, 3,
+                        )
+                    else:  # hybrid
+                        from backend.engine.pdf_api_embed import hybrid_perbox_with_fallback
+                        task_store.add_log(task_id, "PaddleOCR (hybrid): per-box OCR + spatial fallback...")
+                        await _emit(task_id, "step_progress", {"step": "ocr", "progress": 30, "detail": "Hybrid OCR..."})
+                        loop = asyncio.get_event_loop()
+                        page_texts = await loop.run_in_executor(
+                            None, hybrid_perbox_with_fallback,
+                            pdf_path, surya_boxes, paddle_token, api_layout, 200, 3,
+                        )
+
                 total_text = sum(len(t) for v in page_texts.values() for t in v if t)
                 all_boxes_count = sum(len(v) for v in page_texts.values())
                 matched = sum(1 for v in page_texts.values() for t in v if t)
-                task_store.add_log(task_id, f"PaddleOCR: spatial allocation: {matched}/{all_boxes_count} boxes received text ({total_text} chars)")
+                task_store.add_log(task_id, f"PaddleOCR ({paddle_mode}): {matched}/{all_boxes_count} boxes received text ({total_text} chars)")
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 85, "detail": f"{matched} boxes matched"})
 
-                # Step 4: Embed with Surya bboxes
+                # Step 4: Embed with Surya bboxes (shared)
                 output_pdf = pdf_path + ".paddleocr.pdf"
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(
@@ -2742,7 +2778,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 if os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
                     os.replace(output_pdf, pdf_path)
                     report["ocr_done"] = True
-                    task_store.add_log(task_id, "PaddleOCR online complete (hybrid: Surya boxes + PaddleOCR text, spatial allocation)")
+                    task_store.add_log(task_id, f"PaddleOCR online complete ({paddle_mode}: Surya boxes + PaddleOCR text)")
                 else:
                     raise RuntimeError("PaddleOCR: embedding produced empty file")
 
