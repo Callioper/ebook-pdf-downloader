@@ -133,6 +133,7 @@ export interface AppConfig {
   mineru_token?: string
   mineru_model?: string
   paddleocr_online_token?: string
+  paddleocr_online_mode?: string  // "spatial" | "perbox" | "hybrid"
   paddleocr_online_endpoint?: string
   [key: string]: unknown
 }

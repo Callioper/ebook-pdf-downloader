@@ -38,6 +38,7 @@ interface AppConfig {
   mineru_token: string
   mineru_model: string
   paddleocr_online_token: string
+  paddleocr_online_mode: string
   paddleocr_online_endpoint: string
   ocr_confirm_enabled: boolean
   bookmark_confirm_enabled: boolean
@@ -174,6 +175,7 @@ const DEFAULT_CONFIG: AppConfig = {
   mineru_token: '',
   mineru_model: 'vlm',
   paddleocr_online_token: '',
+  paddleocr_online_mode: 'spatial',
   paddleocr_online_endpoint: '',
   ocr_confirm_enabled: false,
   bookmark_confirm_enabled: false,
@@ -2051,6 +2053,34 @@ export default function ConfigSettings() {
               使用百度 PaddleOCR-VL-1.5 视觉大模型进行文档版面解析。
               支持中英文文档，无需本地 GPU。
             </p>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1.5">识别模式</label>
+              <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
+                {[
+                  { key: 'spatial', label: '空间分配' },
+                  { key: 'perbox', label: '逐框识别' },
+                  { key: 'hybrid', label: '混合识别' },
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => updateForm({ paddleocr_online_mode: key })}
+                    className={`flex-1 py-1.5 text-center transition-colors ${
+                      (form.paddleocr_online_mode || 'spatial') === key
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">
+                {(form.paddleocr_online_mode || 'spatial') === 'spatial' && '段落文字精准，行识别不精确'}
+                {(form.paddleocr_online_mode || 'spatial') === 'perbox' && '行识别精准，有乱码风险'}
+                {(form.paddleocr_online_mode || 'spatial') === 'hybrid' && '逐框为主、空间填补，可能产生识别重复'}
+              </p>
+            </div>
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Access Token</label>
               <div className="flex gap-2">
