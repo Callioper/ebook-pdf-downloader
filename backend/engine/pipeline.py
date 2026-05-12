@@ -2563,7 +2563,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
             try:
                 from backend.engine.surya_detect import run_surya_detect, SuryaDetectError
-                from backend.engine.mineru_client import MinerUClient, parse_layout_from_zip
+                from backend.engine.mineru_client import MinerUClient, MinerUTimeoutError, parse_layout_from_zip
                 from backend.engine.pdf_api_embed import allocate_text_to_surya_boxes, embed_with_surya_boxes
 
                 # Step 1: Surya line detection
@@ -2591,6 +2591,8 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                         os.replace(output_pdf, pdf_path)
                         report["ocr_done"] = True
                         task_store.add_log(task_id, "MinerU OCR complete (fallback: block-level layout)")
+                    else:
+                        task_store.add_log(task_id, "MinerU fallback: embedding produced empty or missing output file")
                     await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
                     return report
 
@@ -2642,7 +2644,7 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
 
                 await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
 
-            except asyncio.TimeoutError:
+            except MinerUTimeoutError:
                 task_store.add_log(task_id, "MinerU OCR timed out")
             except Exception as e:
                 import traceback
