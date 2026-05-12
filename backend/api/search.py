@@ -470,6 +470,46 @@ async def browse_folder():
         _browse_lock.release()
 
 
+def _run_file_dialog() -> str:
+    """Open native file picker for PDF files via tkinter."""
+    if os.name != "nt":
+        return ""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        root.overrideredirect(True)
+        root.geometry('0x0+0+0')
+        root.lift()
+        root.focus_force()
+        root.update_idletasks()
+        root.after(200, lambda: root.lift())
+        path = filedialog.askopenfilename(
+            parent=root, title="选择 PDF 文件",
+            filetypes=[("PDF 文件", "*.pdf"), ("所有文件", "*.*")],
+        )
+        root.destroy()
+        return str(path) if path else ""
+    except Exception:
+        return ""
+
+
+@router.post("/select-file")
+async def select_file():
+    if not _browse_lock.acquire(blocking=False):
+        return {"path": "", "error": "dialog already open"}
+    try:
+        loop = asyncio.get_running_loop()
+        path = await loop.run_in_executor(None, _run_file_dialog)
+        if path:
+            return {"path": path}
+        return {"path": "", "error": "未选择文件"}
+    finally:
+        _browse_lock.release()
+
+
 @router.get("/detect-paths")
 async def detect_paths():
     loop = asyncio.get_running_loop()
