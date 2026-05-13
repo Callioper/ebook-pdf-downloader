@@ -18,6 +18,10 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState('')
   const [previewImages, setPreviewImages] = useState(false)
+  const [previewPage, setPreviewPage] = useState(0)
+  const [previewPageImg, setPreviewPageImg] = useState('')
+  const [previewFullWidth, setPreviewFullWidth] = useState(false)
+  const [alignedPage, setAlignedPage] = useState<number | null>(null)
 
   useEffect(() => {
     if (!visible || !pdfPath) return
@@ -45,9 +49,23 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
     setPageImages(data.pages || [])
   }
 
+  const loadPreviewPage = async (page: number) => {
+    const clamped = Math.max(0, Math.min(totalPages - 1, page))
+    setPreviewPage(clamped)
+    setPreviewPageImg('')
+    const res = await fetch('/api/v1/toc/render-page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdf_path: pdfPath, page: clamped }),
+    })
+    const d = await res.json()
+    if (d.image) setPreviewPageImg(d.image)
+  }
+
   const extract = async () => {
     setStage('extracting')
     setError('')
+    setAlignedPage(null)
     const res = await fetch('/api/v1/toc/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -64,6 +82,12 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
       return
     }
     setBookmark(data.bookmark || '')
+    const lines = (data.bookmark || '').split('\n')
+    const firstLine = lines[0] || ''
+    const pageMatch = firstLine.match(/^\s*(\d+)/)
+    const firstAdvertisedPage = pageMatch ? parseInt(pageMatch[1], 10) - 1 : 0
+    setPreviewPage(firstAdvertisedPage)
+    loadPreviewPage(firstAdvertisedPage)
     setStage('preview')
   }
 
@@ -99,12 +123,12 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
 
             <div className="flex items-center gap-2 mt-3 mb-1">
               <span className="text-xs text-gray-600 dark:text-gray-300">页码:</span>
-              <input type="number" min={1} max={totalPages} value={startPage >= 0 ? startPage + 1 : 1}
-                onChange={(e) => setStartPage(Math.max(0, Number(e.target.value) - 1))}
+              <input type="number" min={1} max={totalPages} value={startPage >= 0 ? startPage + 1 : ''}
+                onChange={(e) => { const v = Number(e.target.value); setStartPage(v > 0 ? Math.min(totalPages - 1, Math.max(0, v - 1)) : -1) }}
                 className="w-16 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs dark:bg-gray-700 dark:text-gray-100" />
               <span className="text-xs text-gray-400">–</span>
-              <input type="number" min={1} max={totalPages} value={endPage >= 0 ? endPage + 1 : 1}
-                onChange={(e) => setEndPage(Math.min(totalPages - 1, Number(e.target.value) - 1))}
+              <input type="number" min={1} max={totalPages} value={endPage >= 0 ? endPage + 1 : ''}
+                onChange={(e) => { const v = Number(e.target.value); setEndPage(v > 0 ? Math.min(totalPages - 1, Math.max(0, v - 1)) : -1) }}
                 className="w-16 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs dark:bg-gray-700 dark:text-gray-100" />
               <span className="text-xs text-gray-400">/ {totalPages} 页</span>
               <button onClick={loadPreviews}
@@ -148,33 +172,93 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
 
         {stage === 'preview' && (
           <>
-            <div className="mb-4">
+            <div className="mb-3 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded text-xs text-blue-700 dark:text-blue-300">
+              请将右边 PDF 翻到<strong>第一条书签</strong>对应的实际页面，然后点击「以此为第一页」确认偏移量。
+              {alignedPage !== null && (
+                <span className="ml-2 text-green-700 dark:text-green-300">
+                  ✓ 已定位 — 第 {alignedPage + 1} 页（偏移 {alignedPage - (startPage >= 0 ? startPage : 0)}）
+                </span>
+              )}
+            </div>
+
+            <div className={`flex gap-3 ${previewFullWidth ? 'flex-col' : ''}`}>
+              {/* Left: bookmark text */}
+              <div className={`${previewFullWidth ? 'w-full' : 'w-1/2'}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-300">提取的目录</label>
+                  <button type="button"
+                    onClick={() => setPreviewFullWidth(!previewFullWidth)}
+                    className="text-[11px] text-blue-500 hover:text-blue-600">
+                    {previewFullWidth ? '分栏' : '全宽'}
+                  </button>
+                </div>
+                <pre className="text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-3 overflow-auto font-mono dark:text-gray-200"
+                  style={{ maxHeight: previewFullWidth ? '30vh' : '50vh' }}>
+                  {bookmark.split('\n').map((line, i) => (
+                    <div key={i} className={i === 0 ? 'bg-yellow-100 dark:bg-yellow-900/30 -mx-1 px-1 rounded' : ''}>
+                      {line}
+                    </div>
+                  ))}
+                </pre>
+              </div>
+
+              {/* Right: PDF page navigator */}
+              <div className={`${previewFullWidth ? 'w-full' : 'w-1/2'}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-300">PDF 页面</label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={() => loadPreviewPage(previewPage - 1)} disabled={previewPage <= 0}
+                      className="px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30">
+                      −
+                    </button>
+                    <input type="number" min={1} max={totalPages} value={previewPage + 1}
+                      onChange={(e) => loadPreviewPage(Number(e.target.value) - 1)}
+                      className="w-16 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-xs text-center dark:bg-gray-700 dark:text-gray-100" />
+                    <span className="text-xs text-gray-400">/ {totalPages}</span>
+                    <button type="button" onClick={() => loadPreviewPage(previewPage + 1)} disabled={previewPage >= totalPages - 1}
+                      className="px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30">
+                      +
+                    </button>
+                    <button type="button"
+                      onClick={() => { setAlignedPage(previewPage); setOffset(previewPage - (startPage >= 0 ? startPage : 0)) }}
+                      className="ml-2 px-2 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 border border-blue-300 dark:border-blue-600">
+                      以此为第一页
+                    </button>
+                  </div>
+                </div>
+                {previewPageImg ? (
+                  <div className="bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded overflow-hidden flex items-center justify-center"
+                    style={{ maxHeight: previewFullWidth ? '40vh' : '60vh' }}>
+                    <img src={`data:image/png;base64,${previewPageImg}`}
+                      className="max-w-full max-h-full object-contain"
+                      alt={`Page ${previewPage + 1}`}
+                      draggable={false} />
+                  </div>
+                ) : (
+                  <div className="bg-gray-200 dark:bg-gray-800 rounded animate-pulse flex items-center justify-center"
+                    style={{ height: previewFullWidth ? '40vh' : '60vh' }}>
+                    <span className="text-xs text-gray-400">加载中...</span>
+                  </div>
+                )}
+                <p className="text-[10px] text-center text-gray-400 mt-1">第 {previewPage + 1} 页</p>
+              </div>
+            </div>
+
+            <div className="mt-3 mb-1">
               <label className="text-xs font-medium text-gray-600 dark:text-gray-300 block mb-1">
                 页码偏移: {offset > 0 ? `+${offset}` : offset}
               </label>
-              <input type="range" min={-20} max={20} value={offset}
+              <input type="range" min={-50} max={50} value={offset}
                 onChange={(e) => setOffset(Number(e.target.value))}
                 className="w-full" />
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                若目录页数与正文实际页数不符，拖动滑块调整
-              </p>
             </div>
-
-            <pre className="text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-3 max-h-60 overflow-auto mb-4 dark:text-gray-200 font-mono">
-              {bookmark.split('\n').slice(0, 30).map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
-              {bookmark.split('\n').length > 30 && (
-                <div className="text-gray-400">... 共 {bookmark.split('\n').length} 条</div>
-              )}
-            </pre>
 
             <div className="flex gap-2">
               <button onClick={() => onConfirm(bookmark, offset)}
                 className="px-4 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700">
                 确认添加 ({bookmark.split('\n').filter(l => l.trim()).length} 条)
               </button>
-              <button onClick={() => { setStage('select'); setBookmark(''); }}
+              <button onClick={() => { setStage('select'); setBookmark(''); setAlignedPage(null); }}
                 className="px-4 py-2 text-sm rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600">
                 重新选择
               </button>
