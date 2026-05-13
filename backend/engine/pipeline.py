@@ -329,7 +329,7 @@ async def _enrich_external_metadata(task_id: str, report: Dict[str, Any], config
                     loop = _aio.new_event_loop()
                     _aio.set_event_loop(loop)
                     try:
-                        return loop.run_until_complete(zl.zlib_search(query, page=1, limit=3))
+                        return loop.run_until_complete(zl.zlib_search(query, limit=3))
                     finally:
                         loop.close()
                 result = await _aio.to_thread(_do_zlib_search)
@@ -1354,6 +1354,11 @@ async def _download_via_aa_and_stacks(
                                 progress_data["eta"] = ""
 
                             time.sleep(3)  # 心跳间隔
+                            # Check if user cancelled
+                            _t = task_store.get(task_id)
+                            if _t and _t.get("status") == "cancelled":
+                                task_store.add_log(task_id, "AA: download cancelled by user")
+                                return None
 
                         task_store.add_log(task_id, "AA: stacks heartbeat ended")
                         return None
@@ -1410,54 +1415,51 @@ async def _download_via_aa_and_stacks(
                 except Exception as e:
                     task_store.add_log(task_id, f"AA: stacks error: {str(e)[:100]}")
 
-            # stacks 不可用或失败 → FlareSolverr 兜底下载
-            # 通过 FlareSolverr session 获取 /d/{md5} 的 CDN 重定向 URL
-            try:
-                from engine.flaresolverr import _get_flare_port
-                port = _get_flare_port(config)
-                task_store.add_log(task_id, f"AA: trying FlareSolverr direct download (port {port})...")
-                fs_url = await resolve_download_url(md5, proxy)
-                if fs_url and "annas-archive" not in fs_url.lower():
-                    task_store.add_log(task_id, f"AA: CDN URL from FlareSolverr: {fs_url[:80]}")
-                    import requests as _req
-                    hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-                    fs_resp = _req.get(fs_url, headers=hdrs, timeout=120, verify=False, stream=True)
-                    if fs_resp.status_code == 200:
-                        _total_size = int(fs_resp.headers.get("Content-Length", 0))
-                        _downloaded = 0
-                        _dl_start = time.time()
-                        cd = fs_resp.headers.get("Content-Disposition", "")
-                        fname = f"{md5}.pdf"
-                        if cd and "filename=" in cd:
-                            fname = cd.split("filename=")[-1].strip("\"' ")
-                        fpath = os.path.join(tmp_dir, fname)
-                        with open(fpath, "wb") as f:
-                            for chunk in fs_resp.iter_content(65536):
-                                if chunk:
-                                    f.write(chunk)
-                                    _downloaded += len(chunk)
-                                    if _total_size > 0 and _downloaded % (65536 * 100) == 0:
-                                        _pct = int(_downloaded / _total_size * 100)
-                                        _elapsed = time.time() - _dl_start
-                                        _speed = _downloaded / _elapsed / 1024 / 1024 if _elapsed > 0 else 0
-                                        _remaining = (_total_size - _downloaded) / (_downloaded / _elapsed) if _downloaded > 0 else 0
-                                        await _emit_progress(
-                                            task_id, "download_pages",
-                                            _pct,
-                                            f"AA 下载中... {_downloaded//1024//1024}MB/{_total_size//1024//1024}MB ({_speed:.1f} MB/s)",
-                                            _format_eta(_remaining),
-                                        )
-                        if os.path.getsize(fpath) > 1024:
-                            with open(fpath, "rb") as fh:
-                                if fh.read(4) == b"%PDF" and verify_md5(fpath, md5):
-                                    task_store.add_log(task_id, f"AA: FlareSolverr download OK")
-                                    return fpath
-                            os.remove(fpath)
-            except Exception as e:
-                task_store.add_log(task_id, f"AA: FlareSolverr download failed: {str(e)[:100]}")
-
-            # 只试第一个 MD5
-            break
+        # stacks 不可用或失败 → FlareSolverr 兜底下载
+        # 通过 FlareSolverr session 获取 /d/{md5} 的 CDN 重定向 URL
+        try:
+            from engine.flaresolverr import _get_flare_port
+            port = _get_flare_port(config)
+            task_store.add_log(task_id, f"AA: trying FlareSolverr direct download (port {port})...")
+            fs_url = await resolve_download_url(md5, proxy)
+            if fs_url and "annas-archive" not in fs_url.lower():
+                task_store.add_log(task_id, f"AA: CDN URL from FlareSolverr: {fs_url[:80]}")
+                import requests as _req
+                hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                fs_resp = _req.get(fs_url, headers=hdrs, timeout=120, verify=False, stream=True)
+                if fs_resp.status_code == 200:
+                    _total_size = int(fs_resp.headers.get("Content-Length", 0))
+                    _downloaded = 0
+                    _dl_start = time.time()
+                    cd = fs_resp.headers.get("Content-Disposition", "")
+                    fname = f"{md5}.pdf"
+                    if cd and "filename=" in cd:
+                        fname = cd.split("filename=")[-1].strip("\"' ")
+                    fpath = os.path.join(tmp_dir, fname)
+                    with open(fpath, "wb") as f:
+                        for chunk in fs_resp.iter_content(65536):
+                            if chunk:
+                                f.write(chunk)
+                                _downloaded += len(chunk)
+                                if _total_size > 0 and _downloaded % (65536 * 100) == 0:
+                                    _pct = int(_downloaded / _total_size * 100)
+                                    _elapsed = time.time() - _dl_start
+                                    _speed = _downloaded / _elapsed / 1024 / 1024 if _elapsed > 0 else 0
+                                    _remaining = (_total_size - _downloaded) / (_downloaded / _elapsed) if _downloaded > 0 else 0
+                                    await _emit_progress(
+                                        task_id, "download_pages",
+                                        _pct,
+                                        f"AA 下载中... {_downloaded//1024//1024}MB/{_total_size//1024//1024}MB ({_speed:.1f} MB/s)",
+                                        _format_eta(_remaining),
+                                    )
+                    if os.path.getsize(fpath) > 1024:
+                        with open(fpath, "rb") as fh:
+                            if fh.read(4) == b"%PDF" and verify_md5(fpath, md5):
+                                task_store.add_log(task_id, f"AA: FlareSolverr download OK")
+                                return fpath
+                        os.remove(fpath)
+        except Exception as e:
+            task_store.add_log(task_id, f"AA: FlareSolverr download failed: {str(e)[:100]}")
 
         return None
 
@@ -1704,12 +1706,14 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
 
     # ── 根据来源优先走对应的下载路径 ──
     zl_first = (source == "zlibrary")
+    aa_only = (source == "annas_archive")
     if zl_first:
         zl_book_id = report.get("book_id", "")
     else:
         zl_book_id = ""
 
-    # ── 路径A/B自适应：如果是 Z-Library 来源则先走 ZL，否则先走 AA ──
+    # ── 路径A/B自适应：根据来源决定降级策略 ──
+    #   ZL来源 → 仅ZL, AA来源 → 仅AA, 本地检索 → AA→ZL降级
     if not zl_first:
         # 默认：AA 优先
         task_store.add_log(task_id, "=== Path A: Anna's Archive ===")
@@ -1729,7 +1733,7 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
         task_store.add_log(task_id, "任务已标记为失败，跳过后续下载尝试")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 100})
         return report
-    if not downloaded:
+    if not downloaded and not aa_only:
         task_store.add_log(task_id, "=== Path B: Z-Library ===")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
 
@@ -1750,20 +1754,40 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                         task_store.add_log(task_id, f"ZL: {balance}")
                         await _emit_progress(task_id, "download_pages", 60, f"ZL {balance}", "")
 
+                    _t = task_store.get(task_id)
+                    if _t and _t.get("status") == "cancelled":
+                        task_store.add_log(task_id, "ZL: download cancelled by user")
+                        return report
+
                     # 搜索全部候选条目（不做标题过滤，返回所有结果让用户选）
+                    task_store.add_log(task_id, "ZL: searching by ISBN...")
+                    await _emit_progress(task_id, "download_pages", 65, "ZL ISBN 搜索中...", "")
                     candidates = await dl.zlib_search_candidates(
                         isbn=isbn, title=title, authors=authors,
                     )
                     await _emit_progress(task_id, "download_pages", 70, f"ZL 搜索到 {len(candidates)} 个候选，等待选择", "")
                     if candidates:
                         if zl_first:
-                            # 用户已从 Z-Lib 搜索结果中选择了此书，自动下载第一个候选
-                            task_store.add_log(task_id, f"ZL: auto-selecting from {len(candidates)} candidates (source=zlibrary)")
-                            best = candidates[0]
-                            sel_id = best.get("id", "")
-                            sel_hash = best.get("hash", "")
+                            # 用户已从 Z-Lib 搜索结果中选择了此书，优先按 book_id 匹配
+                            task_store.add_log(task_id, f"ZL: {len(candidates)} candidates, matching selected book_id={zl_book_id}")
+                            selected_candidate = None
+                            if zl_book_id:
+                                for c in candidates:
+                                    if str(c.get("id")) == str(zl_book_id) or str(c.get("hash")) == str(zl_book_id):
+                                        selected_candidate = c
+                                        break
+                            if not selected_candidate:
+                                selected_candidate = candidates[0]
+                                task_store.add_log(task_id, f"ZL: book_id not matched, falling back to first candidate id={selected_candidate.get('id')}")
+                            sel_id = selected_candidate.get("id", "")
+                            sel_hash = selected_candidate.get("hash", "")
                             if sel_id and sel_hash:
-                                sel_title = best.get("title", title)
+                                _z = task_store.get(task_id)
+                                if _z and _z.get("status") == "cancelled":
+                                    task_store.add_log(task_id, "ZL: download cancelled by user")
+                                    return report
+
+                                sel_title = selected_candidate.get("title", title)
                                 zl_path = await dl.zlib_download_verified(
                                     sel_id, sel_hash, report["tmp_dir"],
                                     filename=sel_title,
@@ -1778,6 +1802,11 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                                 else:
                                     task_store.add_log(task_id, "ZL: auto-download verification failed, trying next candidate")
                                     for c in candidates[1:3]:
+                                        _z2 = task_store.get(task_id)
+                                        if _z2 and _z2.get("status") == "cancelled":
+                                            task_store.add_log(task_id, "ZL: download cancelled by user")
+                                            break
+
                                         sid, shash = c.get("id", ""), c.get("hash", "")
                                         if sid and shash:
                                             zl_path2 = await dl.zlib_download_verified(sid, shash, report["tmp_dir"], filename=c.get("title", title))
@@ -1801,6 +1830,11 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
                                 sel_id = selection.get("id", "")
                                 sel_hash = selection.get("hash", "")
                                 if sel_id and sel_hash:
+                                    _z3 = task_store.get(task_id)
+                                    if _z3 and _z3.get("status") == "cancelled":
+                                        task_store.add_log(task_id, "ZL: download cancelled by user")
+                                        return report
+
                                     task_store.add_log(task_id, f"ZL: user selected book {sel_id}")
                                     sel_title = selection.get("title", "")
                                     if not sel_title:
@@ -1836,20 +1870,8 @@ async def _step_download_pages(task_id: str, task: Dict[str, Any], config: Dict[
             else:
                 task_store.add_log(task_id, "ZL: no credentials configured, skipping")
 
-    # ── ZL 优先模式降级：AA 兜底 ──
-    if zl_first and not downloaded:
-        task_store.add_log(task_id, "=== Path A (fallback): Anna's Archive ===")
-        await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 50})
-        aa_result = await _download_via_aa_and_stacks(
-            task_id, config, report, ss_code, isbn, title, proxy,
-        )
-        if aa_result:
-            downloaded = True
-            download_source = "annas_archive"
-            report["download_path"] = aa_result
-
-    # ── 路径C：LibGen 兜底 ──
-    if not downloaded and config.get("libgen_enabled", True):
+    # ── 路径C：LibGen 兜底（仅本地检索时允许降级）──
+    if not downloaded and source not in ("zlibrary", "annas_archive") and config.get("libgen_enabled", True):
         task_store.add_log(task_id, "=== Path C: LibGen (last resort) ===")
         await _emit(task_id, "step_progress", {"step": "download_pages", "progress": 80})
 
@@ -2096,6 +2118,13 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
         task_store.add_log(task_id, "No PDF to OCR")
         await _emit(task_id, "step_progress", {"step": "ocr", "progress": 100})
         return report
+
+    # Close any cached fitz handle so OCR can overwrite the file
+    try:
+        from api.toc import close_cached_doc
+        close_cached_doc(pdf_path)
+    except Exception:
+        pass
 
     ocr_engine = config.get("ocr_engine", "tesseract")
     ocr_lang = config.get("ocr_languages", "chi_sim+eng")
@@ -2915,10 +2944,14 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
                 )
             except Exception as e:
                 task_store.add_log(task_id, f"BW compression failed: {str(e)[:200]}")
-                try:
-                    os.remove(report["pdf_path"] + ".bw")
-                except Exception:
-                    pass
+                task_store.add_log(task_id, "BW压缩失败不影响输出——OCR生成的PDF已保留原始质量，可在设置中关闭「PDF压缩」跳过此步骤")
+                for suffix in [".bw", "_bw.pdf"]:
+                    try:
+                        p = report["pdf_path"].replace(".pdf", "") + suffix
+                        if os.path.exists(p):
+                            os.remove(p)
+                    except Exception:
+                        pass
 
     return report
 
@@ -2934,40 +2967,37 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         src = "user" if task.get("bookmark") else f"Step2 ({'+'.join(k for k,v in report.get('raw_sources',{}).items() if v) or 'merged'})"
         task_store.add_log(task_id, f"Bookmark from {src}: {len(bookmark)} chars")
 
-    confirmed = True
-    if config.get("bookmark_confirm_enabled", False):
-        config_info = {
-            "外源书签": "已提供" if task.get("bookmark") or report.get("bookmark") else "自动获取",
-            "ISBN": report.get("isbn", "") or "未获取",
-            "智能TOC": "已启用" if pdf_path else "无PDF",
-        }
-        confirmed = await _wait_for_step_confirmation(
-        task_id=task_id,
-        step_name="bookmark",
-        step_label="目录处理",
-        config_info=config_info,
-    )
-    if not confirmed:
-        await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 100})
-        return report
-
-    # ── AI Vision fallback (only if no bookmark or no page numbers) ──
+    # ── If no bookmark from Step 2, open TOCModal for manual selection ──
     if not bookmark and pdf_path and os.path.exists(pdf_path):
-        task_store.add_log(task_id, "尝试智能 TOC 提取...")
-        await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 30, "detail": "智能目录提取中..."})
-        try:
-            from addbookmark.ai_vision_toc import generate_toc
-            bookmark, source = await generate_toc(pdf_path, config)
-            if bookmark:
-                task_store.add_log(task_id, f"智能 TOC 提取成功（来源: {source}，{len(bookmark)} 字符）")
-                report["bookmark"] = bookmark
-                report["bookmark_source"] = source
-            else:
-                task_store.add_log(task_id, "智能 TOC 提取: 未找到目录")
-        except ImportError:
-            task_store.add_log(task_id, "ai_vision_toc 模块不可用")
-        except Exception as e:
-            task_store.add_log(task_id, f"智能 TOC 提取错误: {e}")
+        task_store.add_log(task_id, "请在弹出的智能目录窗口中手动选择目录页并确认偏移量")
+        await ws_manager.broadcast_all({
+            "type": "show_toc_modal",
+            "task_id": task_id,
+            "pdf_path": pdf_path,
+            "output_dir": config.get("finished_dir", "") or config.get("download_dir", ""),
+        })
+        await _emit_progress(task_id, "bookmark", 30, "等待智能目录确认...")
+
+        # Initialize flag to prevent stale value from prior runs
+        task_store.update(task_id, {"_toc_done": False})
+
+        # Poll for user completion
+        _timeout_iters = 300  # 10 min at 2s interval
+        for _ in range(_timeout_iters):
+            _t = task_store.get(task_id)
+            if not _t or _t.get("status") == "cancelled":
+                task_store.add_log(task_id, "Task cancelled during TOC wait")
+                task_store.update(task_id, {"_toc_done": False})
+                return report
+            if _t.get("_toc_done"):
+                task_store.add_log(task_id, "智能目录已由用户确认注入")
+                report["bookmark_applied"] = True
+                task_store.update(task_id, {"_toc_done": False})
+                break
+            await asyncio.sleep(2)
+        else:
+            task_store.add_log(task_id, "智能目录确认超时，跳过书签注入")
+            task_store.update(task_id, {"_toc_done": False})
 
     if bookmark and pdf_path and os.path.exists(pdf_path):
         task_store.add_log(task_id, "Applying bookmark to PDF...")
@@ -2992,6 +3022,24 @@ async def _step_finalize(task_id: str, task: Dict[str, Any], config: Dict[str, A
     pdf_path = report.get("pdf_path", "")
     download_dir = config.get("download_dir", "")
     finished_dir = config.get("finished_dir", "")
+
+    # ── Apply filename template ──
+    template = config.get("filename_template", "").strip()
+    if template and "{" in template and pdf_path and os.path.exists(pdf_path):
+        try:
+            from engine.filename_template import apply_template
+            new_name = apply_template(template, report)
+            if new_name:
+                new_path = os.path.join(os.path.dirname(pdf_path), new_name)
+                if os.path.abspath(new_path) != os.path.abspath(pdf_path):
+                    if os.path.exists(new_path):
+                        os.remove(new_path)
+                    os.rename(pdf_path, new_path)
+                    pdf_path = new_path
+                    report["pdf_path"] = pdf_path
+                    task_store.add_log(task_id, f"File renamed: {os.path.basename(pdf_path)}")
+        except Exception as e:
+            task_store.add_log(task_id, f"File rename failed: {e}")
 
     if pdf_path and os.path.exists(pdf_path):
         target_dir = finished_dir or download_dir
