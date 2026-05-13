@@ -60,6 +60,28 @@ def render_pages(req: RenderRequest) -> RenderResponse:
     return RenderResponse(pages=pages, count=len(pages))
 
 
+class SinglePageRequest(BaseModel):
+    pdf_path: str
+    page: int  # 0-indexed
+
+
+@router.post("/render-page")
+def render_page(req: SinglePageRequest):
+    """Return a single page as base64 PNG at low DPI for fast browsing."""
+    import fitz
+    if not os.path.exists(req.pdf_path):
+        raise HTTPException(404, "PDF not found")
+    doc = fitz.open(req.pdf_path)
+    if req.page < 0 or req.page >= len(doc):
+        doc.close()
+        raise HTTPException(400, f"Page {req.page} out of range (0-{len(doc)-1})")
+    pix = doc[req.page].get_pixmap(dpi=72)
+    buf = io.BytesIO(pix.tobytes("png"))
+    img = base64.b64encode(buf.getvalue()).decode()
+    doc.close()
+    return {"page": req.page, "image": img}
+
+
 @router.post("/extract")
 async def extract_toc(req: ExtractRequest):
     """Extract TOC from selected pages using Vision LLM."""
@@ -168,31 +190,35 @@ async def _call_anthropic(images, prompt, endpoint, model, api_key):
 
 class ApplyRequest(BaseModel):
     pdf_path: str
+    bookmark: str = ""
+    offset: int = 0
 
 
 @router.post("/apply")
 async def apply_bookmark(req: ApplyRequest):
-    """Directly run AI Vision TOC extraction and inject into PDF."""
+    """Inject bookmarks into PDF. If bookmark is provided, use it directly. Otherwise auto-extract."""
     from config import get_config
     cfg = get_config()
 
     if not os.path.exists(req.pdf_path):
         raise HTTPException(404, "PDF not found")
 
-    bookmark = ""
+    bookmark = req.bookmark
     source = ""
-    try:
-        from addbookmark.ai_vision_toc import generate_toc
-        bookmark, source = await generate_toc(req.pdf_path, cfg)
-    except Exception as e:
-        return {"ok": False, "message": f"TOC extraction failed: {str(e)[:200]}"}
+
+    if not bookmark:
+        try:
+            from addbookmark.ai_vision_toc import generate_toc
+            bookmark, source = await generate_toc(req.pdf_path, cfg)
+        except Exception as e:
+            return {"ok": False, "message": f"TOC extraction failed: {str(e)[:200]}"}
 
     if not bookmark:
         return {"ok": False, "message": "未能提取到目录内容"}
 
     try:
         from addbookmark.bookmark_injector import inject_bookmarks
-        inject_bookmarks(req.pdf_path, bookmark, req.pdf_path, offset=0)
+        inject_bookmarks(req.pdf_path, bookmark, req.pdf_path, offset=req.offset)
     except Exception as e:
         return {"ok": False, "message": f"书签注入失败: {str(e)[:200]}"}
 
