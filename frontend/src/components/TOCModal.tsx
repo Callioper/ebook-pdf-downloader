@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import PDFPageViewer from './PDFPageViewer'
 
 interface Props {
   pdfPath: string
@@ -70,7 +71,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto p-6 shadow-xl">
+      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-auto p-6 shadow-xl">
         <h2 className="text-lg font-semibold mb-4 dark:text-gray-100">智能目录识别</h2>
 
         {error && (
@@ -81,27 +82,39 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
 
         {stage === 'select' && (
           <>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              选择目录所在的页码范围，点击预览确认后再点击识别目录。
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              点击页面设置起始页，Shift+点击设置结束页，或拖拽选择连续页面范围。已选: 第 {startPage >= 0 ? startPage + 1 : '?'} – {endPage >= 0 ? endPage + 1 : '?'} 页
             </p>
-            <div className="flex items-center gap-2 mb-4">
+
+            <PDFPageViewer
+              pdfPath={pdfPath}
+              totalPages={totalPages}
+              selectedStart={startPage}
+              selectedEnd={endPage}
+              onSelectionChange={(s, e) => {
+                setStartPage(s)
+                setEndPage(e)
+              }}
+            />
+
+            <div className="flex items-center gap-2 mt-3 mb-1">
               <span className="text-xs text-gray-600 dark:text-gray-300">页码:</span>
-              <input type="number" min={1} max={totalPages} value={startPage + 1}
+              <input type="number" min={1} max={totalPages} value={startPage >= 0 ? startPage + 1 : 1}
                 onChange={(e) => setStartPage(Math.max(0, Number(e.target.value) - 1))}
                 className="w-16 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs dark:bg-gray-700 dark:text-gray-100" />
               <span className="text-xs text-gray-400">–</span>
-              <input type="number" min={1} max={totalPages} value={endPage + 1}
+              <input type="number" min={1} max={totalPages} value={endPage >= 0 ? endPage + 1 : 1}
                 onChange={(e) => setEndPage(Math.min(totalPages - 1, Number(e.target.value) - 1))}
                 className="w-16 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs dark:bg-gray-700 dark:text-gray-100" />
               <span className="text-xs text-gray-400">/ {totalPages} 页</span>
               <button onClick={loadPreviews}
                 className="px-3 py-1 text-xs rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600">
-                {previewImages ? '刷新预览' : '预览'}
+                {previewImages ? '刷新预览' : '预览选中页'}
               </button>
             </div>
 
             {previewImages && pageImages.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-2">
                 {pageImages.map((img, i) => (
                   <div key={i} className="shrink-0">
                     <img src={`data:image/png;base64,${img}`}
@@ -114,7 +127,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
             )}
 
             <div className="flex gap-2">
-              <button onClick={extract} disabled={totalPages === 0}
+              <button onClick={extract} disabled={totalPages === 0 || startPage < 0 || endPage < startPage}
                 className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
                 识别目录
               </button>
