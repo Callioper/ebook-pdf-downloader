@@ -152,7 +152,7 @@ const DEFAULT_CONFIG: AppConfig = {
   stacks_username: '',
   stacks_password: '',
   theme: 'auto',
-  zfile_base_url: 'http://192.168.0.7:32771',
+  zfile_base_url: '',
   zfile_external_url: '',
   zfile_storage_key: '1',
   http_proxy: '',

@@ -127,7 +127,7 @@ Create `C:\Users\ADMINI~1\AppData\Local\Temp\opencode\test_equal_split.py`:
 import asyncio, os, sys, time
 PROJECT_ROOT = r"D:\opencode\book-downloader"
 sys.path.insert(0, PROJECT_ROOT)
-TOKEN_MINERU = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI4NTUwMTEyNSIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc3NjcwNTUzNywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiMTMzNzIxODM3NjciLCJvcGVuSWQiOm51bGwsInV1aWQiOiJmYTEzNDc5NC0wZjUzLTRiMGEtYjM5ZS1mMDRkNGMzODdmNzEiLCJlbWFpbCI6IiIsImV4cCI6MTc4NDQ4MTUzN30.Y_CPlKhnviHPjfIiXxFCbn2k2s8WxfLQB8k3CxWK5zJdQs7Jt7INoXaswA9DTWwc4hAuvzJ_6oJI4xN_kDUazA"
+TOKEN_MINERU = "YOUR_MINERU_TOKEN"
 PDF = r"C:\Users\Administrator\Downloads\2.pdf"
 OUT = r"C:\Users\Administrator\Downloads\2_equal_split.pdf"
 

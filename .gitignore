@@ -16,8 +16,8 @@ frontend/dist/
 # Environment
 .env
 .venv
-venv/
-ENV/
+venv*/
+env/
 
 # Config (contains secrets)
 config.json

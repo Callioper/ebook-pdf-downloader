@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=ebook-pdf-downloader
-AppVersion=1.2.1
+AppVersion=1.3.0
 AppPublisher=ebook-pdf-downloader
 DefaultDirName={autopf}\ebook-pdf-downloader
 DefaultGroupName=ebook-pdf-downloader

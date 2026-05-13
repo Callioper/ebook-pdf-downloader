@@ -5,7 +5,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 [![OCR](https://img.shields.io/badge/OCR-PaddleOCR%20%7C%20Tesseract%20%7C%20LLM-orange?style=for-the-badge)](https://github.com/PaddlePaddle/PaddleOCR)
-[![Purpose](https://img.shields.io/badge/Purpose-PDF%20Download%20%7C%20OCR%20%7C%20Bookmark-blueviolet?style=for-the-badge)]()
+[![Purpose](https://img.shields.io/badge/Purpose-Book%20Download%20%7C%20OCR-blueviolet?style=for-the-badge)](https://github.com/Callioper/ebook-pdf-downloader)
 
 > **专为 PDF 电子书下载、OCR 文字识别和书签目录生成而设计。从检索到可搜索、带目录的 PDF，一站式全自动完成。**
 

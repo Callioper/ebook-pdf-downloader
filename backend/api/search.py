@@ -1779,15 +1779,23 @@ async def install_update():
         if not new_exe or not os.path.exists(new_exe):
             return {"ok": False, "error": "未找到下载的更新文件"}
 
-        bat_path = os.path.join(tempfile.gettempdir(), "book-downloader-update", "update.bat")
+        bat_dir = os.path.join(tempfile.gettempdir(), "book-downloader-update")
+        os.makedirs(bat_dir, exist_ok=True)
+        bat_path = os.path.join(bat_dir, "update.bat")
         with open(bat_path, "w") as f:
             f.write("@echo off\r\n")
-            f.write("timeout /t 2 /nobreak >nul\r\n")
+            f.write("timeout /t 3 /nobreak >nul\r\n")
             # If it's a setup exe, run it silently
             if "setup" in new_exe.lower():
                 f.write(f'start "" /wait "{new_exe}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART\r\n')
             else:
-                f.write(f'copy /y "{new_exe}" "{exe_path}"\r\n')
+                # Portable: retry copy until exe process exits
+                f.write(":retry\r\n")
+                f.write(f'copy /y "{new_exe}" "{exe_path}" >nul 2>&1\r\n')
+                f.write("if errorlevel 1 (\r\n")
+                f.write("  timeout /t 2 /nobreak >nul\r\n")
+                f.write("  goto retry\r\n")
+                f.write(")\r\n")
                 f.write(f'start "" "{exe_path}"\r\n')
             f.write("del \"%~f0\"\r\n")
 
