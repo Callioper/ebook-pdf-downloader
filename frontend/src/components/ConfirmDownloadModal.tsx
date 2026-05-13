@@ -55,7 +55,6 @@ export default function ConfirmDownloadModal() {
         try {
           const data = JSON.parse(evt.data)
           if (data.type === 'confirm_download') {
-            // Reset selection for new request
             setSelectedCandidate(null)
             setInfo({
               task_id: data.task_id,
@@ -72,13 +71,8 @@ export default function ConfirmDownloadModal() {
         } catch { /* ignore */ }
       }
 
-      ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 3000)
-      }
-
-      ws.onerror = () => {
-        ws?.close()
-      }
+      ws.onclose = () => { reconnectTimer = setTimeout(connect, 3000) }
+      ws.onerror = () => { ws?.close() }
     }
 
     connect()
@@ -93,13 +87,9 @@ export default function ConfirmDownloadModal() {
     setPending(true)
     try {
       const body: Record<string, unknown> = { confirm }
-      // If user selected a candidate, include its id/hash
       if (confirm && selectedCandidate && info.candidates) {
         const sel = info.candidates.find(c => c.id === selectedCandidate)
-        if (sel) {
-          body.book_id = sel.id
-          body.book_hash = sel.hash
-        }
+        if (sel) { body.book_id = sel.id; body.book_hash = sel.hash }
       }
       await fetch(`${API_BASE}/tasks/${info.task_id}/confirm-download`, {
         method: 'POST',
@@ -116,55 +106,45 @@ export default function ConfirmDownloadModal() {
   const hasCandidates = info.candidates && info.candidates.length > 0
 
   return (
-    <div style={{
-      position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
-      background: '#fff', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-      padding: '20px 24px', maxWidth: 460, width: '100%',
-      border: '1px solid #e5e7eb',
-      maxHeight: '80vh', overflowY: 'auto',
-    }}>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+    <div className="fixed bottom-6 right-6 z-[9999] bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 max-w-[460px] w-full max-h-[80vh] overflow-y-auto">
+      <div className="text-base font-semibold mb-3 dark:text-gray-100">
         ⚠️ 选择下载来源
       </div>
 
-      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12, lineHeight: 1.6 }}>
-        <div><strong>书名：</strong>{info.title || '未知'}</div>
-        {info.isbn && <div><strong>ISBN：</strong>{info.isbn}</div>}
-        {info.authors.length > 0 && <div><strong>作者：</strong>{info.authors.join('、')}</div>}
-        {info.publisher && <div><strong>出版社：</strong>{info.publisher}</div>}
+      <div className="text-sm text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
+        <div><strong className="dark:text-gray-300">书名：</strong>{info.title || '未知'}</div>
+        {info.isbn && <div><strong className="dark:text-gray-300">ISBN：</strong>{info.isbn}</div>}
+        {info.authors.length > 0 && <div><strong className="dark:text-gray-300">作者：</strong>{info.authors.join('、')}</div>}
+        {info.publisher && <div><strong className="dark:text-gray-300">出版社：</strong>{info.publisher}</div>}
       </div>
 
-      {/* ZL candidates list */}
       {hasCandidates && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+        <div className="mb-3">
+          <div className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1.5">
             📚 在 Z-Library 找到以下书籍，请选择要下载的版本：
           </div>
-          <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+          <div className="max-h-[260px] overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg">
             {info.candidates!.map((c) => (
               <div
                 key={c.id}
                 onClick={() => setSelectedCandidate(c.id)}
-                style={{
-                  padding: '10px 12px',
-                  cursor: 'pointer',
-                  background: selectedCandidate === c.id ? '#eff6ff' : '#fff',
-                  borderBottom: '1px solid #f3f4f6',
-                  borderLeft: selectedCandidate === c.id ? '3px solid #3b82f6' : '3px solid transparent',
-                }}
+                className={`p-2.5 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0
+                  ${selectedCandidate === c.id
+                    ? 'bg-blue-50 dark:bg-blue-900/20 border-l-[3px] border-l-blue-500'
+                    : 'bg-white dark:bg-gray-800 border-l-[3px] border-l-transparent hover:bg-gray-50 dark:hover:bg-gray-750'}`}
               >
-                <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{c.title || '无标题'}</div>
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{c.title || '无标题'}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {c.authors && <span>{c.authors} · </span>}
                   {c.year && <span>{c.year} · </span>}
                   {c.extension && <span>{c.extension.toUpperCase()} · </span>}
                   {c.size > 0 && <span>{(c.size / 1024 / 1024).toFixed(1)} MB · </span>}
-                  <span style={{ color: '#9ca3af' }}>{TIER_LABELS[c.tier] || `第${c.tier}层`}</span>
+                  <span className="text-gray-400 dark:text-gray-500">{TIER_LABELS[c.tier] || `第${c.tier}层`}</span>
                 </div>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 6, padding: '6px 8px', background: '#fff7ed', borderRadius: 6, color: '#9a3412', fontSize: 12 }}>
+          <div className="mt-1.5 p-2 bg-amber-50 dark:bg-amber-900/20 rounded-md text-amber-800 dark:text-amber-300 text-xs">
             ⚡ 将消耗 Z-Library 每日下载额度。
             {selectedCandidate ? '已选择一本书。' : '请点击选择一本要下载的书。'}
           </div>
@@ -172,31 +152,26 @@ export default function ConfirmDownloadModal() {
       )}
 
       {!hasCandidates && (
-        <div style={{ marginTop: 8, padding: 8, background: '#fff7ed', borderRadius: 6, color: '#9a3412', fontSize: 12 }}>
+        <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 rounded-md text-amber-800 dark:text-amber-300 text-xs">
           ⚡ 将消耗 Z-Library 每日下载额度。确认继续？
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+      <div className="flex gap-2 justify-end mt-2">
         <button
           onClick={() => handleConfirm(false)}
           disabled={pending}
-          style={{
-            padding: '6px 16px', borderRadius: 6, border: '1px solid #d1d5db',
-            background: '#fff', cursor: 'pointer', fontSize: 13,
-          }}
+          className="px-4 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 text-sm"
         >
           跳过
         </button>
         <button
           onClick={() => handleConfirm(true)}
           disabled={pending || (hasCandidates && !selectedCandidate)}
-          style={{
-            padding: '6px 16px', borderRadius: 6, border: 'none',
-            background: hasCandidates && !selectedCandidate ? '#d1d5db' : '#f97316',
-            color: '#fff', cursor: hasCandidates && !selectedCandidate ? 'not-allowed' : 'pointer',
-            fontSize: 13, fontWeight: 600,
-          }}
+          className={`px-4 py-1.5 rounded-md text-white text-sm font-semibold disabled:opacity-50
+            ${hasCandidates && !selectedCandidate
+              ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed'
+              : 'bg-orange-500 hover:bg-orange-600 cursor-pointer'}`}
         >
           {pending ? '处理中...' : hasCandidates ? '下载选中条目' : '确认下载'}
         </button>

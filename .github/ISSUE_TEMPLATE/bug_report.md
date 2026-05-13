@@ -26,7 +26,7 @@ assignees: ''
 
 ## 版本信息
 
-- 软件版本：v1.2.1（exe 内置 / 源码运行）
+- 软件版本：v1.3.0（exe 内置 / 源码运行）
 - 操作系统：Windows 10 / 11
 - OCR 引擎：Tesseract / PaddleOCR / LLM OCR
 
@@ -36,6 +36,14 @@ assignees: ''
 
 ```
 （粘贴日志）
+```
+
+## 浏览器控制台 (F12 Console)
+
+按 **F12** 打开开发者工具 → **Console** 标签页，将会看到以 `toc:info`、`render-batch` 等前缀的性能信息和错误堆栈。请复制出现的红色错误信息或卡住的步骤日志：
+
+```
+（粘贴 F12 Console 输出）
 ```
 
 ## 配置文件

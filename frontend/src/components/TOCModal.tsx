@@ -1,15 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import PDFPageViewer from './PDFPageViewer'
 
 interface Props {
   pdfPath: string
   visible: boolean
-  onConfirm: (bookmark: string, offset: number) => void
   onCancel: () => void
+  taskId?: string
+  outputDir?: string
 }
 
-export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Props) {
-  const [stage, setStage] = useState<'select' | 'extracting' | 'preview'>('select')
+export default function TOCModal({ pdfPath, visible, onCancel, taskId, outputDir }: Props) {
+  const [stage, setStage] = useState<'select' | 'extracting' | 'preview' | 'injecting' | 'done'>('select')
+  const [injectMsg, setInjectMsg] = useState('')
   const [startPage, setStartPage] = useState(0)
   const [endPage, setEndPage] = useState(5)
   const [totalPages, setTotalPages] = useState(0)
@@ -22,6 +24,12 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
   const [previewPageImg, setPreviewPageImg] = useState('')
   const [previewFullWidth, setPreviewFullWidth] = useState(false)
   const [alignedPage, setAlignedPage] = useState<number | null>(null)
+  const [firstBookmarkPage, setFirstBookmarkPage] = useState(1)
+  const previewBlobRef = useRef<string>('')
+
+  useEffect(() => {
+    return () => { if (previewBlobRef.current) URL.revokeObjectURL(previewBlobRef.current) }
+  }, [])  // 1-indexed, extracted from bookmark line 1
 
   useEffect(() => {
     if (!visible || !pdfPath) return
@@ -52,14 +60,18 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
   const loadPreviewPage = async (page: number) => {
     const clamped = Math.max(0, Math.min(totalPages - 1, page))
     setPreviewPage(clamped)
-    setPreviewPageImg('')
     const res = await fetch('/api/v1/toc/render-page', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdf_path: pdfPath, page: clamped }),
+      body: JSON.stringify({ pdf_path: pdfPath, page: clamped, dpi: 120 }),
     })
-    const d = await res.json()
-    if (d.image) setPreviewPageImg(d.image)
+    if (res.ok) {
+      const blob = await res.blob()
+      if (previewBlobRef.current) URL.revokeObjectURL(previewBlobRef.current)
+      const url = URL.createObjectURL(blob)
+      previewBlobRef.current = url
+      setPreviewPageImg(url)
+    }
   }
 
   const extract = async () => {
@@ -84,31 +96,73 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
     setBookmark(data.bookmark || '')
     const lines = (data.bookmark || '').split('\n')
     const firstLine = lines[0] || ''
-    const pageMatch = firstLine.match(/^\s*(\d+)/)
+    const fields = firstLine.split('\t')
+    const pageStr = fields.length >= 2 ? fields[1] : firstLine
+    const pageMatch = pageStr.match(/^\s*(\d+)/)
     const firstAdvertisedPage = pageMatch ? parseInt(pageMatch[1], 10) - 1 : 0
+    setFirstBookmarkPage(pageMatch ? parseInt(pageMatch[1], 10) : 1)
     setPreviewPage(firstAdvertisedPage)
     loadPreviewPage(firstAdvertisedPage)
     setStage('preview')
   }
 
-  const buildFinalBookmark = (): string => {
-    let header = ''
-    if (startPage >= 0 && endPage >= startPage) {
-      header += '----- 目录页 -----\n'
-      for (let i = startPage; i <= endPage; i++) {
-        header += `第 ${i + 1} 页\n`
+  const handleInject = async () => {
+    setStage('injecting')
+    setInjectMsg('')
+    const finalBookmark = buildFinalBookmark()
+    try {
+      const r = await fetch('/api/v1/toc/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_path: pdfPath, bookmark: finalBookmark, offset }),
+      })
+      const d = await r.json()
+      if (d.ok) {
+        setInjectMsg(d.message || '完成')
+        setStage('done')
+        // Notify pipeline that user confirmed TOC injection
+        if (taskId) {
+          fetch('/api/v1/toc/notify-done', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_id: taskId }),
+          }).catch(() => {})
+        }
+      } else {
+        setError(d.message || '注入失败')
+        setStage('preview')
       }
-      header += '---------------------\n\n'
+    } catch (e) {
+      setError(String(e))
+      setStage('preview')
     }
-    return header + bookmark
+  }
+
+  const buildFinalBookmark = (): string => {
+    let lines: string[] = []
+    if (startPage >= 0 && endPage >= startPage) {
+      for (let i = startPage; i <= endPage; i++) {
+        lines.push(`目录\t${i + 1}\t-1`)  // level -1 = absolute page, no offset
+      }
+    }
+    for (const line of bookmark.split('\n')) {
+      if (line.trim()) lines.push(line)
+    }
+    return lines.join('\n')
   }
 
   if (!visible) return null
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-auto p-6 shadow-xl">
-        <h2 className="text-lg font-semibold mb-4 dark:text-gray-100">智能目录识别</h2>
+      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-auto p-6 shadow-xl">
+        <h2 className="text-lg font-semibold mb-4 dark:text-gray-100 flex items-center justify-between">
+          <span>智能目录识别</span>
+          <button onClick={onCancel}
+            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+            关闭
+          </button>
+        </h2>
 
         {error && (
           <div className="mb-3 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded text-xs text-red-600 dark:text-red-400">
@@ -119,7 +173,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
         {stage === 'select' && (
           <>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              点击第一页设置起始页，再点击最后一页完成选择，或拖拽选择连续页面范围。已选: 第 {startPage >= 0 ? startPage + 1 : '?'} – {endPage >= 0 ? endPage + 1 : '?'} 页
+              选择<strong>目录页</strong>所在的页面范围（点击第一页开始，再点最后一页完成选择）。已选: 第 {startPage >= 0 ? startPage + 1 : '?'} – {endPage >= 0 ? endPage + 1 : '?'} 页
             </p>
 
             <PDFPageViewer
@@ -179,7 +233,11 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
         {stage === 'extracting' && (
           <div className="text-center py-12">
             <div className="inline-block w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
-            <p className="text-sm text-gray-500 dark:text-gray-400">正在调用视觉模型识别目录内容...</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">正在调用视觉模型识别目录内容...</p>
+            <button onClick={onCancel}
+              className="px-4 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+              关闭
+            </button>
           </div>
         )}
 
@@ -189,7 +247,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
               请将右边 PDF 翻到<strong>第一条书签</strong>对应的实际页面，然后点击「以此为第一页」确认偏移量。
               {alignedPage !== null && (
                 <span className="ml-2 text-green-700 dark:text-green-300">
-                  ✓ 已定位 — 第 {alignedPage + 1} 页（偏移 {alignedPage - (startPage >= 0 ? startPage : 0)}）
+                  ✓ 已定位 — 第 {alignedPage + 1} 页（偏移 {(alignedPage + 1) - firstBookmarkPage}）
                 </span>
               )}
             </div>
@@ -233,7 +291,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
                       +
                     </button>
                     <button type="button"
-                      onClick={() => { setAlignedPage(previewPage); setOffset(previewPage - (startPage >= 0 ? startPage : 0)) }}
+                      onClick={() => { setAlignedPage(previewPage); setOffset((previewPage + 1) - firstBookmarkPage) }}
                       className="ml-2 px-2 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 border border-blue-300 dark:border-blue-600">
                       以此为第一页
                     </button>
@@ -242,7 +300,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
                 {previewPageImg ? (
                   <div className="bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded overflow-hidden flex items-center justify-center"
                     style={{ maxHeight: previewFullWidth ? '40vh' : '60vh' }}>
-                    <img src={`data:image/png;base64,${previewPageImg}`}
+                    <img src={previewPageImg}
                       className="max-w-full max-h-full object-contain"
                       alt={`Page ${previewPage + 1}`}
                       draggable={false} />
@@ -267,7 +325,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => onConfirm(buildFinalBookmark(), offset)}
+              <button onClick={handleInject}
                 className="px-4 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700">
                 确认添加 ({bookmark.split('\n').filter(l => l.trim()).length} 条)
               </button>
@@ -277,6 +335,41 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
               </button>
             </div>
           </>
+        )}
+
+        {stage === 'injecting' && (
+          <div className="text-center py-12">
+            <div className="inline-block w-8 h-8 border-2 border-green-500 border-t-transparent rounded-full animate-spin mb-4" />
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">正在注入书签...</p>
+            <button onClick={onCancel}
+              className="px-4 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+              关闭
+            </button>
+          </div>
+        )}
+
+        {stage === 'done' && (
+          <div className="text-center py-8">
+            <div className="text-4xl mb-3">✅</div>
+            <p className="text-sm font-medium text-green-700 dark:text-green-300 mb-6">{injectMsg}</p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => fetch('/api/v1/toc/open-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdf_path: pdfPath }) })}
+                className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700">
+                打开 PDF
+              </button>
+              <button onClick={() => {
+                const dir = outputDir || pdfPath
+                fetch('/api/v1/toc/open-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdf_path: dir }) })
+              }}
+                className="px-4 py-2 text-sm rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600">
+                打开文件夹
+              </button>
+              <button onClick={onCancel}
+                className="px-4 py-2 text-sm rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600">
+                关闭
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

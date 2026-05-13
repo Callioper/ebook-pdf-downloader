@@ -2945,13 +2945,12 @@ async def _step_ocr(task_id: str, task: Dict[str, Any], config: Dict[str, Any], 
             except Exception as e:
                 task_store.add_log(task_id, f"BW compression failed: {str(e)[:200]}")
                 task_store.add_log(task_id, "BW压缩失败不影响输出——OCR生成的PDF已保留原始质量，可在设置中关闭「PDF压缩」跳过此步骤")
-                for suffix in [".bw", "_bw.pdf"]:
-                    try:
-                        p = report["pdf_path"].replace(".pdf", "") + suffix
-                        if os.path.exists(p):
-                            os.remove(p)
-                    except Exception:
-                        pass
+                try:
+                    bw_file = report["pdf_path"] + ".bw"
+                    if os.path.exists(bw_file):
+                        os.remove(bw_file)
+                except Exception:
+                    pass
 
     return report
 
@@ -2967,9 +2966,28 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         src = "user" if task.get("bookmark") else f"Step2 ({'+'.join(k for k,v in report.get('raw_sources',{}).items() if v) or 'merged'})"
         task_store.add_log(task_id, f"Bookmark from {src}: {len(bookmark)} chars")
 
+    # ── Confirmation dialog (if enabled in settings) ──
+    if config.get("bookmark_confirm_enabled", False):
+        config_info = {
+            "外源书签": "已提供" if bookmark else "自动获取",
+            "ISBN": report.get("isbn", "") or "未获取",
+            "智能TOC": "已启用" if pdf_path else "无PDF",
+        }
+        confirmed = await _wait_for_step_confirmation(
+            task_id=task_id,
+            step_name="bookmark",
+            step_label="目录处理",
+            config_info=config_info,
+        )
+        if not confirmed:
+            await _emit(task_id, "step_progress", {"step": "bookmark", "progress": 100})
+            return report
+
     # ── If no bookmark from Step 2, open TOCModal for manual selection ──
     if not bookmark and pdf_path and os.path.exists(pdf_path):
         task_store.add_log(task_id, "请在弹出的智能目录窗口中手动选择目录页并确认偏移量")
+        # Initialize flag BEFORE broadcast to prevent race: frontend could set True before we init to False
+        task_store.update(task_id, {"_toc_done": False})
         await ws_manager.broadcast_all({
             "type": "show_toc_modal",
             "task_id": task_id,
@@ -2978,14 +2996,11 @@ async def _step_bookmark(task_id: str, task: Dict[str, Any], config: Dict[str, A
         })
         await _emit_progress(task_id, "bookmark", 30, "等待智能目录确认...")
 
-        # Initialize flag to prevent stale value from prior runs
-        task_store.update(task_id, {"_toc_done": False})
-
         # Poll for user completion
         _timeout_iters = 300  # 10 min at 2s interval
         for _ in range(_timeout_iters):
             _t = task_store.get(task_id)
-            if not _t or _t.get("status") == "cancelled":
+            if not _t or _t.get("status") == STATUS_CANCELLED:
                 task_store.add_log(task_id, "Task cancelled during TOC wait")
                 task_store.update(task_id, {"_toc_done": False})
                 return report

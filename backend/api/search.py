@@ -272,7 +272,7 @@ async def _search_zlib(query: str, proxy: str = "") -> List[Dict[str, Any]]:
     try:
         from engine.zlib_downloader import ZLibDownloader
         dl = ZLibDownloader(config)
-        result = await dl.zlib_search(query, page=1, limit=10)
+        result = await dl.zlib_search(query, limit=10)
         books = []
         # Handle multiple possible result key names from Z-Lib eAPI
         items = result.get("books") or result.get("results") or result.get("data") or []

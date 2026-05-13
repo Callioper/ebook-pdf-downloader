@@ -22,9 +22,11 @@ Ebook PDF Downloader 的核心目标是**将任意电子书转化为可搜索、
 -   **⚙️ OCR 三引擎**: PaddleOCR（PP-OCRv5, 中文主力 ~24min/217 页）、Tesseract 默认引擎、LLM OCR（视觉大模型 dense-mode always，逐框独立识别，支持 6 种已验证模型，异步暂停/恢复）
 -   **🎯 OCR 可选确认**: 管道执行到 OCR/目录步骤时弹出确认对话框，显示当前引擎和配置，用户可选择跳过
 -   **📦 PDF 压缩**: OCR 后黑白二值化压缩（pikepdf + FlateDecode，文字层完整保留），可选全/半分辨率，同时保留未压缩 OCR 原稿
--   **📑 智能目录**: 书葵网 + 豆瓣 + NLC 三源书签合并，AI Vision 智能 TOC 提取（支持 OpenAI/Anthropic 本地 LLM），自动注入 PDF 书签
--   **🎨 现代化 Web UI**: React 18 + TypeScript + Tailwind CSS，WebSocket 实时进度更新，OCR 阶段/逐页进度条，日志流查看，深色模式
--   **⏯️ 任务控制**: 暂停/恢复/重试/取消，LLM OCR 暂停时终止子进程树（恢复后重新 OCR，LM Studio 资源释放），任务完成提示音
+-   **📑 智能目录**: 书葵网 + 豆瓣 + NLC 三源书签合并，AI Vision 智能 TOC 提取（支持 OpenAI/Anthropic/Doubao/Zhipu），PDF 页面浏览器（点击/拖拽选目录页），偏移量侧边栏预览对齐，自动注入 PDF 层级书签
+-   **🎨 现代化 Web UI**: React 18 + TypeScript + Tailwind CSS，WebSocket 实时进度更新，OCR 阶段/逐页进度条，日志流查看，深色模式（基于时间自动切换 06:00-18:00），弹窗适配暗色主题
+-   **⏯️ 任务控制**: 暂停/恢复/重试/取消，LLM OCR 暂停时终止子进程树，确认对话框提醒音效，任务完成提示音
+-   **📄 PDF 预览**: 任务详情页右侧栏 PDF 实时预览，左右箭头翻页 + 页码跳转，自适应窗口大小
+-   **📝 文件名模板**: 支持 `{title}_{author}_{isbn}` 等 8 个元数据字段自定义文件名，实时预览
 -   **🔒 100% 本地优先**: 所有核心功能无需云 API，LLM OCR 可选配置本地/远程端点，数据完全私有
 -   **🖥️ OCR 实时进度**: LLM OCR 分阶段进度显示（PDF 光栅化 → 版面检测 → 逐框识别 → 嵌入文字层），逐页进度 (`36/217 页`)，Surya 批处理大小可调
 
@@ -61,8 +63,8 @@ graph TD
 3. **下载 PDF**: Stacks 队列下载（优先） → Z-Library eAPI → LibGen 兜底，FlareSolverr 自动绕过 Cloudflare
 4. **转换**: 下载的页面/压缩包自动封装为 PDF
 5. **OCR 识别** (可选): 弹出确认对话框 → 选引擎（PaddleOCR / Tesseract / LLM OCR）→ LLM OCR 调用 `local-llm-pdf-ocr` CLI（Surya 分批次版面检测 → dense-mode 逐框 LLM 识别 → SimSun CJK 字体嵌入）→ 可选 BW 压缩 → 保留未压缩原稿
-6. **目录处理** (可选): 书葵网 + 豆瓣 + NLC 三源书签合并 → AI Vision 智能 TOC 提取 → 自动注入 PDF
-7. **完成**: 保存到 finished_dir → 生成任务报告 → 打开 PDF
+6. **目录处理**: 管道弹出智能目录窗口（WebSocket 全局广播）→ 用户手动选择目录页范围 → AI Vision 提取内容 → 偏移量对齐确认 → 确认后自动注入 PDF → 管道继续
+7. **完成**: 应用文件名模板重命名 → 保存到 finished_dir → 打开 PDF / 打���文件夹 / 关闭
 
 ---
 
@@ -211,12 +213,14 @@ python main.py
 | **下载** | | |
 | 下载目录 | 临时存放 | `~/Downloads/book-downloader` |
 | 保存目录 | 最终输出 | `~/Downloads/book-downloader/finished` |
+| 文件名模板 | `{title}_{author}` 等 8 字段 | `{title}` |
+| **来源** | | |
 | HTTP 代理 | 访问外网 | （可选） |
 | Stacks 地址 | AA 下载服务器 | `http://localhost:7788` |
 | Stacks 用户名/密码 | Docker 容器凭证 | （可选） |
 | Z-Library 邮箱/密码 | 自动搜索下载 | （可选） |
 | AA 会员 Key | 高速下载 | （可选） |
-| ZFile 地址/密钥 | ZFile 网盘下载 | （可选） |
+| FlareSolverr 端口 | Cloudflare 绕过 | 8191 |
 | **OCR** | | |
 | OCR 引擎 | `tesseract` / `paddleocr` / `llm_ocr` | `tesseract` |
 | 并发线程 | 同时处理页数 | `4` |
@@ -224,8 +228,6 @@ python main.py
 | 超时时间 | 单任务最大 OCR 分钟 | `7200s` |
 | LLM OCR 端点 | OpenAI 兼容 API | `http://127.0.0.1:1234/v1` |
 | LLM OCR 模型 | 模型名称 | `qwen3-vl-4b-instruct` |
-| LLM OCR 并发 | LLM 同时请求数 (1-5) | `1` |
-| 检测批次大小 | Surya 每批处理页数 (5-50) | `20` |
 | PDF 压缩 | 启用 BW 二值化压缩 | `关闭` |
 | 压缩分辨率 | `全分辨率` / `半分辨率` | `半分辨率` |
 | **AI Vision TOC** | | |

@@ -86,7 +86,11 @@ def inject_bookmarks(
             toc_entries.append([1, '目 录', toc_page + 1])
 
         for title, shukui_page, level in outlines:
-            page_num = shukui_page + offset
+            if level == -1:
+                page_num = shukui_page  # absolute page, no offset
+                level = 1
+            else:
+                page_num = shukui_page + offset
             page_num = max(1, min(page_num, total))
             toc_entries.append([level, title, page_num])
 
@@ -134,7 +138,10 @@ def inject_bookmarks(
         "if toc_page>=0:\n"
         " entries.append([1,chr(0x76ee)+' '+chr(0x5f55),toc_page+1])\n"
         "for t,p,l in data['items']:\n"
-        " pn=max(1,min(p+offset,total))\n"
+        " if l==-1:\n"
+        "  pn=p;l=1\n"
+        " else:\n"
+        "  pn=max(1,min(p+offset,total))\n"
         " entries.append([l,t,pn])\n"
         "doc.set_toc(entries)\n" +
         (

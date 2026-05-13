@@ -32,7 +32,7 @@ export default function PDFPreviewPanel({ pdfPath }: Props) {
       const res = await fetch('/api/v1/toc/render-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pdf_path: pdfPath, page: clamped }),
+        body: JSON.stringify({ pdf_path: pdfPath, page: clamped, dpi: 96 }),
       })
       if (!res.ok) { setLoading(false); return }
       const blob = await res.blob()
@@ -51,14 +51,13 @@ export default function PDFPreviewPanel({ pdfPath }: Props) {
 
   // Cleanup
   useEffect(() => {
-    const u = blobRef.current
-    return () => { if (u) URL.revokeObjectURL(u) }
+    return () => { if (blobRef.current) URL.revokeObjectURL(blobRef.current) }
   }, [])
 
   if (!pdfPath || totalPages <= 0) return null
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-3">
+    <div className="bg-white rounded-lg border border-gray-200 p-3 flex flex-col flex-1 min-h-0">
       <h4 className="text-sm font-semibold text-gray-700 mb-2">PDF 预览</h4>
 
       <div className="flex items-center justify-between mb-2">
@@ -92,10 +91,9 @@ export default function PDFPreviewPanel({ pdfPath }: Props) {
         </button>
       </div>
 
-      <div className="bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded overflow-hidden flex items-center justify-center"
-        style={{ minHeight: '300px', maxHeight: '60vh' }}>
+      <div className="bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded overflow-hidden flex items-center justify-center flex-1 min-h-0">
         {loading && !imageUrl ? (
-          <div className="flex items-center justify-center w-full h-64">
+          <div className="flex items-center justify-center w-full h-full">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : imageUrl ? (

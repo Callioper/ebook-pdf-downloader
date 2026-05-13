@@ -2,17 +2,59 @@
 import base64
 import io
 import os
+import time
+import threading
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1/toc", tags=["toc"])
 
+# ── fitz document cache (avoids reopening PDF for every batch) ──
+_doc_cache: dict[str, tuple] = {}
+_cache_lock = threading.Lock()
+_CACHE_MAX = 4
+_CACHE_TTL = 30  # seconds
+
+
+def _get_cached_doc(pdf_path: str):
+    import fitz
+    now = time.time()
+    with _cache_lock:
+        # Evict expired
+        expired = [k for k, v in _doc_cache.items() if now - v[1] > _CACHE_TTL]
+        for k in expired:
+            _doc_cache[k][0].close()
+            del _doc_cache[k]
+        if pdf_path in _doc_cache:
+            doc, ts = _doc_cache[pdf_path]
+            _doc_cache[pdf_path] = (doc, now)  # refresh timestamp
+            return doc
+        if len(_doc_cache) >= _CACHE_MAX:
+            oldest = min(_doc_cache, key=lambda k: _doc_cache[k][1])
+            _doc_cache[oldest][0].close()
+            del _doc_cache[oldest]
+        # Read into memory to avoid holding a file handle lock on Windows
+        with open(pdf_path, 'rb') as f:
+            data = f.read()
+        doc = fitz.open(stream=data, filetype='pdf')
+        _doc_cache[pdf_path] = (doc, now)
+        return doc
+
+
+def close_cached_doc(pdf_path: str):
+    """Close and remove a specific PDF from the cache (call before file overwrite)."""
+    with _cache_lock:
+        if pdf_path in _doc_cache:
+            _doc_cache[pdf_path][0].close()
+            del _doc_cache[pdf_path]
+
 
 class RenderRequest(BaseModel):
     pdf_path: str
     start_page: int  # 0-indexed
     end_page: int
+    dpi: int = 48
 
 
 class RenderResponse(BaseModel):
@@ -46,49 +88,81 @@ def get_pdf_info(req: InfoRequest):
 
 @router.post("/render-pages")
 def render_pages(req: RenderRequest) -> RenderResponse:
-    """Return base64 PNGs of selected page range."""
-    import fitz
+    """Return base64 JPEGs of selected page range (uses cached doc, fast)."""
     if not os.path.exists(req.pdf_path):
         raise HTTPException(404, "PDF not found")
-    doc = fitz.open(req.pdf_path)
+    doc = _get_cached_doc(req.pdf_path)
     pages = []
     for i in range(req.start_page, min(req.end_page + 1, len(doc))):
-        pix = doc[i].get_pixmap(dpi=150)
+        pix = doc[i].get_pixmap(dpi=req.dpi)
         buf = io.BytesIO(pix.tobytes("png"))
         pages.append(base64.b64encode(buf.getvalue()).decode())
-    doc.close()
     return RenderResponse(pages=pages, count=len(pages))
 
 
 class SinglePageRequest(BaseModel):
     pdf_path: str
     page: int  # 0-indexed
+    dpi: int = 48
 
 
 @router.post("/render-page")
 def render_page(req: SinglePageRequest):
-    """Return a single page as base64 PNG at low DPI for fast browsing."""
-    import fitz
+    """Return a single page as raw PNG bytes."""
     if not os.path.exists(req.pdf_path):
         raise HTTPException(404, "PDF not found")
-    doc = fitz.open(req.pdf_path)
-    if req.page < 0 or req.page >= len(doc):
-        doc.close()
-        raise HTTPException(400, f"Page {req.page} out of range (0-{len(doc)-1})")
-    pix = doc[req.page].get_pixmap(dpi=72)
-    buf = io.BytesIO(pix.tobytes("png"))
-    img = base64.b64encode(buf.getvalue()).decode()
-    doc.close()
-    return {"page": req.page, "image": img}
+    doc = _get_cached_doc(req.pdf_path)
+    try:
+        if req.page < 0 or req.page >= len(doc):
+            raise HTTPException(400, f"Page {req.page} out of range (0-{len(doc)-1})")
+        pix = doc[req.page].get_pixmap(dpi=req.dpi)
+        from fastapi.responses import Response
+        return Response(content=pix.tobytes("png"), media_type="image/png")
+    finally:
+        pass  # doc is cached, don't close
 
 
 @router.post("/extract")
 async def extract_toc(req: ExtractRequest):
     """Extract TOC from selected pages using Vision LLM."""
     from addbookmark.ai_vision_toc import build_vision_prompt, parse_tocify_response
+    from config import get_config
 
-    if not req.endpoint or not req.model:
+    # Auto-populate from server config if not provided in request
+    endpoint = req.endpoint
+    model = req.model
+    api_key = req.api_key
+    provider = req.provider
+
+    if not endpoint or not model or not api_key:
+        cfg = get_config()
+        ai_cfg = cfg if isinstance(cfg, dict) else {}
+        ai_provider = ai_cfg.get("ai_vision_provider", "")
+        if not endpoint and ai_cfg.get("ai_vision_endpoint"):
+            endpoint = ai_cfg["ai_vision_endpoint"]
+        if not model:
+            if ai_provider == "doubao":
+                model = ai_cfg.get("ai_vision_endpoint_id", "")
+            else:
+                model = ai_cfg.get("ai_vision_model", "")
+        if not api_key:
+            if ai_provider == "doubao":
+                api_key = ai_cfg.get("ai_vision_doubao_key", "")
+            elif ai_provider == "zhipu":
+                api_key = ai_cfg.get("ai_vision_zhipu_key", "")
+            else:
+                api_key = ai_cfg.get("ai_vision_api_key", "")
+        if provider == "openai_compatible" and ai_provider:
+            provider = ai_provider
+
+    if not endpoint or not model:
         return {"bookmark": "", "error": "Vision LLM not configured"}
+
+    # Map provider aliases
+    if provider in ("zhipu", "ollama", "lmstudio"):
+        provider = "openai_compatible"
+    elif provider in ("doubao",):
+        provider = "openai_compatible"
 
     # Render pages as PNG
     import fitz
@@ -108,10 +182,10 @@ async def extract_toc(req: ExtractRequest):
         response = await _call_vision_llm(
             images=images,
             prompt=prompt,
-            provider=req.provider,
-            endpoint=req.endpoint,
-            model=req.model,
-            api_key=req.api_key,
+            provider=provider,
+            endpoint=endpoint,
+            model=model,
+            api_key=api_key,
         )
     except Exception as e:
         return {"bookmark": "", "error": str(e)[:200]}
@@ -128,7 +202,7 @@ async def _call_vision_llm(
     model: str,
     api_key: str,
 ) -> str:
-    """Call a Vision LLM with images + prompt. Supports OpenAI-compatible, Gemini, Anthropic."""
+    """Call a Vision LLM with images + prompt. Supports OpenAI-compatible, Gemini, Anthropic, Doubao."""
     import httpx
     import json as _json
 
@@ -147,7 +221,7 @@ async def _call_openai_compatible(images, prompt, endpoint, model, api_key):
         content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
     async with httpx.AsyncClient(timeout=120) as c:
         r = await c.post(
-            f"{endpoint.rstrip('/')}/v1/chat/completions",
+            f"{endpoint.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"model": model, "messages": [{"role": "user", "content": content}], "max_tokens": 4096},
         )
@@ -224,3 +298,41 @@ async def apply_bookmark(req: ApplyRequest):
 
     lines = bookmark.strip().split("\n")
     return {"ok": True, "message": f"成功添加 {len(lines)} 条书签", "source": source}
+
+
+class OpenRequest(BaseModel):
+    pdf_path: str
+
+
+@router.post("/open-pdf")
+def open_pdf(req: OpenRequest):
+    """Open the PDF with system default viewer."""
+    if not os.path.exists(req.pdf_path):
+        raise HTTPException(404, "PDF not found")
+    os.startfile(req.pdf_path)
+    return {"ok": True}
+
+
+@router.post("/open-folder")
+def open_folder(req: OpenRequest):
+    """Open the folder containing the PDF."""
+    folder = os.path.dirname(os.path.abspath(req.pdf_path))
+    if not os.path.exists(folder):
+        raise HTTPException(404, "Folder not found")
+    os.startfile(folder)
+    return {"ok": True}
+
+
+class NotifyRequest(BaseModel):
+    task_id: str
+
+
+@router.post("/notify-done")
+def notify_toc_done(req: NotifyRequest):
+    """Called by TOCModal when user confirms bookmark injection, so pipeline can continue."""
+    from task_store import task_store
+    t = task_store.get(req.task_id)
+    if t:
+        task_store.update(req.task_id, {"_toc_done": True})
+        return {"ok": True}
+    return {"ok": False, "message": "task not found"}

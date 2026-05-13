@@ -58,16 +58,20 @@ def detect_bookmark_level(title: str) -> tuple:
 
 def parse_bookmark_hierarchy(bookmark_text: str) -> List[Tuple[str, int, int]]:
     """
-    Parse flat 书葵网 bookmark text into hierarchical list.
+    Parse bookmark text into hierarchical list.
 
-    Input: 书葵网 raw text ("title\tpage", one entry per line)
-    Output: [(title, shukui_page, effective_level), ...]
+    Supports two formats:
+    1. 书葵网: "title\\tpage" (flat, hierarchy inferred from naming convention)
+    2. AI Vision: "title\\tpage\\tlevel" (level = tab indent count, 0=chapter)
+
+    Output: [(title, shukui_page, effective_level), ...]  level 1-4
     """
     if not bookmark_text:
         return []
 
     lines = bookmark_text.strip().split('\n')
     entries = []
+    explicit_entries = []  # AI Vision entries with explicit levels
 
     for line in lines:
         line = line.strip()
@@ -81,6 +85,26 @@ def parse_bookmark_hierarchy(bookmark_text: str) -> List[Tuple[str, int, int]]:
             shukui_page = int(parts[1].strip())
         except ValueError:
             continue
+
+        # Check for explicit level from AI Vision (third field)
+        explicit_level = None
+        if len(parts) >= 3:
+            try:
+                explicit_level = int(parts[2].strip())
+            except ValueError:
+                pass
+
+        if explicit_level is not None:
+            if explicit_level == -1:
+                # Absolute page entry (TOC page marker), use level -1 flag
+                entries.append((title, shukui_page, -1))
+                continue
+            # AI Vision: use explicit tab count as level (0→1, 1→2, 2→3, 3→4)
+            effective_level = min(explicit_level + 1, 4)
+            entries.append((title, shukui_page, effective_level))
+            continue
+
+        # 书葵网: infer level from naming convention
         level, is_container = detect_bookmark_level(title)
         entries.append({
             'title': title,
@@ -92,28 +116,29 @@ def parse_bookmark_hierarchy(bookmark_text: str) -> List[Tuple[str, int, int]]:
     if not entries:
         return []
 
-    # Stack-based hierarchy adjustment
+    # Stack-based hierarchy adjustment for inferred entries only
     result = []
-    stack = []  # container nodes only: {'raw_level': int}
+    stack = []
 
     for entry in entries:
-        raw_lv = entry['raw_level']
-        is_cont = entry['is_container']
-
-        if is_cont:
-            # Pop containers at same or higher raw_level
-            while stack and raw_lv <= stack[-1]['raw_level']:
-                stack.pop()
-            stack.append({'raw_level': raw_lv})
-            effective_level = len(stack)
+        if isinstance(entry, tuple):
+            # Already has explicit level, pass through
+            result.append(entry)
         else:
-            # Non-container: only pop when strictly outside parent container
-            while stack and raw_lv < stack[-1]['raw_level']:
-                stack.pop()
-            effective_level = len(stack) + 1
+            raw_lv = entry['raw_level']
+            is_cont = entry['is_container']
 
-        effective_level = min(effective_level, 4)
+            if is_cont:
+                while stack and raw_lv <= stack[-1]['raw_level']:
+                    stack.pop()
+                stack.append({'raw_level': raw_lv})
+                effective_level = len(stack)
+            else:
+                while stack and raw_lv < stack[-1]['raw_level']:
+                    stack.pop()
+                effective_level = len(stack) + 1
 
-        result.append((entry['title'], entry['shukui_page'], effective_level))
+            effective_level = min(effective_level, 4)
+            result.append((entry['title'], entry['shukui_page'], effective_level))
 
     return result

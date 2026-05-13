@@ -1228,15 +1228,15 @@ export default function ConfigSettings() {
               <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
                 <p className="text-[10px] text-gray-500 mb-1">预览:</p>
                 <p className="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">
-                  {form.filename_template
-                    .replace('{title}', '至高的清贫')
-                    .replace('{author}', '作者名')
-                    .replace('{publisher}', '出版社')
-                    .replace('{isbn}', '9787XXXXXXXX')
-                    .replace('{ss_code}', 'SS12345678')
-                    .replace('{source}', 'zlibrary')
-                    .replace('{year}', '2024')
-                    .replace('{book_id}', '123456')
+                  {(form.filename_template || '')
+                    .replace(/\{title\}/g, '至高的清贫')
+                    .replace(/\{author\}/g, '作者名')
+                    .replace(/\{publisher\}/g, '出版社')
+                    .replace(/\{isbn\}/g, '9787XXXXXXXX')
+                    .replace(/\{ss_code\}/g, 'SS12345678')
+                    .replace(/\{source\}/g, 'zlibrary')
+                    .replace(/\{year\}/g, '2024')
+                    .replace(/\{book_id\}/g, '123456')
                   }.pdf
                 </p>
               </div>

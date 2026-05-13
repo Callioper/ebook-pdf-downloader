@@ -501,7 +501,11 @@ def build_vision_prompt() -> str:
 
 
 def parse_tocify_response(response: str) -> str:
-    """Parse Vision LLM output into title<tab>page format for bookmark injection."""
+    """Parse Vision LLM output into title<tab>page<tab>level format for bookmark injection.
+
+    Level is preserved from the AI's tab-indentation output:
+    0 = chapter (no indent), 1 = section (1 tab), 2+ = subsection.
+    """
     import re
     lines = []
     last_page = 1
@@ -511,13 +515,16 @@ def parse_tocify_response(response: str) -> str:
     text = m.group(1).strip() if m else response.strip()
 
     for line in text.split('\n'):
-        line = line.strip()
-        if not line:
+        line = line.strip('\r')
+        if not line.strip():
             continue
 
-        # Count leading tabs for hierarchy (flatten: keep as indent for readability)
-        tabs = len(line) - len(line.lstrip('\t'))
-        title = line.lstrip('\t')
+        # Count leading tabs for hierarchy
+        tabs = 0
+        while line.startswith('\t'):
+            tabs += 1
+            line = line[1:]
+        title = line.strip()
 
         # Extract page number from end of line
         pm = re.search(r'\s+(\d{1,5})\s*$', title)
@@ -529,14 +536,13 @@ def parse_tocify_response(response: str) -> str:
             # Check for Roman numerals
             pm2 = re.search(r'\s+([ivxlcdm]{1,5})\s*$', title, re.I)
             if pm2:
-                # Keep Roman as-is, just stash as text
                 rm = pm2.group(1)
                 title = title[:pm2.start()].strip()
-                page = rm  # Roman numeral string
+                page = rm
             else:
                 page = str(last_page)
 
-        lines.append(f"{title}\t{page}")
+        lines.append(f"{title}\t{page}\t{tabs}")
 
     return '\n'.join(lines)
 
@@ -788,7 +794,7 @@ async def call_vision_llm(
     api_key = _resolve_api_key(api_key)
 
     # Alias mapping
-    if provider in ("minimax_openai",):
+    if provider in ("minimax_openai", "zhipu", "ollama", "lmstudio", "doubao"):
         provider = "openai_compatible"
     elif provider in ("minimax_anthropic",):
         provider = "anthropic"
@@ -810,14 +816,6 @@ async def call_vision_llm(
             return await _call_minimax(images, prompt, endpoint, model, api_key, timeout)
     else:
         return await _call_openai_compatible(images, prompt, endpoint, model, api_key, timeout)
-
-
-def _resolve_api_key(api_key: str) -> str:
-    """解析 API Key，支持 {env:VAR_NAME} 语法读取环境变量。"""
-    if api_key.startswith("{env:") and api_key.endswith("}"):
-        var_name = api_key[5:-1]
-        return os.environ.get(var_name, "")
-    return api_key
 
 
 async def _call_azure(
@@ -1165,23 +1163,8 @@ async def generate_toc(
     pdf_path: str,
     config: dict,
 ) -> Tuple[str, str]:
-    """两阶段 TOC 提取主入口。
-
-    阶段1: 定位目录页范围（免费）
-    阶段2: AI Vision 从目录页图片提取文字+解析（付费）
-    """
+    """AI Vision TOC 提取——直接盲扫前20页，不依赖 find_toc_pages 自动定位。"""
     ai_vision_enabled = config.get("ai_vision_enabled", True)
-
-    # ── 阶段1: 定位目录页 ──
-    logger.info("TOC 提取: 阶段1 — 定位目录页")
-    toc_start, toc_end = find_toc_pages(pdf_path)
-
-    if toc_start < 0:
-        logger.info("TOC 提取: 阶段1 — 未找到目录页")
-    else:
-        logger.info(f"TOC 提取: 阶段1 — 目录页 {toc_start}-{toc_end}")
-
-    # ── 阶段2: AI Vision 提取 ──
     if not ai_vision_enabled:
         logger.info("TOC 提取: AI Vision 已禁用")
         return ("", "")
@@ -1191,36 +1174,30 @@ async def generate_toc(
     ai_api_key = config.get("ai_vision_api_key", "")
     ai_provider = config.get("ai_vision_provider", "openai_compatible")
 
+    if ai_provider == "doubao":
+        ai_model = config.get("ai_vision_endpoint_id", "") or ai_model
+        ai_api_key = config.get("ai_vision_doubao_key", "") or ai_api_key
+    elif ai_provider == "zhipu":
+        ai_api_key = config.get("ai_vision_zhipu_key", "") or ai_api_key
+
     if not ai_endpoint or not ai_model:
         logger.info("TOC 提取: AI Vision 未配置")
         return ("", "")
 
-    logger.info("TOC 提取: 阶段2 — AI Vision 提取")
-    hint = (toc_start, toc_end) if toc_start >= 0 else (-1, -1)
-
-    # Extract OCR text for cross-validation (if available)
-    ocr_text = ""
-    if toc_start >= 0:
-        try:
-            import fitz
-            doc = fitz.open(pdf_path)
-            parts = []
-            for i in range(toc_start, min(toc_end + 1, len(doc))):
-                parts.append(doc[i].get_text())
-            doc.close()
-            ocr_text = "\n".join(parts)
-        except Exception:
-            pass
-
+    logger.info("TOC 提取: AI Vision 盲扫前20页")
+    # Pass resolved config values so extract_toc_from_vision uses correct model/key
+    resolved_config = dict(config)
+    resolved_config["ai_vision_model"] = ai_model
+    resolved_config["ai_vision_api_key"] = ai_api_key
     bookmark = await extract_toc_from_vision(
-        pdf_path, config,
-        toc_page_hint=hint,
-        ocr_text_for_validation=ocr_text,
+        pdf_path, resolved_config,
+        toc_page_hint=(-1, -1),
+        ocr_text_for_validation="",
     )
 
     if bookmark:
-        logger.info("TOC 提取: 阶段2 成功")
+        logger.info("TOC 提取: 成功")
         return (bookmark, "ai_vision")
 
-    logger.info("TOC 提取: 阶段2 未提取到目录")
+    logger.info("TOC 提取: 未找到目录")
     return ("", "")

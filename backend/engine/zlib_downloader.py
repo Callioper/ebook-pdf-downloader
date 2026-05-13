@@ -1,14 +1,14 @@
 # ==== zlib_downloader.py ====
 # 职责：ZLibrary登录、搜索和下载，支持多种浏览器指纹伪装
-# 入口函数：ZLibDownloader.zlib_login(), zlib_search(), zlib_download(), download_file()
+# 入口函数：ZLibDownloader.zlib_login(), zlib_search(), zlib_download()
 # 依赖：无
 # 注意：使用curl_cffi绕过CloudFlare，支持代理和重试
 
+import asyncio
 import logging
 import os
 import re
 import time
-import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -35,6 +35,7 @@ class ZLibDownloader:
         self.proxy = config.get("http_proxy", "")
         self._session: Optional[curl_requests.Session] = None
         self._logged_in = False
+        self._cookies: dict = {}
 
     @property
     def _proxies(self):
@@ -49,6 +50,10 @@ class ZLibDownloader:
             self._session = curl_requests.Session()
         if self.proxy:
             self._session.proxies = self._proxies
+        # Apply cached cookies if using cached login
+        if self._logged_in and self._cookies:
+            for k, v in self._cookies.items():
+                self._session.cookies.set(k, v)
         return self._session
 
     async def zlib_login(self, email: str = "", password: str = "") -> Dict[str, Any]:
@@ -56,6 +61,18 @@ class ZLibDownloader:
         password = password or self.password
         if not email or not password:
             return {"ok": False, "message": "需要邮箱和密码"}
+
+        # Check cached token first
+        try:
+            from config import get_zlib_cached_token, set_zlib_cached_token
+            cached = get_zlib_cached_token()
+            if cached:
+                self._logged_in = True
+                if cached.get("_cookies"):
+                    self._cookies = cached["_cookies"]
+                return cached
+        except ImportError:
+            pass
 
         session = self._get_session()
         last_error = ""
@@ -95,15 +112,19 @@ class ZLibDownloader:
                             self._cookies = dict(session.cookies)
                             # Try to fetch account balance
                             balance = self._fetch_balance(session, imp)
-                            result = {"ok": True, "message": "登录成功"}
+                            result = {"ok": True, "message": "登录成功", "_cookies": dict(session.cookies)}
                             if balance:
                                 result["balance"] = balance
+                            try:
+                                from config import set_zlib_cached_token
+                                set_zlib_cached_token(result, ttl=1800)
+                            except ImportError: pass
                             return result
                         except Exception:
                             pass
                 except Exception as e:
                     last_error = str(e)
-                    time.sleep(1)
+                    await asyncio.sleep(1)
 
         # Method 2: Fall back to EAPI login
         for attempt in range(MAX_RETRIES):
@@ -123,15 +144,20 @@ class ZLibDownloader:
                         data = r.json()
                         if data.get("success") == 1:
                             self._logged_in = True
+                            self._cookies = dict(session.cookies)
                             balance = self._fetch_balance(session, imp)
-                            result = {"ok": True, "message": "登录成功"}
+                            result = {"ok": True, "message": "登录成功", "_cookies": dict(session.cookies)}
                             if balance:
                                 result["balance"] = balance
+                            try:
+                                from config import set_zlib_cached_token
+                                set_zlib_cached_token(result, ttl=1800)
+                            except ImportError: pass
                             return result
                         return {"ok": False, "message": data.get("error", "邮箱或密码错误")}
                 except Exception as e:
                     last_error = str(e)
-                    time.sleep(1)
+                    await asyncio.sleep(1)
         return {"ok": False, "message": f"连接失败: {last_error}"}
 
     def _fetch_balance(self, session, imp: str) -> Optional[str]:
@@ -164,7 +190,7 @@ class ZLibDownloader:
             pass
         return None
 
-    async def zlib_search(self, query: str, page: int = 1, limit: int = 20) -> Dict[str, Any]:
+    async def zlib_search(self, query: str, limit: int = 20) -> Dict[str, Any]:
         if not self._logged_in:
             result = await self.zlib_login()
             if not result.get("ok"):
@@ -186,19 +212,32 @@ class ZLibDownloader:
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                         },
                         impersonate=imp,
-                        timeout=30,
+                        timeout=15,
                     )
                     if r.status_code == 200:
                         result = r.json()
                         books = _extract_books(result)
                         logger.info(f"ZL search '{query[:40]}': HTTP 200, {len(books)} books")
                         return result
+                    elif r.status_code in (401, 403):
+                        # Auth failed — cached cookies likely expired, clear and re-login
+                        logger.warning(f"ZL search '{query[:40]}': HTTP {r.status_code}, clearing cache")
+                        self._logged_in = False
+                        self._cookies = {}
+                        try:
+                            from config import set_zlib_cached_token
+                            set_zlib_cached_token({}, ttl=0)
+                        except ImportError: pass
+                        result = await self.zlib_login()
+                        if not result.get("ok"):
+                            return {"total": 0, "results": []}
+                        session = self._get_session()
                     else:
                         logger.warning(f"ZL search '{query[:40]}': HTTP {r.status_code}")
                 except Exception as e:
                     last_error = str(e)
                     logger.warning(f"ZL search error: {e}")
-                    time.sleep(1)
+                    await asyncio.sleep(1)
         return {"total": 0, "results": []}
 
     async def zlib_download_book(self, book_id: str, book_hash: str, output_dir: str,
@@ -231,7 +270,6 @@ class ZLibDownloader:
                             dl_r = session.get(download_url, impersonate=imp, timeout=60)
                             if dl_r.status_code == 200:
                                 ext = data.get("file", {}).get("extension", "pdf")
-                                # Use provided filename, fall back to book_id
                                 fname = f"{safe_name}.{ext}" if safe_name else f"{book_id}.{ext}"
                                 filepath = os.path.join(output_dir, fname)
                                 with open(filepath, "wb") as f:
@@ -243,53 +281,36 @@ class ZLibDownloader:
                                         header = f.read(4)
                                     if ext == "pdf" and header != b"%PDF":
                                         logger.warning(f"ZL {book_id}: non-PDF content (size={file_size}), removed")
-                                        try:
-                                            os.remove(filepath)
-                                        except Exception:
-                                            pass
+                                        try: os.remove(filepath)
+                                        except Exception: pass
                                     else:
                                         logger.info(f"ZL {book_id}: valid file saved ({file_size}B)")
                                         return True
                                 else:
                                     logger.warning(f"ZL {book_id}: file too small ({file_size}B), removed")
-                                    try:
-                                        os.remove(filepath)
-                                    except Exception:
-                                        pass
+                                    try: os.remove(filepath)
+                                    except Exception: pass
                             else:
                                 logger.warning(f"ZL {book_id}: file download failed HTTP {dl_r.status_code}")
                         else:
                             logger.warning(f"ZL {book_id}: no downloadLink in response: {str(data)[:200]}")
+                    elif r.status_code in (401, 403):
+                        logger.warning(f"ZL download {book_id}: HTTP {r.status_code}, clearing cache and re-login")
+                        self._logged_in = False
+                        self._cookies = {}
+                        try:
+                            from config import set_zlib_cached_token
+                            set_zlib_cached_token({}, ttl=0)
+                        except ImportError: pass
+                        result = await self.zlib_login()
+                        if not result.get("ok"):
+                            return False
+                        session = self._get_session()
                     else:
                         logger.warning(f"ZL {book_id}: API HTTP {r.status_code} (attempt {attempt+1}, imp={imp})")
                 except Exception as e:
                     logger.warning(f"ZL {book_id}: exception (attempt {attempt+1}, imp={imp}): {e}")
-                    time.sleep(1)
-        return False
-
-    async def download_file(self, task_id: str, book_id: str, output_dir: str) -> bool:
-        import requests
-        os.makedirs(output_dir, exist_ok=True)
-        zfile_url = self._zfile_url
-        if not zfile_url:
-            return False
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            }
-            r = requests.get(
-                f"{zfile_url}/api/v1/storage/{self.storage_key}/file/{book_id}",
-                headers=headers,
-                timeout=30,
-                proxies=self._proxies,
-            )
-            if r.status_code == 200:
-                pdf_path = os.path.join(output_dir, f"{book_id}.pdf")
-                with open(pdf_path, "wb") as f:
-                    f.write(r.content)
-                return True
-        except Exception:
-            pass
+                    await asyncio.sleep(1)
         return False
 
     # ==== 增强搜索和下载 ====
@@ -308,80 +329,6 @@ class ZLibDownloader:
             return True, "approximate"
         return False, "mismatch"
 
-    async def zlib_search_tiered(
-        self,
-        isbn: str = "",
-        title: str = "",
-        authors: Optional[List[str]] = None,
-        expected_size: int = 0,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        三层检索策略：ISBN精确 → title+author复合 → title单独
-        返回最佳匹配项（含id, hash, size, match_level），或None
-        """
-        authors = authors or []
-        author_str = authors[0] if authors else ""
-
-        # Tier 1: ISBN
-        if isbn and len(isbn) >= 10:
-            logger.info(f"ZL candidates tier 1: searching by ISBN='{isbn}'")
-            result = await self.zlib_search(isbn, page=1, limit=10)
-            books = _extract_books(result)
-            logger.info(f"ZL candidates tier 1: {len(books)} raw results")
-            for book in books:
-                book_isbn = str(book.get("isbn", ""))
-                if isbn.replace("-", "") in book_isbn.replace("-", ""):
-                    match = self._check_book_match(book, expected_size, title, authors)
-                    if match:
-                        match["tier"] = 1
-                        match["strategy"] = "isbn_exact"
-                        return match
-
-        # 第2层：title + author 复合搜索
-        if title and author_str:
-            query = f"{title} {author_str}"
-            logger.info(f"ZL tiered search layer 2: title+author='{query[:60]}'")
-            result = await self.zlib_search(query, page=1, limit=20)
-            books = _extract_books(result)
-            for book in books:
-                match = self._check_book_match(book, expected_size, title, authors)
-                if match:
-                    match["tier"] = 2
-                    match["strategy"] = "title_author"
-                    # 高相关度的才直接返回，否则继续尝试
-                    if match.get("title_score", 0) >= 40:
-                        return match
-
-            # 如果第2层没有高匹配结果，继续第3层
-            best = None
-            for book in books:
-                match = self._check_book_match(book, expected_size, title, authors)
-                if match and match.get("title_score", 0) > 15:
-                    if not best or match.get("title_score", 0) > best.get("title_score", 0):
-                        best = match
-            if best:
-                best["tier"] = 2
-                best["strategy"] = "title_author_best"
-                return best
-
-        # 第3层：仅title搜索
-        if title:
-            logger.info(f"ZL tiered search layer 3: title='{title[:60]}'")
-            result = await self.zlib_search(title, page=1, limit=20)
-            books = _extract_books(result)
-            best = None
-            for book in books:
-                match = self._check_book_match(book, expected_size, title, authors)
-                if match:
-                    if not best or match.get("title_score", 0) > best.get("title_score", 0):
-                        best = match
-            if best:
-                best["tier"] = 3
-                best["strategy"] = "title_only"
-                return best
-
-        return None
-
     async def zlib_search_candidates(
         self,
         isbn: str = "",
@@ -399,7 +346,7 @@ class ZLibDownloader:
 
         # Tier 1: ISBN
         if isbn and len(isbn) >= 10:
-            result = await self.zlib_search(isbn, page=1, limit=10)
+            result = await self.zlib_search(isbn, limit=10)
             for book in _extract_books(result):
                 book_id = str(book.get("id", ""))
                 book_hash = book.get("hash") or book.get("book_hash") or ""
@@ -422,7 +369,7 @@ class ZLibDownloader:
         if title and author_str:
             query = f"{title} {author_str}"
             logger.info(f"ZL candidates tier 2: searching by title+author='{query[:60]}'")
-            result = await self.zlib_search(query, page=1, limit=20)
+            result = await self.zlib_search(query, limit=20)
             for book in _extract_books(result):
                 book_id = str(book.get("id", ""))
                 book_hash = book.get("hash") or book.get("book_hash") or ""
@@ -444,7 +391,7 @@ class ZLibDownloader:
         # Tier 3: title only
         if title:
             logger.info(f"ZL candidates tier 3: searching by title='{title[:60]}'")
-            result = await self.zlib_search(title, page=1, limit=20)
+            result = await self.zlib_search(title, limit=20)
             for book in _extract_books(result):
                 book_id = str(book.get("id", ""))
                 book_hash = book.get("hash") or book.get("book_hash") or ""
@@ -465,55 +412,6 @@ class ZLibDownloader:
 
         logger.info(f"ZL search_candidates: {len(candidates)} results for '{title}'")
         return candidates
-
-    def _check_book_match(
-        self,
-        book: Dict[str, Any],
-        expected_size: int = 0,
-        search_title: str = "",
-        search_authors: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        检查单个搜索结果是否匹配。
-        验证项目（按优先级）：
-        1. 必须有 id 和 hash
-        2. 标题必须匹配（模糊匹配）
-        3. 文件大小在容差内（如果有 expected_size）
-        """
-        book_id = str(book.get("id", ""))
-        book_hash = book.get("hash") or book.get("book_hash") or ""
-        if not book_id or not book_hash:
-            return None
-
-        book_title = book.get("title", "")
-        title_score = 0
-
-        if search_title and book_title:
-            title_score = _calc_title_match(book_title, search_title, search_authors or [])
-            # 低分标题直接拒绝
-            if title_score < 10:
-                logger.debug(f"ZL book {book_id}: title mismatch '{book_title}' vs '{search_title}' (score={title_score})")
-                return None
-
-        # 检查文件大小
-        book_size = int(book.get("filesize", book.get("filesize_bytes", 0)))
-        if expected_size > 0 and book_size > 0:
-            ok, level = self._verify_filesize(book_size, expected_size, 0.05)
-            if not ok:
-                logger.debug(f"ZL book {book_id}: size mismatch (got {book_size}, expected {expected_size})")
-                return None
-        else:
-            level = "size_unchecked"
-
-        return {
-            "id": book_id,
-            "hash": book_hash,
-            "size": book_size,
-            "match_level": level,
-            "title": book_title,
-            "title_score": title_score,
-            "extension": book.get("extension", book.get("ext", "pdf")),
-        }
 
     async def zlib_download_verified(
         self,
@@ -578,55 +476,3 @@ def _extract_books(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(books, dict):
         books = books.get("books", books.get("results", []))
     return books if isinstance(books, list) else []
-
-
-def _calc_title_match(book_title: str, search_title: str, search_authors: Optional[List[str]] = None) -> int:
-    """
-    计算书籍标题与搜索标题的匹配度 (0-100)。
-    基于CJK字符重叠率、关键词命中和作者辅助验证。
-    """
-    search_authors = search_authors or []
-    bt = unicodedata.normalize("NFKC", book_title.lower()).strip()
-    st = unicodedata.normalize("NFKC", search_title.lower()).strip()
-    if not bt or not st:
-        return 0
-
-    # 1. 精确包含 → 100分
-    if st in bt or bt in st:
-        return 100
-    # 2. 一个包含另一个的大部（长度短的80%以上被包含）
-    min_len = min(len(st), len(bt))
-    if min_len >= 2:
-        if st in bt or bt in st:
-            return 90
-
-    # 3. CJK 字符重叠率
-    bt_chars = set(c for c in bt if '\u4e00' <= c <= '\u9fff')
-    st_chars = set(c for c in st if '\u4e00' <= c <= '\u9fff')
-    char_score = 0
-    if st_chars and bt_chars:
-        overlap = len(bt_chars & st_chars)
-        max_chars = max(len(st_chars), len(bt_chars))
-        char_score = int((overlap / max_chars) * 100)
-
-    # 4. 分词后词级别重叠
-    bt_words = set(re.split(r'[\s,，、。．：；！？\-\u4e00-\u9fff]+', bt))
-    st_words = set(re.split(r'[\s,，、。．：；！？\-\u4e00-\u9fff]+', st))
-    bt_words.discard("")
-    st_words.discard("")
-    word_score = 0
-    if st_words and bt_words:
-        overlap_words = bt_words & st_words
-        word_score = int((len(overlap_words) / max(len(st_words), 1)) * 100)
-
-    score = max(char_score, word_score)
-
-    # 5. 如果有关键词完全匹配（不含停用词），额外加分
-    stop = set("的了不在有是和我对与就也还".strip())
-    sig_words = [w for w in st_words if w not in stop and len(w) >= 2]
-    if sig_words:
-        all_found = all(any(sig in bw for bw in bt_words) for sig in sig_words)
-        if all_found:
-            score = max(score, 60)
-
-    return min(score, 100)

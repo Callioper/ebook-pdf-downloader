@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { API_BASE } from '../constants'
+import { playNotificationSound } from '../utils/sound'
 import ConfirmDownloadModal from './ConfirmDownloadModal'
 import ConfirmStepModal from './ConfirmStepModal'
 import TOCModal from './TOCModal'
@@ -37,7 +38,26 @@ export default function Layout() {
   const [sysChecking, setSysChecking] = useState(false)
   const sysCheckedRef = useRef(false)
 
+  // ── TOC Modal state (shared via Outlet context) ──
+  const [tocPdfPath, setTocPdfPath] = useState<string | null>(null)
+  const [tocTaskId, setTocTaskId] = useState<string>('')
+  const [tocOutputDir, setTocOutputDir] = useState<string>('')
+
+  const openTocModal = useCallback((pdfPath: string, taskId: string = '') => {
+    setTocPdfPath(pdfPath)
+    setTocTaskId(taskId)
+  }, [])
+
+  const closeTocModal = useCallback(() => {
+    setTocPdfPath(null)
+    setTocTaskId('')
+  }, [])
+
   // ── Theme ──
+  const isDarkByTime = () => {
+    const h = new Date().getHours()
+    return h < 6 || h >= 18
+  }
   const applyTheme = (theme: string) => {
     localStorage.setItem('theme', theme)
     const root = document.documentElement
@@ -46,14 +66,12 @@ export default function Layout() {
     } else if (theme === 'light') {
       root.classList.remove('dark')
     } else {
-      // auto: follow OS preference
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      if (mq.matches) { root.classList.add('dark') } else { root.classList.remove('dark') }
-      const handler = (e: MediaQueryListEvent) => {
-        if (e.matches) { root.classList.add('dark') } else { root.classList.remove('dark') }
-      }
-      mq.addEventListener('change', handler)
-      return () => mq.removeEventListener('change', handler)
+      // auto: follow time of day (06:00-18:00 light, 18:00-06:00 dark)
+      if (isDarkByTime()) { root.classList.add('dark') } else { root.classList.remove('dark') }
+      const interval = setInterval(() => {
+        if (isDarkByTime()) { root.classList.add('dark') } else { root.classList.remove('dark') }
+      }, 60000)
+      return () => clearInterval(interval)
     }
   }
 
@@ -184,6 +202,30 @@ export default function Layout() {
     }, 10000)
     return () => clearInterval(heartbeat)
   }, [])
+
+  // Listen for pipeline show_toc_modal events via WebSocket
+  useEffect(() => {
+    const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws?client_id=layout_toc'
+    let ws: WebSocket | null = null
+    let reconnect: ReturnType<typeof setTimeout>
+    const connect = () => {
+      ws = new WebSocket(wsUrl)
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.type === 'show_toc_modal' && msg.task_id && msg.pdf_path) {
+            playNotificationSound()
+            setTocOutputDir(msg.output_dir || '')
+            openTocModal(msg.pdf_path, msg.task_id)
+          }
+        } catch {}
+      }
+      ws.onclose = () => { reconnect = setTimeout(connect, 5000) }
+      ws.onerror = () => { ws?.close() }
+    }
+    connect()
+    return () => { clearTimeout(reconnect); ws?.close() }
+  }, [openTocModal])
 
   const handleDismiss = () => {
     setDismissed(true)
@@ -353,10 +395,18 @@ export default function Layout() {
 
       <main className="flex-1">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <Outlet />
+          <Outlet context={{ openTocModal }} />
           <ConfirmDownloadModal />
           <ConfirmStepModal />
-          {false && <TOCModal pdfPath="" visible={false} onConfirm={() => {}} onCancel={() => {}} />}
+          {tocPdfPath && (
+            <TOCModal
+              pdfPath={tocPdfPath}
+              visible={!!tocPdfPath}
+              taskId={tocTaskId}
+              outputDir={tocOutputDir}
+              onCancel={closeTocModal}
+            />
+          )}
         </div>
       </main>
 

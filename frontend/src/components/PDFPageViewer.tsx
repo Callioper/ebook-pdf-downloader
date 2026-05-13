@@ -10,12 +10,18 @@ interface Props {
 }
 
 const BATCH_SIZE = 20
-const PAGE_WIDTH = 180
+const PAGE_WIDTH = 280
 
 export default function PDFPageViewer({
   pdfPath, totalPages, selectedStart, selectedEnd, onSelectionChange, twoClick,
 }: Props) {
   const [loadedPages, setLoadedPages] = useState<Map<number, string>>(new Map())
+  const blobUrlsRef = useRef<string[]>([])
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => { blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u)) }
+  }, [])
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: BATCH_SIZE - 1 })
   const [dragMode, setDragMode] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -52,33 +58,54 @@ export default function PDFPageViewer({
     return () => observer.disconnect()
   }, [totalPages])
 
-  // Fetch pages in visible range
+  // Fetch pages in visible range (parallel requests, leveraging backend thread pool)
   useEffect(() => {
+    if (totalPages <= 0) return
     const toLoad: number[] = []
     for (let i = visibleRange.start; i <= Math.min(visibleRange.end, totalPages - 1); i++) {
       if (!loadedPages.has(i)) toLoad.push(i)
     }
     if (toLoad.length === 0) return
 
+    const PARALLEL = 10
     let cancelled = false
     const loadBatch = async () => {
-      for (const page of toLoad) {
+      for (let i = 0; i < toLoad.length; i += PARALLEL) {
         if (cancelled) return
-        try {
-          const res = await fetch('/api/v1/toc/render-page', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pdf_path: pdfPath, page }),
+        const chunk = toLoad.slice(i, i + PARALLEL)
+        const results = await Promise.allSettled(
+          chunk.map(async (page) => {
+            const res = await fetch('/api/v1/toc/render-page', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pdf_path: pdfPath, page }),
+            })
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            const blob = await res.blob()
+            const url = URL.createObjectURL(blob)
+            blobUrlsRef.current.push(url)
+            return { page, url }
           })
-          const d = await res.json()
-          if (cancelled) return
-          if (d.image) setLoadedPages(prev => new Map(prev).set(page, d.image))
-        } catch { /* retry on next scroll */ }
+        )
+        if (cancelled) return
+        const newEntries: [number, string][] = []
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.url) {
+            newEntries.push([r.value.page, r.value.url])
+          }
+        }
+        if (newEntries.length > 0) {
+          setLoadedPages(prev => {
+            const next = new Map(prev)
+            for (const [p, img] of newEntries) next.set(p, img)
+            return next
+          })
+        }
       }
     }
     loadBatch()
     return () => { cancelled = true }
-  }, [visibleRange, pdfPath])
+  }, [visibleRange, pdfPath, totalPages])
 
   // Click to select page
   const handlePageClick = useCallback((pageIndex: number, e: React.MouseEvent) => {
@@ -163,7 +190,7 @@ export default function PDFPageViewer({
               style={{ width: PAGE_WIDTH }}
             >
               {img ? (
-                <img src={`data:image/png;base64,${img}`}
+                <img src={img}
                   className="w-full block rounded-t"
                   alt={`Page ${i + 1}`}
                   draggable={false}
