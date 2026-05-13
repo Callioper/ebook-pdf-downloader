@@ -6,36 +6,44 @@ interface Props {
   selectedStart: number
   selectedEnd: number
   onSelectionChange: (start: number, end: number) => void
+  twoClick?: boolean
 }
 
 const BATCH_SIZE = 20
 const PAGE_WIDTH = 180
 
 export default function PDFPageViewer({
-  pdfPath, totalPages, selectedStart, selectedEnd, onSelectionChange,
+  pdfPath, totalPages, selectedStart, selectedEnd, onSelectionChange, twoClick,
 }: Props) {
   const [loadedPages, setLoadedPages] = useState<Map<number, string>>(new Map())
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: BATCH_SIZE - 1 })
   const [dragMode, setDragMode] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const dragStartRef = useRef(0)
+  const [pendingStart, setPendingStart] = useState<number | null>(null)
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  onSelectionChangeRef.current = onSelectionChange
 
   // Lazy load via IntersectionObserver
   useEffect(() => {
     if (!containerRef.current) return
     const observer = new IntersectionObserver((entries) => {
+      let minPage = Infinity
+      let maxPage = -1
       for (const e of entries) {
         if (!e.isIntersecting) continue
-        const el = e.target as HTMLElement
-        const pi = Number(el.dataset.pageIndex)
+        const pi = Number((e.target as HTMLElement).dataset.pageIndex)
         if (isNaN(pi)) continue
-        setVisibleRange(r => {
-          const ns = Math.max(0, pi - BATCH_SIZE / 2)
-          const ne = Math.min(totalPages - 1, pi + BATCH_SIZE / 2)
-          if (ns >= r.start && ne <= r.end) return r
-          return { start: Math.min(r.start, ns), end: Math.max(r.end, ne) }
-        })
+        minPage = Math.min(minPage, pi)
+        maxPage = Math.max(maxPage, pi)
       }
+      if (minPage === Infinity) return
+      setVisibleRange(r => {
+        const ns = Math.max(0, minPage - BATCH_SIZE / 2)
+        const ne = Math.min(totalPages - 1, maxPage + BATCH_SIZE / 2)
+        if (ns >= r.start && ne <= r.end) return r
+        return { start: Math.min(r.start, ns), end: Math.max(r.end, ne) }
+      })
     }, { root: containerRef.current, rootMargin: '600px', threshold: 0.01 })
 
     const el = containerRef.current
@@ -75,6 +83,18 @@ export default function PDFPageViewer({
   // Click to select page
   const handlePageClick = useCallback((pageIndex: number, e: React.MouseEvent) => {
     if (dragMode) return
+    if (twoClick) {
+      if (pendingStart === null) {
+        setPendingStart(pageIndex)
+        onSelectionChange(pageIndex, pageIndex)
+        return
+      }
+      const s = Math.min(pendingStart, pageIndex)
+      const en = Math.max(pendingStart, pageIndex)
+      onSelectionChange(s, en)
+      setPendingStart(null)
+      return
+    }
     if (e.shiftKey && selectedStart >= 0) {
       const s = Math.min(selectedStart, pageIndex)
       const en = Math.max(selectedStart, pageIndex)
@@ -86,7 +106,7 @@ export default function PDFPageViewer({
         onSelectionChange(pageIndex, pageIndex)
       }
     }
-  }, [selectedStart, selectedEnd, onSelectionChange, dragMode])
+  }, [selectedStart, selectedEnd, onSelectionChange, dragMode, twoClick, pendingStart])
 
   // Drag to select range
   const handleMouseDown = (pageIndex: number) => {
@@ -107,7 +127,7 @@ export default function PDFPageViewer({
       const clamped = Math.max(0, Math.min(totalPages - 1, page))
       const s = Math.min(dragStartRef.current, clamped)
       const en = Math.max(dragStartRef.current, clamped)
-      onSelectionChange(s, en)
+      onSelectionChangeRef.current(s, en)
     }
     const onUp = () => setDragMode(false)
     window.addEventListener('mousemove', onMove)
@@ -116,7 +136,7 @@ export default function PDFPageViewer({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [dragMode, totalPages, onSelectionChange])
+  }, [dragMode, totalPages])
 
   return (
     <div ref={containerRef}
@@ -125,6 +145,7 @@ export default function PDFPageViewer({
       <div className="flex flex-col items-center gap-1 py-3">
         {Array.from({ length: totalPages }, (_, i) => {
           const selected = i >= selectedStart && i <= selectedEnd && selectedStart >= 0
+          const pending = twoClick && pendingStart === i
           const img = loadedPages.get(i)
           return (
             <div key={i}
@@ -135,6 +156,8 @@ export default function PDFPageViewer({
                 cursor-pointer shrink-0 rounded transition-all duration-100
                 ${selected
                   ? 'ring-2 ring-blue-500 shadow-lg shadow-blue-500/30 scale-[1.02] bg-blue-50 dark:bg-blue-900/20'
+                  : pending
+                  ? 'ring-2 ring-amber-400 shadow-lg shadow-amber-400/30 scale-[1.02] bg-amber-50 dark:bg-amber-900/20'
                   : 'hover:ring-1 hover:ring-gray-400 dark:hover:ring-gray-500'}
               `}
               style={{ width: PAGE_WIDTH }}
