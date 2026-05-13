@@ -31,6 +31,7 @@ function playCompletionSound() {
   }
 }
 import TaskListPanel from '../components/TaskListPanel'
+import PDFPreviewPanel from '../components/PDFPreviewPanel'
 
 export default function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>()
@@ -324,6 +325,9 @@ export default function TaskDetailPage() {
 
       <div className="space-y-4">
         <TaskListPanel compact />
+        {task.report?.pdf_path && (
+          <PDFPreviewPanel pdfPath={task.report.pdf_path} />
+        )}
       </div>
     </div>
   )
