@@ -85,6 +85,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ai_vision_zhipu_key": "",
     "ai_vision_doubao_key": "",
     "ai_vision_max_pages": 5,
+    "filename_template": "{title}",
     "theme": "auto",
 }
 
@@ -157,6 +158,25 @@ def set_stacks_cached_session(session_cookie: str, ttl: int = 3600) -> None:
     import time
     _stacks_cached_session = session_cookie
     _stacks_cached_expiry = time.time() + ttl
+
+
+# Cached Z-Library login result (token dict) for reuse
+_zlib_cached_token: dict = {}
+_zlib_cached_expiry: float = 0.0
+
+
+def get_zlib_cached_token() -> dict:
+    import time
+    if _zlib_cached_token and time.time() < _zlib_cached_expiry:
+        return _zlib_cached_token
+    return {}
+
+
+def set_zlib_cached_token(token: dict, ttl: int = 1800) -> None:
+    global _zlib_cached_token, _zlib_cached_expiry
+    import time
+    _zlib_cached_token = token
+    _zlib_cached_expiry = time.time() + ttl
 
 
 def update_config(data: Dict[str, Any]) -> Dict[str, Any]:
