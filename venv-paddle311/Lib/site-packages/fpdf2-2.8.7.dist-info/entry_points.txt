@@ -1,2 +1,0 @@
-[mkdocs.plugins]
-check_toc = docs.plugins.check_toc:CheckTocPlugin

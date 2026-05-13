@@ -1,2 +1,0 @@
-[console_scripts]
-ocrmypdf = ocrmypdf.__main__:run

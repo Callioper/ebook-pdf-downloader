@@ -1,3 +1,0 @@
-[console_scripts]
-aistudio = aistudio_sdk.cmdline:main
-
