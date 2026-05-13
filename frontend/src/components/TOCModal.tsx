@@ -91,6 +91,18 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
     setStage('preview')
   }
 
+  const buildFinalBookmark = (): string => {
+    let header = ''
+    if (startPage >= 0 && endPage >= startPage) {
+      header += '----- 目录页 -----\n'
+      for (let i = startPage; i <= endPage; i++) {
+        header += `第 ${i + 1} 页\n`
+      }
+      header += '---------------------\n\n'
+    }
+    return header + bookmark
+  }
+
   if (!visible) return null
 
   return (
@@ -107,7 +119,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
         {stage === 'select' && (
           <>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              点击页面设置起始页，Shift+点击设置结束页，或拖拽选择连续页面范围。已选: 第 {startPage >= 0 ? startPage + 1 : '?'} – {endPage >= 0 ? endPage + 1 : '?'} 页
+              点击第一页设置起始页，再点击最后一页完成选择，或拖拽选择连续页面范围。已选: 第 {startPage >= 0 ? startPage + 1 : '?'} – {endPage >= 0 ? endPage + 1 : '?'} 页
             </p>
 
             <PDFPageViewer
@@ -115,6 +127,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
               totalPages={totalPages}
               selectedStart={startPage}
               selectedEnd={endPage}
+              twoClick
               onSelectionChange={(s, e) => {
                 setStartPage(s)
                 setEndPage(e)
@@ -254,7 +267,7 @@ export default function TOCModal({ pdfPath, visible, onConfirm, onCancel }: Prop
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => onConfirm(bookmark, offset)}
+              <button onClick={() => onConfirm(buildFinalBookmark(), offset)}
                 className="px-4 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700">
                 确认添加 ({bookmark.split('\n').filter(l => l.trim()).length} 条)
               </button>
