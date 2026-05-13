@@ -140,6 +140,7 @@ export interface AppConfig {
   ai_vision_zhipu_key?: string
   ai_vision_doubao_key?: string
   theme?: string  // "auto" | "light" | "dark"
+  filename_template: string
   [key: string]: unknown
 }
 

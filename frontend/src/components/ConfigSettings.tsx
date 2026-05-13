@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { LLM_OCR_RECOMMENDED } from '../constants'
 
 interface AppConfig {
@@ -45,6 +46,7 @@ interface AppConfig {
   bookmark_confirm_enabled: boolean
   pdf_compress: boolean
   pdf_compress_half: boolean
+  filename_template: string
   theme: string
   [key: string]: unknown
 }
@@ -185,6 +187,7 @@ const DEFAULT_CONFIG: AppConfig = {
   bookmark_confirm_enabled: false,
   pdf_compress: false,
   pdf_compress_half: true,
+  filename_template: '{title}',
 }
 
 const OCR_ENGINES = [
@@ -346,6 +349,7 @@ const AI_VISION_PROVIDERS = [
 ] as const
 
 export default function ConfigSettings() {
+  const { openTocModal } = useOutletContext<{ openTocModal: (pdfPath: string, taskId?: string) => void }>()
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [form, setForm] = useState<AppConfig>({ ...DEFAULT_CONFIG })
   const [loading, setLoading] = useState(true)
@@ -360,7 +364,8 @@ export default function ConfigSettings() {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     database: false,
-    download: false,
+    download: true,
+    sources: false,
     proxy: false,
     ocr: false,
     bookmarks: false,
@@ -547,6 +552,19 @@ export default function ConfigSettings() {
     }
     restoreZlib()
   }, [config, form.zlib_email, form.zlib_password, zlibChecked])
+
+  // Auto-detect Tesseract + OCRmyPDF on mount
+  useEffect(() => {
+    if (!config) return
+    handleDetectOcrEngine('tesseract')
+    handleDetectOcrEngine('ocrmypdf')
+  }, [config])
+
+  // Auto-detect database on mount
+  useEffect(() => {
+    if (!config) return
+    checkDbConnectivity()
+  }, [config])
 
   // Restore proxy state from stored config
   useEffect(() => {
@@ -1171,9 +1189,9 @@ export default function ConfigSettings() {
 
       {/* ============ 下载 ============ */}
       <SectionHeader
-        title="下载与来源"
-        summary={<><StatusDot status={form.download_dir && form.finished_dir ? 'green' : 'yellow'} /> {form.download_dir && form.finished_dir ? '配置完成' : '请设置下载目录和完成目录'}</>}
-        color="green"
+        title="下载"
+        summary={<><StatusDot status={form.download_dir ? 'green' : 'yellow'} /> {form.download_dir ? '已设置' : '请设置下载目录'}</>}
+        color="blue"
         expanded={expanded.download}
         onToggle={() => toggleSection('download')}
       />
@@ -1197,6 +1215,46 @@ export default function ConfigSettings() {
             />
           </div>
 
+          {/* 文件名模板 */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">文件名模板</label>
+            <input type="text" value={form.filename_template || '{title}'}
+              onChange={(e) => updateForm({ filename_template: e.target.value })}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600" />
+            <p className="text-[10px] text-gray-400 mt-1">
+              可用字段: {'{title}'} {'{author}'} {'{publisher}'} {'{isbn}'} {'{ss_code}'} {'{source}'} {'{year}'} {'{book_id}'}
+            </p>
+            {form.filename_template && form.filename_template.includes('{') && (
+              <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded">
+                <p className="text-[10px] text-gray-500 mb-1">预览:</p>
+                <p className="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">
+                  {form.filename_template
+                    .replace('{title}', '至高的清贫')
+                    .replace('{author}', '作者名')
+                    .replace('{publisher}', '出版社')
+                    .replace('{isbn}', '9787XXXXXXXX')
+                    .replace('{ss_code}', 'SS12345678')
+                    .replace('{source}', 'zlibrary')
+                    .replace('{year}', '2024')
+                    .replace('{book_id}', '123456')
+                  }.pdf
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ============ 来源 ============ */}
+      <SectionHeader
+        title="来源"
+        summary={<><StatusDot status={zlibConnected ? 'green' : stacksStatus} /> {zlibConnected ? 'Z-Library 已连接' : stacksStatus === 'green' ? 'Stacks 已连接' : '请配置来源'}</>}
+        color="green"
+        expanded={expanded.sources}
+        onToggle={() => toggleSection('sources')}
+      />
+      {expanded.sources && (
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
               Anna's Archive 会员密钥
@@ -1512,45 +1570,7 @@ export default function ConfigSettings() {
                       <p className="text-xs text-blue-600 mt-2">启动后返回设置页点击"重新检测"确认连接状态。</p>
                     </div>
                   </details>
-                  {/* PDF 压缩 */}
-                  <div className="border-t border-gray-200 pt-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!form.pdf_compress}
-                        onChange={(e) => setForm((prev) => ({ ...prev, pdf_compress: e.target.checked }))}
-                        className="rounded border-gray-300"
-                      />
-                      <span className="text-xs font-medium text-gray-600">PDF 黑白二值化压缩（OCR 后执行）</span>
-                    </label>
-                    <p className="text-xs text-gray-400 mt-0.5 ml-5">将彩色扫描页转为 1-bit 黑白，大幅减小体积，完整保留 OCR 文字层。</p>
-                    {form.pdf_compress && (
-                      <div className="mt-2 ml-5 flex items-center gap-3">
-                        <span className="text-xs text-gray-500">分辨率:</span>
-                        <label className="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="pdf_compress_half"
-                            checked={!form.pdf_compress_half}
-                            onChange={() => setForm((prev) => ({ ...prev, pdf_compress_half: false }))}
-                            className="border-gray-300"
-                          />
-                          <span className="text-xs text-gray-600">全分辨率 (~300 DPI)</span>
-                        </label>
-                        <label className="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="pdf_compress_half"
-                            checked={!!form.pdf_compress_half}
-                            onChange={() => setForm((prev) => ({ ...prev, pdf_compress_half: true }))}
-                            className="border-gray-300"
-                          />
-                          <span className="text-xs text-gray-600">半分辨率 (~150 DPI, 体积更小)</span>
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                </div>
+        </div>
       )}
 
       {/* ============ 网络代理 ============ */}
@@ -2166,6 +2186,31 @@ export default function ConfigSettings() {
           </div>
           )}
 
+          {/* PDF 压缩（OCR 后执行） */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
+            <label className="text-xs font-medium text-gray-600 block mb-1">PDF 黑白二值化压缩</label>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer dark:text-gray-300">
+              <input type="checkbox" checked={form.pdf_compress || false}
+                onChange={(e) => updateForm({ pdf_compress: e.target.checked })}
+                className="rounded" />
+              启用（OCR 后自动执行）
+            </label>
+            {form.pdf_compress && (
+              <div className="ml-5 mt-1 space-y-0.5">
+                <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                  <input type="radio" name="compress_res" checked={!form.pdf_compress_half}
+                    onChange={() => updateForm({ pdf_compress_half: false })} />
+                  全分辨率（~300 DPI）
+                </label>
+                <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                  <input type="radio" name="compress_res" checked={!!form.pdf_compress_half}
+                    onChange={() => updateForm({ pdf_compress_half: true })} />
+                  半分辨率（~150 DPI，文件更小）
+                </label>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-2 pt-3">
             <input type="checkbox" id="ocr_confirm_enabled"
               checked={form.ocr_confirm_enabled ?? false}
@@ -2273,9 +2318,20 @@ export default function ConfigSettings() {
             </details>
           )}
 
-          {/* 模型名称 — Doubao uses Endpoint ID as model */}
+          {/* 模型名称 */}
           {form.ai_vision_provider === 'doubao' ? (
             <p className="text-[11px] text-gray-400">模型由 Endpoint ID 指定（{form.ai_vision_endpoint_id || '未填写'}）</p>
+          ) : form.ai_vision_provider === 'zhipu' ? (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
+              <select value={form.ai_vision_model || 'glm-4.6v-flash'}
+                onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600">
+                <option value="glm-4.6v-flash">glm-4.6v-flash</option>
+                <option value="glm-4.1v-thinking-flash">glm-4.1v-thinking-flash</option>
+                <option value="glm-4v-flash">glm-4v-flash</option>
+              </select>
+            </div>
           ) : (
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">模型名称</label>
@@ -2284,7 +2340,6 @@ export default function ConfigSettings() {
                 onChange={(e) => updateForm({ ai_vision_model: e.target.value })}
                 placeholder={
                   form.ai_vision_provider === 'zhipu' ? 'glm-4.6v-flash' :
-                  form.ai_vision_provider === 'doubao' ? 'doubao-vision-pro-32k' :
                   'minicpm-v'
                 }
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs font-mono" />
@@ -2299,7 +2354,7 @@ export default function ConfigSettings() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         endpoint: form.ai_vision_endpoint,
-                        api_key: form.ai_vision_provider === 'zhipu' ? form.ai_vision_zhipu_key : form.ai_vision_provider === 'doubao' ? form.ai_vision_doubao_key : (form.ai_vision_provider === 'ollama' || form.ai_vision_provider === 'lmstudio') ? '' : form.ai_vision_api_key,
+                        api_key: (form.ai_vision_provider === 'ollama' || form.ai_vision_provider === 'lmstudio') ? '' : form.ai_vision_api_key,
                         provider: form.ai_vision_provider,
                         endpoint_id: form.ai_vision_endpoint_id,
                       }),
@@ -2501,14 +2556,8 @@ export default function ConfigSettings() {
               const data = await res.json()
               if (!data.path) { setBookmarkMsg('未选择文件'); return }
 
-              setBookmarkMsg('正在识别目录...')
-              const r2 = await fetch('/api/v1/toc/apply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pdf_path: data.path }),
-              })
-              const d2 = await r2.json()
-              setBookmarkMsg(d2.message || (d2.ok ? '完成' : '失败'))
+              setBookmarkMsg('已选择文件，请在弹出的目录识别窗口中操作')
+              openTocModal(data.path)
             } catch (e) {
               setBookmarkMsg(String(e))
             }
