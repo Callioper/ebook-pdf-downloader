@@ -180,7 +180,11 @@ export default function Layout() {
           .catch(() => {}),
       ]
 
-      await Promise.allSettled(tasks)
+      const timeout = new Promise<void>(resolve => {
+        setTimeout(() => resolve(), 30000)
+      })
+
+      await Promise.race([Promise.allSettled(tasks), timeout])
       setAppReady(true)
     }
     init()
