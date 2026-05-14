@@ -276,7 +276,14 @@ def main():
 
     # Create GitHub release
     if GITHUB_TOKEN:
-        body = f"## v{new_version}\n\nRelease notes for v{new_version}\n"
+        body = f"""## v{new_version}
+
+### 新增
+- 启动检测超时机制：软件启动时检测系统状态超过30秒将自动跳过，直接进入主界面
+
+### 优化
+- 提升启动体验，避免因后端组件不可用导致界面长时间卡在加载页
+"""
         data = json.dumps({
             "tag_name": f"v{new_version}",
             "name": f"v{new_version}",
