@@ -493,3 +493,49 @@ async def resolve_download_url(
                 return url
 
     return None
+
+
+def _detect_stacks_failure(status_data: dict, md5: str) -> Optional[str]:
+    """
+    Inspect a GET /api/status response for a failed queue item matching md5.
+    Returns the error message if found, or None if the item is not in a failed state.
+    Checks `current`, `queue[]`, and `recent_history[]` in that order.
+    """
+    if not isinstance(status_data, dict):
+        return None
+
+    # Candidate containers to inspect
+    current = status_data.get("current")
+    queue_items = status_data.get("queue", []) or []
+    history_items = status_data.get("recent_history", []) or []
+
+    # Normalise `current` into a list for uniform iteration
+    candidates = []
+    if isinstance(current, dict) and current.get("md5") == md5:
+        candidates.append(current)
+    for item in queue_items:
+        if isinstance(item, dict) and item.get("md5") == md5:
+            candidates.append(item)
+    for item in history_items:
+        if isinstance(item, dict) and item.get("md5") == md5:
+            candidates.append(item)
+
+    for item in candidates:
+        # Check explicit failure indicators
+        is_failed = (
+            item.get("failed_at")
+            or item.get("status") == "failed"
+        )
+        if not is_failed:
+            continue
+        # Extract the most descriptive error field
+        msg = (
+            item.get("error")
+            or item.get("error_message")
+            or item.get("status_message")
+            or item.get("message")
+            or "unknown error"
+        )
+        return str(msg)
+
+    return None
