@@ -1331,7 +1331,7 @@ async def _download_via_aa_and_stacks(
                                             if lr.status_code == 200:
                                                 for line in lr.text.splitlines()[-20:]:
                                                     lowered = line.lower()
-                                                    if md5[:8] in lowered or any(
+                                                    if md5.lower() in lowered or md5[:8] in lowered or any(
                                                         kw in lowered for kw in ("failed", "403", "error", "mirror", "refused")
                                                     ):
                                                         log_detail_lines.append(line.strip()[:200])
