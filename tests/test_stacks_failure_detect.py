@@ -129,3 +129,21 @@ def test_detect_failure_fallback_to_status_message():
     msg = _detect_stacks_failure(data, MD5)
     assert msg is not None
     assert "Mirror download failed" in msg
+
+
+def test_detect_failure_fallback_to_message_field():
+    """When all other fields absent but `message` field exists."""
+    data = {
+        "queue": [
+            {
+                "md5": MD5,
+                "failed_at": "2026-05-16T20:49:39",
+                "message": "transfer: Connection refused",
+            }
+        ],
+        "current": None,
+        "recent_history": [],
+    }
+    msg = _detect_stacks_failure(data, MD5)
+    assert msg is not None
+    assert "Connection refused" in msg

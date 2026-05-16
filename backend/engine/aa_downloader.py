@@ -506,8 +506,8 @@ def _detect_stacks_failure(status_data: dict, md5: str) -> Optional[str]:
 
     # Candidate containers to inspect
     current = status_data.get("current")
-    queue_items = status_data.get("queue", []) or []
-    history_items = status_data.get("recent_history", []) or []
+    queue_items = status_data.get("queue") or []
+    history_items = status_data.get("recent_history") or []
 
     # Normalise `current` into a list for uniform iteration
     candidates = []
