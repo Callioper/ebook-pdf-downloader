@@ -147,3 +147,17 @@ def test_detect_failure_fallback_to_message_field():
     msg = _detect_stacks_failure(data, MD5)
     assert msg is not None
     assert "Connection refused" in msg
+
+
+def test_detect_failure_no_error_field_returns_unknown():
+    """Item is failed but has no error/error_message/status_message fields."""
+    data = {
+        "current": {
+            "md5": MD5,
+            "failed_at": "2026-05-16T20:49:39",
+        },
+        "queue": [],
+        "recent_history": [],
+    }
+    msg = _detect_stacks_failure(data, MD5)
+    assert msg == "unknown error"
